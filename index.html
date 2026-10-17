@@ -9,7 +9,8 @@
       body { margin: 0; height: 100vh; overflow: hidden; background: #8ec572; color: #402e3a;
              font: 14px/1.45 ui-monospace, monospace; }
       #field { position: relative; width: 100vw; height: 100vh; overflow: hidden; }
-      canvas { display: block; image-rendering: pixelated; touch-action: none; }
+      canvas { display: block; image-rendering: pixelated; touch-action: none; -webkit-touch-callout: none; user-select: none; -webkit-user-select: none; }
+      button, .notice { touch-action: manipulation; }
       h1 { font-size: 16px; margin: 0; }
       h2 { font-size: 13px; margin: 0 0 6px; text-transform: uppercase; letter-spacing: .06em; }
       h3 { font-size: 11px; margin: 0 0 4px; text-transform: uppercase; letter-spacing: .06em; color: #7a6a8a; }
@@ -101,6 +102,20 @@
       #palette img { image-rendering: pixelated; }
       #tool-line { display: flex; gap: 12px; margin: 0 0 6px; font-size: 12px; }
       #tool-line p { margin: 0; }
+
+      /* Phones: papers out of the way of the map, and the toolbar one swipeable row. */
+      @media (max-width: 600px), (max-height: 500px) {
+        body { font-size: 13px; }
+        #tag, #build-info { width: auto; max-width: min(320px, calc(100% - 24px)); font-size: 12px; padding: 6px 10px; }
+        #build-info .hint { display: none; }
+        #palette { flex-wrap: nowrap; overflow-x: auto; padding-bottom: 4px; }
+      }
+      @media (max-width: 600px) {
+        #tag { top: auto; bottom: 12px; }
+      }
+      @media (max-height: 500px) {
+        #tag .hint { display: none; }
+      }
     </style>
   </head>
   <body>

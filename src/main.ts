@@ -237,11 +237,11 @@ function placeCard() {
   const v = mapView;
   const w = card.offsetWidth;
   const h = card.offsetHeight;
-  const x = v.ox + (left + PLOT_W / 2) * v.s - w / 2;
-  let y = v.oy + top * v.s - h - 12;
-  if (y < 8) y = v.oy + (top + PLOT_H) * v.s + 12;
-  card.style.left = `${clamp(x, 8, canvas.width - w - 8)}px`;
-  card.style.top = `${clamp(y, 8, canvas.height - h - 8)}px`;
+  const x = (v.ox + (left + PLOT_W / 2) * v.s) / dpr - w / 2;
+  let y = (v.oy + top * v.s) / dpr - h - 12;
+  if (y < 8) y = (v.oy + (top + PLOT_H) * v.s) / dpr + 12;
+  card.style.left = `${clamp(x, 8, canvas.width / dpr - w - 8)}px`;
+  card.style.top = `${clamp(y, 8, canvas.height / dpr - h - 8)}px`;
 }
 
 // The notice board, read up close.
@@ -302,7 +302,7 @@ board.addEventListener("click", (e) => {
 // --- up close: the plot's card and the toolbar --------------------------------
 
 const HINTS: Record<string, string> = {
-  prop: "Click to place it. Right-click takes things down.",
+  prop: matchMedia("(pointer: coarse)").matches ? "Tap to place it." : "Click to place it. Right-click takes things down.",
   ground: "Drag to paint the ground.",
   move: "Drag things about.",
   remove: "Click something to take it down.",
@@ -422,6 +422,7 @@ interface View {
 }
 
 let mapView: View = { s: 1, ox: 0, oy: 0 };
+let dpr = 1; // device pixels per CSS pixel: views are in device pixels, the DOM in CSS
 let focusView: View = { s: 1, ox: 0, oy: 0 };
 
 /** The biggest whole-pixel view of w x h, centred, leaving `below` px clear at the bottom. */
@@ -434,15 +435,18 @@ function fit(w: number, h: number, below = 0): View {
 /** Up close, clear of the toolbar when there is one. */
 function fitFocus() {
   const tools = $("tools");
-  focusView = fit(FOCUS_W, FOCUS_H, focus && !tools.hidden ? tools.offsetHeight + 16 : 0);
+  focusView = fit(FOCUS_W, FOCUS_H, focus && !tools.hidden ? (tools.offsetHeight + 16) * dpr : 0);
 }
 
 function resize() {
   const box = $("field").getBoundingClientRect();
-  canvas.width = Math.floor(box.width);
-  canvas.height = Math.floor(box.height);
-  canvas.style.width = `${canvas.width}px`;
-  canvas.style.height = `${canvas.height}px`;
+  // Draw at the screen's real resolution: sharper, and finer whole-pixel steps
+  // to fit the map with, which matters most on a phone.
+  dpr = devicePixelRatio || 1;
+  canvas.width = Math.floor(box.width * dpr);
+  canvas.height = Math.floor(box.height * dpr);
+  canvas.style.width = `${box.width}px`;
+  canvas.style.height = `${box.height}px`;
   ctx.imageSmoothingEnabled = false;
   mapView = fit(MAP_W, MAP_H);
   fitFocus();
@@ -450,7 +454,7 @@ function resize() {
 
 function toArt(e: MouseEvent, v: View) {
   const r = canvas.getBoundingClientRect();
-  return { x: (e.clientX - r.left - v.ox) / v.s, y: (e.clientY - r.top - v.oy) / v.s };
+  return { x: ((e.clientX - r.left) * dpr - v.ox) / v.s, y: ((e.clientY - r.top) * dpr - v.oy) / v.s };
 }
 
 const viewport = (v: View) => ctx.setTransform(v.s, 0, 0, v.s, v.ox, v.oy);
@@ -809,7 +813,10 @@ let mouse: { x: number; y: number } | null = null; // map art space, while over 
 
 /** Things that follow the map about: Gary's speech bubble, a name over whoever you point at. */
 function overlays(now: number, t: number) {
-  const screen = (x: number, y: number) => ({ left: `${mapView.ox + x * mapView.s}px`, top: `${mapView.oy + y * mapView.s}px` });
+  const screen = (x: number, y: number) => ({
+    left: `${(mapView.ox + x * mapView.s) / dpr}px`,
+    top: `${(mapView.oy + y * mapView.s) / dpr}px`,
+  });
   const gary = garyAt(t, recent());
   const bubble = $("bubble");
   bubble.hidden = !said || now > said.until;
