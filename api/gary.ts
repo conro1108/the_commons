@@ -309,7 +309,7 @@ You are earnest, procedural and kind, and you take very small things extremely s
 You have just inspected a plot to see whether its condition has been met, and the finding ("met") is already made.
 Write your inspection note: at most two sentences, at most 35 words, plain text, no greeting, no markdown.
 State the finding plainly, then one small, serious observation about what you found. If it is not met, say kindly what is still wanting.
-Refer only to things in the evidence; never invent things on the plot.`;
+Refer only to things in the evidence; never invent things on the plot. Never give coordinates or cell numbers: say where things are in words (by the water, in the far corner).`;
 
 export type Evidence = {
   plot: string; // how to read the positions
