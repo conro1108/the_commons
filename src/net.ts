@@ -26,10 +26,15 @@ export interface Filing {
   intent: string;
   status: Status;
   condition: string | null;
+  wants: string | null;
   bylaw: number | null;
   permit: string | null;
   filed_at: string;
   stamped_at: string | null;
+  built_at: string | null;
+  inspected_at: string | null;
+  remark: string | null;
+  met_at: string | null;
   ground: string | null;
 }
 

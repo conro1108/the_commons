@@ -1,6 +1,6 @@
 import { BRUSHES, EMPTY, GROUND, paintGround } from "./content/ground.ts";
 import { PALETTE, propCanvas, propSize } from "./content/props.ts";
-import { BYLAWS, CONDITIONS } from "./rulebook.ts";
+import { BYLAWS } from "./rulebook.ts";
 import { BUILD_H, BUILD_W, MAP_H, MAP_W, MARGIN, PATH, PLOT_H, PLOT_W, ZOOM, plotAt, plotName, plotOrigin, type Plot } from "./layout.ts";
 import {
   HELD, fileClaim, handlesFor, loadFilings, loadPlacements, move, paint, place, rehandle, rename, signIn, supabase, unplace,
@@ -79,11 +79,12 @@ function heldPlots() {
 
 const BUILT: Filing["status"][] = ["approved", "conditional"];
 
-/** Newest granted plots first, the same on every screen, since Gary's rounds depend on it. */
+/** Most lately stamped or inspected plots first, the same on every screen, since Gary's rounds depend on it. */
+const seen = (f: Filing) => (f.inspected_at ?? "") > f.stamped_at! ? f.inspected_at! : f.stamped_at!;
 const recent = () =>
   [...filings.values()]
     .filter((f) => BUILT.includes(f.status) && f.stamped_at)
-    .sort((a, b) => b.stamped_at!.localeCompare(a.stamped_at!) || b.id - a.id)
+    .sort((a, b) => seen(b).localeCompare(seen(a)) || b.id - a.id)
     .slice(0, 5)
     .map((f) => ({ x: f.plot_x, y: f.plot_y }));
 
@@ -110,17 +111,16 @@ function exchange(f: Filing, fresh = false) {
     ${f.stamped_at && !unread.has(f.id) ? `<p class="meta">Stamped ${when(f.stamped_at)}.</p>` : ""}`;
 }
 
-/** The condition on a plot, and whether what's built answers it. */
+/** The condition on a plot, and what Gary made of it when he last came round. */
 function conditionHtml(f: Filing) {
-  const c = f.condition ? CONDITIONS[f.condition] : null;
-  if (!c || unread.has(f.id)) return "";
-  if (!BUILT.includes(f.status)) return `<p><b>Condition.</b> ${c.text}</p>`;
-  const neighbours = [[0, -1], [0, 1], [-1, 0], [1, 0]].filter(([dx, dy]) =>
-    heldPlots().has(plotKey({ x: f.plot_x + dx, y: f.plot_y + dy })),
-  ).length;
-  const [met, note] = c.check({ props: new Set((built.get(f.id) ?? []).map((p) => p.prop)), neighbours, today: new Date() });
-  return `<div class="condition"><p><b>Condition.</b> ${c.text}</p>
-    <p class="stamp ${met ? "approved" : "pending"}">${met ? "Met" : "Outstanding"}</p> <span class="meta">${note}</span></div>`;
+  if (!f.condition || unread.has(f.id)) return "";
+  if (!BUILT.includes(f.status)) return `<p><b>Condition.</b> ${esc(f.condition)}</p>`;
+  const coming = !f.met_at && f.built_at && f.built_at > (f.inspected_at ?? "");
+  const note = coming
+    ? "Gary has noticed some building and will be round once it settles."
+    : (f.remark ?? (f.filer === me ? "Gary will come round once you've built something." : "Gary has not yet been round."));
+  return `<div class="condition"><p><b>Condition.</b> ${esc(f.condition)}</p>
+    <p class="stamp ${f.met_at ? "approved" : "pending"}">${f.met_at ? "Met" : "Outstanding"}</p> <span class="meta">${esc(note)}</span></div>`;
 }
 
 // Your name on file, changed from the tag whenever you like; filings just use it.
@@ -338,7 +338,7 @@ function renderBuildInfo() {
       ? `<p class="hint">Building on a granted plot needs no further paperwork. Gary finds this difficult.</p>`
       : `<p class="meta">${count ? `${count} thing${count === 1 ? "" : "s"} built.` : "Nothing built yet."}</p>`}`;
   $("tool-hint").textContent = HINTS[tool.split(":")[0]];
-  const wants = new Set(f.condition ? (CONDITIONS[f.condition]?.wants ?? []) : []);
+  const wants = new Set(f.wants && !f.met_at ? [f.wants] : []);
   for (const b of $("palette").querySelectorAll<HTMLButtonElement>("[data-tool]")) {
     b.classList.toggle("on", b.dataset.tool === tool);
     b.classList.toggle("wanted", wants.has(b.dataset.tool!.slice(5)));
@@ -981,6 +981,11 @@ async function start() {
       if (f.filer === me && was?.status === "pending" && f.status !== "pending") {
         unread.add(f.id);
         letters.push({ plot: { x: f.plot_x, y: f.plot_y }, out: false, status: f.status, filing: f.id });
+      }
+      // His inspection, likewise, unless we're standing on the plot to hear it.
+      if (f.filer === me && was && f.inspected_at !== was.inspected_at && focus?.id !== f.id) {
+        unread.add(f.id);
+        letters.push({ plot: { x: f.plot_x, y: f.plot_y }, out: false, status: f.met_at ? "approved" : "committee", filing: f.id });
       }
       upsert(f);
       handles = await handlesFor([f.filer]);

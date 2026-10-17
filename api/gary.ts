@@ -1,10 +1,12 @@
 // Gary's desk. The database POSTs a filing id here (see drain_gary() in
 // db/schema.sql); Gary rules on it and writes the result back with the secret
-// key, so nobody forges a permit. A decision model rules from enums; GLM only
+// key, so nobody forges a permit. It also POSTs { inspect: id } when a plot
+// with an outstanding condition has been built on (send_inspector()), and
+// Gary goes round to see whether the condition's been met. A decision model rules from enums; GLM only
 // writes the prose, and the decision model checks it before it goes out. The write is conditional on the filing still being
 // pending, so a retried request never overwrites a stored ruling.
 
-import { createClient } from "@supabase/supabase-js";
+import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { experimental_decide as decide, generateText } from "ai";
 
 const JUDGE = "perplexity/pplx-decider-v1.2";
@@ -31,6 +33,22 @@ export const CONDITIONS = {
   smaller: "Must be slightly smaller than intended.",
 } as const;
 export type Condition = keyof typeof CONDITIONS;
+// For a stock condition, the prop that meets it, if one does.
+const STOCK_WANTS: Partial<Record<Condition, string>> = {
+  north: "weathervane", flag: "flag", plaque: "plaque", dignified: "signpost", goose: "goose",
+};
+
+// What can be built, mirroring PALETTE in src/content/props.ts and GROUND in
+// src/content/ground.ts (client code, so not imported here).
+const PROPS = [
+  "flowers", "tuft", "sunflower", "garden", "hedge", "tree",
+  "bench", "log", "picnic", "campfire", "rock", "pond",
+  "flag", "plaque", "signpost", "noticeboard", "weathervane", "sundial", "postbox", "lamppost", "bin",
+  "goose", "duck", "gnome", "scarecrow", "beehive", "birdbath",
+  "fence", "shed", "well", "hay", "barn", "headstone",
+  "bunting", "lanterns",
+];
+const GROUND: Record<string, string> = { ".": "grass", p: "path", c: "stone", s: "soil", w: "water", m: "wildflowers" };
 
 // One question, so a denial always comes with the bylaw it's under.
 const RULINGS: Record<string, string> = {
@@ -99,10 +117,10 @@ export const REFUSED = "The administrator has declined to enter this filing into
 const pad = (n: number) => String(n).padStart(4, "0");
 
 /** The plain permit, for when the scribe can't be trusted with this one. */
-export function formPermit(id: number, v: Verdict): string {
+export function formPermit(id: number, v: Verdict, condition: string | null): string {
   const n = `Filing ${pad(id)}`;
   if (v.status === "refused") return `${n} is refused. ${REFUSED}`;
-  if (v.status === "conditional" && v.condition) return `${n} is approved, on condition: ${CONDITIONS[v.condition]}`;
+  if (v.status === "conditional" && condition) return `${n} is approved, on condition: ${condition}`;
   if (v.status === "committee") return `${n} has been referred to committee, which meets overnight.`;
   if (v.status === "denied" && v.bylaw) return `${n} is denied under Bylaw ${v.bylaw}: ${BYLAWS[v.bylaw - 1]}`;
   return `${n} is approved.`;
@@ -177,6 +195,7 @@ export async function rule(
     condition: answers.condition.choice,
   });
   const refused = verdict.status === "refused";
+  const written = verdict.condition ? await writeCondition(filing, verdict.condition) : null;
   const input = {
     filing: pad(filing.id),
     intent: filing.intent,
@@ -187,7 +206,7 @@ export async function rule(
       denied: "denied",
       refused: "refused: crude or unkind, and not to be entered into the record",
     }[verdict.status],
-    condition: verdict.condition && CONDITIONS[verdict.condition],
+    condition: written?.condition ?? null,
     bylaw: verdict.bylaw && `Bylaw ${verdict.bylaw}: ${BYLAWS[verdict.bylaw - 1]}`,
     ...(refused && { shock: answers.shock.choice }),
     precedent: refused ? [] : precedent.map((p) => `Filing ${pad(p.id)}: ${p.intent} (${p.status})`),
@@ -218,9 +237,149 @@ export async function rule(
     }
     const problems = problemsWith(draft, checks);
     drafts.push({ text: draft, checks, problems });
-    if (!problems.length) return { verdict, permit: draft, answers, drafts };
+    if (!problems.length) return { verdict, written, permit: draft, answers, drafts };
   }
-  return { verdict, permit: formPermit(filing.id, verdict), answers, drafts };
+  return { verdict, written, permit: formPermit(filing.id, verdict, input.condition), answers, drafts };
+}
+
+const CONDITIONER = `You are Gary, a tired office creature who administers the Commons, a shared patch of land.
+You are earnest, procedural and kind, and you take very small things extremely seriously. Deadpan; never wink.
+A filing has been approved with conditions. Write the condition: one sentence beginning "Must", at most 20 words, plain text, no markdown.
+Make it about this filing in particular: a small, serious, slightly absurd requirement, in proportion to the intent.
+It must be something the filer can meet on their own plot, by what they build there ("things"), how they paint the ground ("ground"), or by having a neighbour on a plot next door. Describe what is required; you may hint at a thing from the list, but never require anything not on it.
+Never require anything off the plot, anything only Gary could do, or anything that can't be seen.
+
+Example, for "a bench, for looking at the pond with":
+Must be positioned so that the pond can be looked at without craning, and must provide shade for the looker.`;
+
+/** What the checker looks for in a written condition. Every check is a "yes means it can't be used". */
+const CONDITION_CHECKS = {
+  irrelevant: "Does the condition have nothing to do with what the filing's intent describes?",
+  unmeetable:
+    "Is the condition impossible to meet just by placing some of the listed things on the plot, painting its ground, or having a neighbour next door?",
+  unfit: "Is the condition crude or unkind, or does it contain a link, a handle or personal information?",
+} as const;
+
+/** Gary writes a condition for this filing, checked like a permit; the stock one if it won't do twice. */
+export async function writeCondition(filing: { id: number; intent: string }, stock: Condition) {
+  const input = { filing: pad(filing.id), intent: filing.intent, things: PROPS, ground: Object.values(GROUND) };
+  const tries: { text: string; checks: Record<string, number>; problems: string[] }[] = [];
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const last = tries.at(-1);
+    const { text } = await generateText({
+      model: SCRIBE,
+      system: CONDITIONER,
+      prompt: JSON.stringify(last ? { ...input, rejected: last.text, rejected_because: last.problems } : input),
+      maxOutputTokens: 300,
+    });
+    const condition = trim(text, 1);
+    if (!/^must\b/i.test(condition) || problemsWith(condition, {}).length) {
+      tries.push({ text: condition, checks: {}, problems: ['it must be one sentence beginning "Must", with no links'] });
+      continue;
+    }
+    const { answers } = await decide({
+      model: JUDGE,
+      state: { ...input, condition },
+      questions: {
+        ...(Object.fromEntries(
+          Object.entries(CONDITION_CHECKS).map(([k, instructions]) => [k, { type: "boolean" as const, instructions }]),
+        ) as Record<keyof typeof CONDITION_CHECKS, { type: "boolean"; instructions: string }>),
+        wants: {
+          type: "choice",
+          instructions: "Which one of the listed things would most help meet this condition?",
+          criteria: Object.fromEntries(PROPS.map((p) => [p, p])),
+        },
+      },
+    });
+    const checks = Object.fromEntries(Object.keys(CONDITION_CHECKS).map((k) => [k, answers[k as keyof typeof CONDITION_CHECKS].probability]));
+    const problems = Object.entries(checks).filter(([, p]) => p > 0.5).map(([k]) => CONDITION_CHECKS[k as keyof typeof CONDITION_CHECKS]);
+    tries.push({ text: condition, checks, problems });
+    if (!problems.length) return { condition, wants: answers.wants.choice as string, tries };
+  }
+  return { condition: CONDITIONS[stock] as string, wants: STOCK_WANTS[stock] ?? null, tries };
+}
+
+// --- inspections -------------------------------------------------------------
+
+const INSPECTOR = `You are Gary, a tired office creature who administers the Commons, a shared patch of land.
+You are earnest, procedural and kind, and you take very small things extremely seriously. Deadpan; never wink, never sarcastic.
+You have just inspected a plot to see whether its condition has been met, and the finding ("met") is already made.
+Write your inspection note: at most two sentences, at most 35 words, plain text, no greeting, no markdown.
+State the finding plainly, then one small, serious observation about what you found. If it is not met, say kindly what is still wanting.
+Refer only to things in the evidence; never invent things on the plot.`;
+
+export type Evidence = {
+  things: Record<string, number>; // prop -> how many
+  ground: Record<string, string>; // ground -> share of the plot, e.g. "12%"
+  neighbours: number; // held plots next door
+};
+
+/** Gary looks over a plot against its condition: the decision model finds, the scribe remarks. */
+export async function inspect(filing: { id: number; intent: string; condition: string }, evidence: Evidence) {
+  const state = { filing: pad(filing.id), intent: filing.intent, condition: filing.condition, evidence };
+  const { answers } = await decide({
+    model: JUDGE,
+    state,
+    questions: {
+      met: {
+        type: "boolean",
+        instructions:
+          "Judging only by the evidence of what is on the plot (and whether it has neighbours, if the condition asks), has the condition been met? Be fair and a little generous: anything that plausibly satisfies it counts. If nothing relevant has been built, it has not.",
+      },
+    },
+  });
+  const met = answers.met.probability > 0.5;
+  const { text } = await generateText({
+    model: SCRIBE,
+    system: INSPECTOR,
+    prompt: JSON.stringify({ ...state, met }),
+    maxOutputTokens: 400,
+  });
+  const draft = trim(text, 2);
+  const remark = problemsWith(draft, {}).length
+    ? met ? "Inspected. The condition is met, and the administrator is satisfied." : "Inspected. The condition remains outstanding. The administrator will come round again."
+    : draft;
+  return { met, remark, answers };
+}
+
+type Db = SupabaseClient<any, any, any>;
+
+/** What's on a plot, as Gary would note it down. */
+async function survey(db: Db, f: { id: number; plot_x: number; plot_y: number; ground: string | null }): Promise<Evidence> {
+  const { data: placed } = await db.from("placements").select("prop").eq("filing", f.id);
+  const things: Record<string, number> = {};
+  for (const { prop } of (placed ?? []) as { prop: string }[]) things[prop] = (things[prop] ?? 0) + 1;
+  const cells = f.ground ?? "";
+  const counts: Record<string, number> = {};
+  for (const ch of cells) counts[GROUND[ch] ?? "grass"] = (counts[GROUND[ch] ?? "grass"] ?? 0) + 1;
+  const ground = cells.length
+    ? Object.fromEntries(Object.entries(counts).map(([k, n]) => [k, `${Math.round((n / cells.length) * 100)}%`]))
+    : { grass: "100%" };
+  const { data: next } = await db
+    .from("filings")
+    .select("plot_x, plot_y")
+    .in("status", ["pending", "approved", "conditional", "committee"])
+    .gte("plot_x", f.plot_x - 1).lte("plot_x", f.plot_x + 1)
+    .gte("plot_y", f.plot_y - 1).lte("plot_y", f.plot_y + 1);
+  const neighbours = ((next ?? []) as { plot_x: number; plot_y: number }[])
+    .filter((n) => Math.abs(n.plot_x - f.plot_x) + Math.abs(n.plot_y - f.plot_y) === 1).length;
+  return { things, ground, neighbours };
+}
+
+/** Go round to one plot. The same evidence never gets a second look. */
+async function inspectPlot(db: Db, id: number): Promise<Response> {
+  const { data: f } = await db.from("filings").select("*").eq("id", id).single();
+  if (!f || f.status !== "conditional" || !f.condition || f.met_at) return Response.json({ skipped: true });
+  const evidence = await survey(db, f);
+  const { data: last } = await db
+    .from("inspections").select("evidence").eq("filing", id).order("id", { ascending: false }).limit(1).maybeSingle();
+  if (last && JSON.stringify(last.evidence) === JSON.stringify(evidence)) return Response.json({ skipped: "unchanged" });
+
+  const { met, remark, answers } = await inspect(f, evidence);
+  const at = new Date().toISOString();
+  await db.from("inspections").insert({ filing: id, at, met, remark, evidence, answers });
+  await db.from("filings").update({ inspected_at: at, remark, met_at: met ? at : null }).eq("id", id);
+  return Response.json({ met, remark });
 }
 
 export async function POST(req: Request): Promise<Response> {
@@ -228,11 +387,13 @@ export async function POST(req: Request): Promise<Response> {
   if (!secret || req.headers.get("authorization") !== `Bearer ${secret}`) {
     return new Response("not at this desk", { status: 401 });
   }
-  const { id } = (await req.json()) as { id: number };
+  const body = (await req.json()) as { id?: number; inspect?: number };
   const db = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SECRET_KEY!, {
     db: { schema: "the_commons" },
     auth: { persistSession: false },
   });
+  if (body.inspect) return inspectPlot(db, body.inspect);
+  const id = body.id!;
 
   const { data: filing } = await db.from("filings").select("*").eq("id", id).single();
   if (!filing || filing.status !== "pending") return Response.json({ skipped: true });
@@ -245,16 +406,17 @@ export async function POST(req: Request): Promise<Response> {
     .order("id", { ascending: false })
     .limit(5);
 
-  const { verdict, permit, answers, drafts } = await rule(filing, precedent ?? []);
+  const { verdict, written, permit, answers, drafts } = await rule(filing, precedent ?? []);
 
   await db
     .from("filings")
     .update({
       status: verdict.status,
-      condition: verdict.condition,
+      condition: written?.condition ?? null,
+      wants: written?.wants ?? null,
       bylaw: verdict.bylaw,
       permit,
-      verdict: { answers, drafts, judge: JUDGE, scribe: SCRIBE },
+      verdict: { answers, drafts, conditions: written?.tries, judge: JUDGE, scribe: SCRIBE },
       stamped_at: new Date().toISOString(),
     })
     .eq("id", id)

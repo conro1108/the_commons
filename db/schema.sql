@@ -29,7 +29,8 @@ create table the_commons.filings (
   intent     text not null check (length(btrim(intent)) between 3 and 120),
   status     text not null default 'pending'
              check (status in ('pending', 'approved', 'conditional', 'committee', 'denied', 'refused', 'lost')),
-  condition  text,
+  condition  text, -- written for this filing by Gary; met when he inspects and says so
+  wants      text, -- the one palette prop Gary thinks would most help meet it
   bylaw      smallint,
   permit     text,
   verdict    jsonb, -- Jev's raw answers and the models used; stored, never regenerated
@@ -37,7 +38,13 @@ create table the_commons.filings (
   -- grass (src/content/ground.ts). Null until painted.
   ground     text check (length(ground) = 432 and ground ~ '^[.a-z]*$'),
   filed_at   timestamptz not null default now(),
-  stamped_at timestamptz
+  stamped_at timestamptz,
+  -- Gary's inspections of a condition: the latest, in full in inspections.
+  built_at     timestamptz, -- last change to what's on the plot (trigger-set)
+  inspect_sent timestamptz, -- when Gary was last sent round
+  inspected_at timestamptz,
+  remark       text,
+  met_at       timestamptz
 );
 create unique index filings_plot_held on the_commons.filings (plot_x, plot_y)
   where status in ('pending', 'approved', 'conditional', 'committee');
@@ -60,6 +67,16 @@ grant insert (plot_x, plot_y, intent) on the_commons.filings to authenticated;
 grant update (ground) on the_commons.filings to authenticated;
 grant all on the_commons.filings to service_role;
 alter publication supabase_realtime add table the_commons.filings;
+
+-- Repainting the ground counts as building.
+create function the_commons.ground_built() returns trigger
+language plpgsql as $$
+begin
+  if new.ground is distinct from old.ground then new.built_at := now(); end if;
+  return new;
+end $$;
+create trigger filings_ground_built before update of ground on the_commons.filings
+  for each row execute function the_commons.ground_built();
 
 -- Placements: what's been built. Only on a plot you hold outright (approved or
 -- conditional) — building needs no paperwork, which Gary finds difficult. x/y
@@ -96,6 +113,34 @@ grant select on the_commons.placements to anon, authenticated;
 grant insert (filing, x, y, prop), update (x, y), delete on the_commons.placements to authenticated;
 grant all on the_commons.placements to service_role;
 alter publication supabase_realtime add table the_commons.placements;
+
+-- Anything built, moved or taken down marks the plot as changed, for Gary.
+create function the_commons.placement_built() returns trigger
+language plpgsql security definer set search_path = '' as $$
+begin
+  update the_commons.filings set built_at = now() where id = coalesce(new.filing, old.filing);
+  return null;
+end $$;
+revoke execute on function the_commons.placement_built() from public, anon, authenticated;
+create trigger placements_built after insert or update or delete on the_commons.placements
+  for each row execute function the_commons.placement_built();
+
+-- Inspections: every time Gary has come round about a condition. Written only
+-- by /api/gary; the latest is copied onto the filing for the map.
+create table the_commons.inspections (
+  id       bigint generated always as identity primary key,
+  filing   bigint not null references the_commons.filings on delete cascade,
+  at       timestamptz not null default now(),
+  met      boolean not null,
+  remark   text not null,
+  evidence jsonb not null, -- what he saw: props, ground, neighbours
+  answers  jsonb not null  -- the decision model's raw answers
+);
+alter table the_commons.inspections enable row level security;
+create policy "inspections are public"
+  on the_commons.inspections for select using (true);
+grant select on the_commons.inspections to anon, authenticated;
+grant all on the_commons.inspections to service_role;
 
 -- Gary's in-tray.
 select pgmq.drop_queue('the_commons_gary')
@@ -149,8 +194,37 @@ begin
 end $$;
 revoke execute on function the_commons.drain_gary() from public, anon, authenticated;
 
+-- Gary's rounds: an outstanding condition on a plot that's been built on and
+-- then left alone for a minute and a half gets a visit. Once per change; if a
+-- visit fails, the next bit of building sends him again.
+create function the_commons.send_inspector() returns void
+language plpgsql security definer set search_path = '' as $$
+declare
+  f record;
+  secret text;
+begin
+  select decrypted_secret into secret from vault.decrypted_secrets where name = 'the_commons_gary';
+  if secret is null then return; end if;
+  for f in
+    update the_commons.filings set inspect_sent = now()
+    where status = 'conditional' and met_at is null
+      and built_at < now() - interval '90 seconds'
+      and built_at > coalesce(inspect_sent, '-infinity')
+    returning id
+  loop
+    perform net.http_post(
+      url := 'https://the-commons-eosin.vercel.app/api/gary',
+      body := jsonb_build_object('inspect', f.id),
+      headers := jsonb_build_object('Content-Type', 'application/json',
+                                    'Authorization', 'Bearer ' || secret),
+      timeout_milliseconds := 30000);
+  end loop;
+end $$;
+revoke execute on function the_commons.send_inspector() from public, anon, authenticated;
+
 select cron.unschedule(jobname) from cron.job where jobname like 'the_commons_%';
 select cron.schedule('the_commons_gary', '5 seconds', 'select the_commons.drain_gary()');
+select cron.schedule('the_commons_inspector', '30 seconds', 'select the_commons.send_inspector()');
 -- The committee meets at 4am and has never once said no.
 select cron.schedule('the_commons_committee', '0 4 * * *', $$
   update the_commons.filings
