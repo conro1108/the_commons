@@ -938,7 +938,7 @@ async function start() {
         // A move echoing back mid-drag is ours; anything else is news.
         if (drag?.p.id !== p.id) setPlacement(p);
       }
-      if (focus) renderBuildInfo();
+      renderAll();
     });
   channel.subscribe((status) => {
     if (status === "SUBSCRIBED") channel.track(spawn);
