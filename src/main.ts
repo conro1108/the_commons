@@ -116,11 +116,12 @@ function conditionHtml(f: Filing) {
   if (!f.condition || unread.has(f.id)) return "";
   if (!BUILT.includes(f.status)) return `<p><b>Condition.</b> ${esc(f.condition)}</p>`;
   const coming = !f.met_at && f.built_at && f.built_at > (f.inspected_at ?? "");
-  const note = coming
-    ? "Gary has noticed some building and will be round once it settles."
-    : (f.remark ?? (f.filer === me ? "Gary will come round once you've built something." : "Gary has not yet been round."));
+  const note = f.remark
+    ? `Gary, on his last visit: <q>${esc(f.remark)}</q>`
+    : esc(f.filer === me ? "Gary will come round once you've built something." : "Gary has not yet been round.");
   return `<div class="condition"><p><b>Condition.</b> ${esc(f.condition)}</p>
-    <p class="stamp ${f.met_at ? "approved" : "pending"}">${f.met_at ? "Met" : "Outstanding"}</p> <span class="meta">${esc(note)}</span></div>`;
+    <p class="stamp ${f.met_at ? "approved" : "pending"}">${f.met_at ? "Met" : "Outstanding"}</p> <span class="meta">${note}</span>
+    ${coming ? `<p class="meta">He has noticed more building and will be round again once it settles.</p>` : ""}</div>`;
 }
 
 // Your name on file, changed from the tag whenever you like; filings just use it.
