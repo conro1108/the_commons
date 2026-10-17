@@ -8,8 +8,8 @@
       * { box-sizing: border-box; }
       body { margin: 0; height: 100vh; display: grid; grid-template-columns: 1fr 320px;
              background: #8ec572; color: #402e3a; font: 14px/1.45 ui-monospace, monospace; }
-      #field { display: grid; place-items: center; overflow: hidden; padding: 12px; }
-      canvas { image-rendering: pixelated; cursor: pointer; }
+      #field { overflow: hidden; min-height: 0; }
+      canvas { display: block; image-rendering: pixelated; touch-action: none; }
       aside { background: #f6f1dc; border-left: 3px solid #402e3a; padding: 14px 16px; overflow-y: auto; }
       h1 { font-size: 18px; margin: 0 0 2px; }
       h2 { font-size: 14px; margin: 18px 0 6px; text-transform: uppercase; letter-spacing: .06em; }
@@ -29,11 +29,18 @@
                background: #ffe9a8; cursor: pointer; }
       button:disabled { opacity: .5; }
       #problem, #build-problem { color: #b5404f; }
-      #palette { display: flex; flex-wrap: wrap; gap: 4px; margin: 8px 0; }
-      #palette button { margin: 0; min-width: 44px; height: 44px; padding: 2px; background: #fffdf3;
-                        display: grid; place-items: center; }
-      #palette button.on { background: #ffe9a8; outline: 2px solid #402e3a; }
+      h3 { font-size: 11px; margin: 10px 0 4px; text-transform: uppercase; letter-spacing: .06em; color: #7a6a8a; }
+      #palette .row { display: flex; flex-wrap: wrap; gap: 4px; }
+      #palette button { margin: 0; min-width: 40px; height: 40px; padding: 2px 4px; background: #fffdf3;
+                        display: grid; place-items: center; font-weight: normal; font-size: 12px; }
+      #palette button:hover { background: #fff4c9; }
+      #palette button.on { background: #ffe9a8; box-shadow: inset 0 0 0 2px #402e3a; }
+      #palette button.wanted { border-style: dashed; border-color: #b07a1e; background: #fff4c9; }
       #palette img { image-rendering: pixelated; }
+      #tool-hint { margin: 10px 0 0; }
+      .condition { background: #fffdf3; border: 1px dashed #c9b88f; padding: 4px 8px; margin: 8px 0; }
+      .condition .stamp { margin: 2px 6px 2px 0; }
+      #leave { margin-top: 14px; }
       #here { margin-top: 4px; }
       @media (max-width: 760px) {
         body { grid-template-columns: 1fr; grid-template-rows: 55vh auto; height: auto; }
@@ -53,7 +60,15 @@
         <button>Submit to Gary</button>
         <p id="problem"></p>
       </form>
-      <section id="build" hidden></section>
+      <section id="build" hidden>
+        <div id="build-info"></div>
+        <div id="tools">
+          <p id="tool-hint" class="hint"></p>
+          <div id="palette"></div>
+          <p id="build-problem"></p>
+        </div>
+        <button id="leave">Back to the commons</button>
+      </section>
       <section id="mine"></section>
       <section id="board"></section>
     </aside>

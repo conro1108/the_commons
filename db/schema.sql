@@ -33,6 +33,9 @@ create table the_commons.filings (
   bylaw      smallint,
   permit     text,
   verdict    jsonb, -- Jev's raw answers and the models used; stored, never regenerated
+  -- The holder's ground painting: one char per build cell, row-major, '.' for
+  -- grass (src/content/ground.ts). Null until painted.
+  ground     text check (length(ground) = 432 and ground ~ '^[.a-z]*$'),
   filed_at   timestamptz not null default now(),
   stamped_at timestamptz
 );
@@ -54,7 +57,13 @@ create policy "file a claim"
          where f.filer = auth.uid() and f.filed_at > now() - interval '1 day') < 3
   );
 grant select on the_commons.filings to anon, authenticated;
+-- Once granted, the holder may paint the ground; nothing else on the row is theirs.
+create policy "paint your own granted plot"
+  on the_commons.filings for update to authenticated
+  using (filer = auth.uid() and status in ('approved', 'conditional'))
+  with check (filer = auth.uid() and status in ('approved', 'conditional'));
 grant insert (plot_x, plot_y, intent) on the_commons.filings to authenticated;
+grant update (ground) on the_commons.filings to authenticated;
 grant all on the_commons.filings to service_role;
 alter publication supabase_realtime add table the_commons.filings;
 
@@ -79,12 +88,18 @@ create policy "build on your own granted plot"
   on the_commons.placements for insert to authenticated
   with check (exists (select 1 from the_commons.filings f
     where f.id = filing and f.filer = auth.uid() and f.status in ('approved', 'conditional')));
+create policy "move things about on your plot"
+  on the_commons.placements for update to authenticated
+  using (exists (select 1 from the_commons.filings f
+    where f.id = filing and f.filer = auth.uid()))
+  with check (exists (select 1 from the_commons.filings f
+    where f.id = filing and f.filer = auth.uid()));
 create policy "take down what's on your plot"
   on the_commons.placements for delete to authenticated
   using (exists (select 1 from the_commons.filings f
     where f.id = filing and f.filer = auth.uid()));
 grant select on the_commons.placements to anon, authenticated;
-grant insert (filing, x, y, prop), delete on the_commons.placements to authenticated;
+grant insert (filing, x, y, prop), update (x, y), delete on the_commons.placements to authenticated;
 grant all on the_commons.placements to service_role;
 alter publication supabase_realtime add table the_commons.placements;
 

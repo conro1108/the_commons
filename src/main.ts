@@ -1,13 +1,19 @@
-import { BUILDABLE, propCanvas, propSize } from "./content/props.ts";
+import { BRUSHES, EMPTY, GROUND, paintGround } from "./content/ground.ts";
+import { PALETTE, propCanvas, propSize } from "./content/props.ts";
+import { CONDITIONS } from "./conditions.ts";
 import { BUILD_H, BUILD_W, MAP_H, MAP_W, MARGIN, PATH, PLOT_H, PLOT_W, ZOOM, plotAt, plotName, plotOrigin, type Plot } from "./layout.ts";
 import {
-  HELD, fileClaim, handlesFor, loadFilings, loadPlacements, place, signIn, supabase, unplace,
+  HELD, fileClaim, handlesFor, loadFilings, loadPlacements, move, paint, place, signIn, supabase, unplace,
   type Filing, type Placement,
 } from "./net.ts";
 import type { RealtimeChannel } from "@supabase/supabase-js";
-import { FOCUS_H, FOCUS_PAD, FOCUS_W, draw, drawFocus, placementAt, plotKey, type Ghost, type Walker } from "./render.ts";
+import {
+  DIRT, FOCUS_H, FOCUS_PAD, FOCUS_W, HILLS, draw, drawFocus, land, placementAt, plotKey,
+  type Cells, type FocusScene, type Walker,
+} from "./render.ts";
 
 const SPEED = 40; // art pixels per second
+const ZOOM_MS = 520; // map <-> plot
 
 const STAMP: Record<Filing["status"], string> = {
   pending: "In Gary's in-tray",
@@ -23,6 +29,9 @@ interface Mover extends Walker {
   ty: number;
 }
 
+/** "prop:bench", "ground:p", "move" or "remove". */
+type Tool = string;
+
 const canvas = document.querySelector("canvas")!;
 const ctx = canvas.getContext("2d")!;
 const $ = (id: string) => document.getElementById(id)!;
@@ -37,15 +46,21 @@ let handles = new Map<string, string>();
 let me = "";
 let hover: Plot | null = null;
 let selected: Plot | null = null;
-let scale = 1;
+
 let focus: Filing | null = null; // the plot we're up close to, if any
-let tool = BUILDABLE[0]; // a prop name, or REMOVE
-let ghost: Ghost | null = null;
-const REMOVE = "remove";
+let zoom: { start: number; dir: 1 | -1; filing: Filing } | null = null; // flying in or out
+let tool: Tool = "prop:bench";
+let pointer: { x: number; y: number } | null = null; // build space, while over the plot
+let stroke: { cells: string[]; before: string; last: Cells } | null = null; // painting ground
+// Ground we've painted this visit. Only the holder paints a plot, so ours is
+// newer than any echo — echoes of earlier saves can arrive after later strokes.
+const painted = new Map<number, string>();
+let drag: { p: Placement; dx: number; dy: number; x: number; y: number } | null = null; // moving a prop
 
 const pad = (n: number) => String(n).padStart(4, "0");
 const esc = (s: string) => s.replace(/[&<>"]/g, (c) => `&${{ "&": "amp", "<": "lt", ">": "gt", '"': "quot" }[c]};`);
 const who = (id: string) => (id === me ? "you" : (handles.get(id) ?? "a resident"));
+const clamp = (v: number, lo: number, hi: number) => Math.min(Math.max(v, lo), Math.max(lo, hi));
 
 function heldPlots() {
   const held = new Map<string, Filing>();
@@ -56,6 +71,7 @@ function heldPlots() {
 const BUILT: Filing["status"][] = ["approved", "conditional"];
 
 const myHeld = () => [...filings.values()].find((f) => f.filer === me && HELD.includes(f.status));
+const mineInFocus = () => !!focus && focus.filer === me && !zoom;
 
 // --- panel ---------------------------------------------------------------
 
@@ -118,51 +134,118 @@ function renderHere() {
   $("here").textContent = `On the commons: ${names.join(", ")}`;
 }
 
-function renderBuild() {
-  const panel = $("build");
-  for (const id of ["plot", "mine", "board"]) $(id).hidden = !!focus;
-  panel.hidden = !focus;
+// --- panel, up close -------------------------------------------------------
+
+/** The condition on a plot, and whether what's built answers it. */
+function conditionHtml(f: Filing) {
+  const c = f.condition ? CONDITIONS[f.condition] : null;
+  if (!c) return "";
+  const neighbours = [[0, -1], [0, 1], [-1, 0], [1, 0]].filter(([dx, dy]) =>
+    heldPlots().has(plotKey({ x: f.plot_x + dx, y: f.plot_y + dy })),
+  ).length;
+  const [met, note] = c.check({ props: new Set((built.get(f.id) ?? []).map((p) => p.prop)), neighbours, today: new Date() });
+  return `<div class="condition"><p><b>Condition.</b> ${c.text}</p>
+    <p class="stamp ${met ? "approved" : "pending"}">${met ? "Met" : "Outstanding"}</p> <span class="meta">${note}</span></div>`;
+}
+
+const HINTS: Record<string, string> = {
+  prop: "Click to place it. Right-click takes things down.",
+  ground: "Drag to paint the ground.",
+  move: "Drag things about.",
+  remove: "Click something to take it down.",
+};
+
+function renderBuildInfo() {
   if (!focus) return;
   const f = focus;
-  const mine = f.filer === me;
   const count = built.get(f.id)?.length ?? 0;
-  panel.innerHTML = `<h2>Plot ${plotName({ x: f.plot_x, y: f.plot_y })}</h2>
-    <p>${mine ? "Yours" : `Held by ${esc(who(f.filer))}`}: <q>${esc(f.intent)}</q></p>
-    ${f.condition ? `<p class="meta">Condition: ${esc(f.condition)}</p>` : ""}
-    ${mine
-      ? `<p class="hint">Building on a granted plot needs no further paperwork. Gary finds this difficult.
-         Click to place; right-click to take down.</p>
-         <div id="palette">${[...BUILDABLE, REMOVE].map((name) => `<button data-tool="${name}" title="${name}"
-           class="${name === tool ? "on" : ""}">${name === REMOVE ? "take down" : `<img src="${propCanvas(name).toDataURL()}" width="${propSize(name).w * 2}" alt="${name}">`}</button>`).join("")}</div>
-         <p id="build-problem"></p>`
-      : `<p class="meta">${count ? `${count} thing${count === 1 ? "" : "s"} built.` : "Nothing built yet."}</p>`}
-    <button id="leave">Back to the commons</button>`;
-  panel.querySelectorAll<HTMLButtonElement>("[data-tool]").forEach((b) =>
+  $("build-info").innerHTML = `<h2>Plot ${plotName({ x: f.plot_x, y: f.plot_y })}</h2>
+    <p>${f.filer === me ? "Yours" : `Held by ${esc(who(f.filer))}`}: <q>${esc(f.intent)}</q></p>
+    ${conditionHtml(f)}
+    ${f.filer === me
+      ? `<p class="hint">Building on a granted plot needs no further paperwork. Gary finds this difficult.</p>`
+      : `<p class="meta">${count ? `${count} thing${count === 1 ? "" : "s"} built.` : "Nothing built yet."}</p>`}`;
+  $("tool-hint").textContent = HINTS[tool.split(":")[0]];
+  const wants = new Set(f.condition ? (CONDITIONS[f.condition]?.wants ?? []) : []);
+  for (const b of $("palette").querySelectorAll<HTMLButtonElement>("[data-tool]")) {
+    b.classList.toggle("on", b.dataset.tool === tool);
+    b.classList.toggle("wanted", wants.has(b.dataset.tool!.slice(5)));
+  }
+}
+
+const icons = new Map<string, string>();
+
+function icon(key: string, make: () => HTMLCanvasElement) {
+  if (!icons.has(key)) icons.set(key, make().toDataURL());
+  return icons.get(key)!;
+}
+
+/** A square of one ground, cut from a whole plot of it. */
+function swatch(ch: string) {
+  const full = document.createElement("canvas");
+  full.width = BUILD_W;
+  full.height = BUILD_H;
+  paintGround(full.getContext("2d")!, ch.repeat(PLOT_W * PLOT_H), 3);
+  const c = document.createElement("canvas");
+  c.width = c.height = 12;
+  c.getContext("2d")!.drawImage(full, -8, -8);
+  return c;
+}
+
+/** The palette, built once per visit; tool changes only flip classes. */
+function renderPalette() {
+  const mine = focus?.filer === me;
+  $("tools").hidden = !mine;
+  if (!mine) return;
+  const button = (t: Tool, title: string, inner: string) =>
+    `<button data-tool="${t}" title="${title}">${inner}</button>`;
+  $("palette").innerHTML = `
+    <div class="row">${button("move", "move things", "move")}${button("remove", "take down", "take down")}</div>
+    <h3>Ground</h3><div class="row">${BRUSHES.map((ch) =>
+      button(`ground:${ch}`, GROUND[ch].label, `<img src="${icon(`ground:${ch}`, () => swatch(ch))}" width="24" alt="${GROUND[ch].label}">`),
+    ).join("")}</div>
+    ${PALETTE.map(({ group, props }) => `<h3>${group}</h3><div class="row">${props
+      .map((name) => button(`prop:${name}`, name, `<img src="${icon(name, () => propCanvas(name))}" width="${propSize(name).w * 2}" alt="${name}">`))
+      .join("")}</div>`).join("")}`;
+  for (const b of $("palette").querySelectorAll<HTMLButtonElement>("[data-tool]")) {
     b.addEventListener("click", () => {
       tool = b.dataset.tool!;
-      renderBuild();
-    }),
-  );
-  $("leave").addEventListener("click", leaveFocus);
+      renderBuildInfo();
+    });
+  }
+}
+
+function showPanels() {
+  for (const id of ["plot", "mine", "board"]) $(id).hidden = !!focus;
+  if (focus) form.hidden = true;
+  $("build").hidden = !focus;
 }
 
 function enterFocus(f: Filing) {
+  if (zoom) return;
   focus = f;
-  ghost = null;
-  resize();
-  renderBuild();
+  zoom = { start: performance.now(), dir: 1, filing: f };
+  pointer = null;
+  $("build-problem").textContent = "";
+  showPanels();
+  renderPalette();
+  renderBuildInfo();
 }
 
 function leaveFocus() {
+  if (!focus || zoom) return;
+  zoom = { start: performance.now(), dir: -1, filing: focus };
   focus = null;
-  ghost = null;
-  resize();
+  stroke = null;
+  drag = null;
+  showPanels();
   renderAll();
 }
 
+$("leave").addEventListener("click", leaveFocus);
+
 function renderAll() {
-  renderBuild();
-  if (focus) return;
+  if (focus) return renderBuildInfo();
   renderPlot();
   renderMine();
   renderBoard();
@@ -180,102 +263,266 @@ form.addEventListener("submit", async (e) => {
   if (!problem) intent.value = "";
 });
 
-// --- map -----------------------------------------------------------------
+// --- canvas and views --------------------------------------------------------
 
-const artSize = () => (focus ? { w: FOCUS_W, h: FOCUS_H } : { w: MAP_W, h: MAP_H });
+interface View {
+  s: number; // device pixels per art pixel, always whole
+  ox: number;
+  oy: number;
+}
+
+let mapView: View = { s: 1, ox: 0, oy: 0 };
+let focusView: View = { s: 1, ox: 0, oy: 0 };
+
+function fit(w: number, h: number): View {
+  const s = Math.max(1, Math.floor(Math.min(canvas.width / w, canvas.height / h)));
+  return { s, ox: Math.floor((canvas.width - w * s) / 2), oy: Math.floor((canvas.height - h * s) / 2) };
+}
 
 function resize() {
   const box = $("field").getBoundingClientRect();
-  const { w, h } = artSize();
-  scale = Math.max(1, Math.floor(Math.min(box.width / w, box.height / h)));
-  canvas.width = w * scale;
-  canvas.height = h * scale;
-  ctx.setTransform(scale, 0, 0, scale, 0, 0);
+  canvas.width = Math.floor(box.width);
+  canvas.height = Math.floor(box.height);
+  canvas.style.width = `${canvas.width}px`;
+  canvas.style.height = `${canvas.height}px`;
   ctx.imageSmoothingEnabled = false;
+  mapView = fit(MAP_W, MAP_H);
+  focusView = fit(FOCUS_W, FOCUS_H);
 }
 
-function toArt(e: MouseEvent) {
+function toArt(e: MouseEvent, v: View) {
   const r = canvas.getBoundingClientRect();
-  const { w, h } = artSize();
-  return { x: ((e.clientX - r.left) / r.width) * w, y: ((e.clientY - r.top) / r.height) * h };
+  return { x: (e.clientX - r.left - v.ox) / v.s, y: (e.clientY - r.top - v.oy) / v.s };
+}
+
+const viewport = (v: View) => ctx.setTransform(v.s, 0, 0, v.s, v.ox, v.oy);
+
+function fill(colour: string) {
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.fillStyle = colour;
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+}
+
+const ease = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - (-2 * t + 2) ** 3 / 2);
+
+/**
+ * Fly between the map and a plot. The map zooms in whole-number steps so its
+ * pixels stay square, with the plot sliding to where the close-up will put it;
+ * then the close-up fades in over the top. At full zoom one map pixel of the
+ * plot is exactly one build cell, so the miniature resolves into the real thing.
+ */
+function drawZoom(now: number) {
+  const z = zoom!;
+  const t = Math.min(1, (now - z.start) / ZOOM_MS);
+  const u = z.dir === 1 ? t : 1 - t;
+  const { left, top } = plotOrigin({ x: z.filing.plot_x, y: z.filing.plot_y });
+  const s0 = mapView.s;
+  const s1 = focusView.s * ZOOM;
+  const s = Math.round(s0 * (s1 / s0) ** ease(Math.min(1, u / 0.8)));
+  const k = s1 === s0 ? 1 : (s - s0) / (s1 - s0);
+  const from = { x: mapView.ox + s0 * left, y: mapView.oy + s0 * top };
+  const to = { x: focusView.ox + focusView.s * FOCUS_PAD, y: focusView.oy + focusView.s * FOCUS_PAD };
+  fill(HILLS);
+  viewport({
+    s,
+    ox: Math.round(from.x + (to.x - from.x) * k - s * left),
+    oy: Math.round(from.y + (to.y - from.y) * k - s * top),
+  });
+  draw(ctx, { held: heldPlots(), built, me, hover: null, selected: null, walkers: [...walkers.values()] });
+  const fade = Math.max(0, (u - 0.65) / 0.35);
+  if (fade > 0) {
+    ctx.globalAlpha = fade;
+    fill(DIRT);
+    viewport(focusView);
+    drawFocus(ctx, focusScene(z.filing), now);
+    ctx.globalAlpha = 1;
+  }
+  if (t >= 1) zoom = null;
 }
 
 // --- up close: building ----------------------------------------------------
 
 /** A build-space point, or null off the plot. */
 function toBuild(e: MouseEvent) {
-  const p = toArt(e);
+  const p = toArt(e, focusView);
   const b = { x: p.x - FOCUS_PAD, y: p.y - FOCUS_PAD };
   return b.x >= 0 && b.y >= 0 && b.x < BUILD_W && b.y < BUILD_H ? b : null;
 }
 
-/** Where the current prop would go: centred on the cursor, snapped to cells, kept inside the fence. */
-function ghostAt(e: MouseEvent): Ghost | null {
-  const b = toBuild(e);
-  if (!b || !focus || focus.filer !== me || tool === REMOVE) return null;
-  const { w, h } = propSize(tool);
-  const clamp = (v: number, max: number) => Math.min(Math.max(v, 0), Math.max(0, max));
+/** Where a prop would go: centred on the point, snapped to cells, kept inside the fence. */
+function propAt(prop: string, bx: number, by: number) {
+  const { w, h } = propSize(prop);
   return {
-    prop: tool,
-    x: clamp(Math.round((b.x - w / 2) / ZOOM), Math.floor((BUILD_W - w) / ZOOM)),
-    y: clamp(Math.round((b.y - h / 2) / ZOOM), Math.floor((BUILD_H - h) / ZOOM)),
+    x: clamp(Math.round((bx - w / 2) / ZOOM), 0, Math.floor((BUILD_W - w) / ZOOM)),
+    y: clamp(Math.round((by - h / 2) / ZOOM), 0, Math.floor((BUILD_H - h) / ZOOM)),
   };
 }
 
-function takeDown(e: MouseEvent) {
-  const b = toBuild(e);
-  if (!b || !focus) return;
+/** The 2x2 cells a ground brush covers, centred on the nearest cell corner. */
+function brushAt(bx: number, by: number): Cells {
+  return {
+    x: clamp(Math.round(bx / ZOOM) - 1, 0, PLOT_W - 2),
+    y: clamp(Math.round(by / ZOOM) - 1, 0, PLOT_H - 2),
+    w: 2,
+    h: 2,
+  };
+}
+
+function focusScene(f: Filing): FocusScene {
+  const mine = f.filer === me && !zoom;
+  const ps = built.get(f.id) ?? [];
+  const scene: FocusScene = { filing: f, built: ps, mine: f.filer === me, ghost: null, brush: null, hover: null };
+  if (!mine || !pointer) return scene;
+  const [kind, arg] = tool.split(":");
+  if (drag) {
+    const moved = { ...drag.p, x: drag.x, y: drag.y };
+    scene.built = ps.map((p) => (p.id === moved.id ? moved : p));
+    scene.hover = { p: moved, colour: "#fff8e0" };
+  } else if (kind === "prop") {
+    scene.ghost = { id: 0, filing: f.id, prop: arg, ...propAt(arg, pointer.x, pointer.y) };
+  } else if (kind === "ground") {
+    scene.brush = brushAt(pointer.x, pointer.y);
+  } else {
+    const p = placementAt(ps, pointer.x, pointer.y);
+    if (p) scene.hover = { p, colour: kind === "move" ? "#fff8e0" : "#e05c48" };
+  }
+  return scene;
+}
+
+function problem(text: string) {
+  $("build-problem").textContent = text;
+}
+
+function setPlacement(p: Placement) {
+  const before = placements.get(p.id);
+  placements.set(p.id, p);
+  if (before && before.filing !== p.filing) regroup(before.filing);
+  regroup(p.filing);
+}
+
+function takeDown(b: { x: number; y: number }) {
+  if (!focus) return;
   const p = placementAt(built.get(focus.id) ?? [], b.x, b.y);
   if (!p) return;
   removePlacement(p.id);
-  unplace(p.id).then((ok) => ok || addPlacement(p));
+  unplace(p.id).then((ok) => ok || setPlacement(p));
 }
 
-async function buildClick(e: MouseEvent) {
-  if (!focus || focus.filer !== me) return;
-  if (tool === REMOVE) return takeDown(e);
-  const g = ghostAt(e);
-  if (!g) return;
-  const result = await place(focus.id, g.x, g.y, g.prop);
-  const problem = document.getElementById("build-problem");
-  if (problem) problem.textContent = typeof result === "string" ? result : "";
-  if (typeof result !== "string") addPlacement(result);
+async function placeAt(prop: string, b: { x: number; y: number }) {
+  const f = focus!;
+  const at = propAt(prop, b.x, b.y);
+  const result = await place(f.id, at.x, at.y, prop);
+  if (typeof result === "string") return problem(result);
+  problem("");
+  land(result.id);
+  addPlacement(result);
 }
+
+/** Lay ground along the brush's path since the last point, so a quick drag leaves no gaps. */
+function paintTo(to: Cells) {
+  if (!stroke || !focus) return;
+  const ch = tool.split(":")[1];
+  const from = stroke.last;
+  const steps = Math.max(Math.abs(to.x - from.x), Math.abs(to.y - from.y), 1);
+  for (let i = 0; i <= steps; i++) {
+    const x = Math.round(from.x + ((to.x - from.x) * i) / steps);
+    const y = Math.round(from.y + ((to.y - from.y) * i) / steps);
+    for (let dy = 0; dy < to.h; dy++) for (let dx = 0; dx < to.w; dx++) stroke.cells[(y + dy) * PLOT_W + x + dx] = ch;
+  }
+  stroke.last = to;
+  focus.ground = stroke.cells.join("");
+  painted.set(focus.id, focus.ground);
+}
+
+canvas.addEventListener("pointerdown", (e) => {
+  if (!focus || zoom) return;
+  const b = toBuild(e);
+  if (!b || !mineInFocus()) return;
+  pointer = b;
+  const [kind, arg] = tool.split(":");
+  if (e.button === 2 || kind === "remove") return takeDown(b);
+  if (e.button !== 0) return;
+  if (kind === "prop") return void placeAt(arg, b);
+  canvas.setPointerCapture(e.pointerId);
+  if (kind === "ground") {
+    const before = focus.ground ?? EMPTY;
+    const at = brushAt(b.x, b.y);
+    stroke = { cells: before.split(""), before, last: at };
+    paintTo(at);
+  } else if (kind === "move") {
+    const p = placementAt(built.get(focus.id) ?? [], b.x, b.y);
+    if (p) drag = { p, dx: b.x - p.x * ZOOM, dy: b.y - p.y * ZOOM, x: p.x, y: p.y };
+  }
+});
+
+canvas.addEventListener("pointermove", (e) => {
+  if (!focus) {
+    const p = toArt(e, mapView);
+    hover = plotAt(p.x, p.y);
+    return;
+  }
+  const b = toBuild(e);
+  if (!b) {
+    if (!stroke && !drag) pointer = null;
+    return;
+  }
+  pointer = b;
+  if (stroke) paintTo(brushAt(b.x, b.y));
+  if (drag) {
+    const { w, h } = propSize(drag.p.prop);
+    Object.assign(drag, propAt(drag.p.prop, b.x - drag.dx + w / 2, b.y - drag.dy + h / 2));
+  }
+});
+
+canvas.addEventListener("pointerup", async () => {
+  if (stroke && focus) {
+    const { before } = stroke;
+    const f = focus;
+    stroke = null;
+    if (f.ground === before) return;
+    const err = await paint(f.id, f.ground!);
+    if (err) {
+      f.ground = before;
+      painted.set(f.id, before);
+      problem(err);
+    }
+  }
+  if (drag) {
+    const { p, x, y } = drag;
+    drag = null;
+    if (p.x === x && p.y === y) return;
+    setPlacement({ ...p, x, y });
+    const err = await move(p.id, x, y);
+    if (err) {
+      setPlacement(p);
+      problem(err);
+    }
+  }
+});
+
+canvas.addEventListener("pointerleave", () => {
+  hover = null;
+  if (!stroke && !drag) pointer = null;
+});
 
 canvas.addEventListener("contextmenu", (e) => {
-  if (!focus || focus.filer !== me) return;
-  e.preventDefault();
-  takeDown(e);
+  if (focus) e.preventDefault();
 });
 
 window.addEventListener("keydown", (e) => {
   if (e.key === "Escape" && focus) leaveFocus();
 });
 
-// --- the map, and pointing at things on it ----------------------------------
-
-canvas.addEventListener("mousemove", (e) => {
-  if (focus) {
-    ghost = ghostAt(e);
-    canvas.style.cursor = focus.filer === me && tool === REMOVE ? "crosshair" : "";
-    return;
-  }
-  const p = toArt(e);
-  hover = plotAt(p.x, p.y);
-});
-canvas.addEventListener("mouseleave", () => {
-  hover = null;
-  ghost = null;
-});
+// --- the map ---------------------------------------------------------------
 
 canvas.addEventListener("click", (e) => {
-  if (focus) return void buildClick(e);
-  const p = toArt(e);
+  if (focus || zoom) return;
+  const p = toArt(e, mapView);
   const plot = plotAt(p.x, p.y);
   let tx = p.x;
   let ty = p.y;
   if (plot) {
-    // Walk to the path just below the plot, as one does before filing.
+    // Walk to the gate, as one does before filing.
     const { left, top } = plotOrigin(plot);
     tx = left + PLOT_W / 2;
     ty = top + PLOT_H + PATH / 2 + 3;
@@ -283,7 +530,7 @@ canvas.addEventListener("click", (e) => {
     selected = plot;
     renderPlot();
   }
-  walkTo(Math.min(Math.max(tx, MARGIN + 2), MAP_W - MARGIN - 2), Math.min(Math.max(ty, MARGIN + 7), MAP_H - MARGIN - 1));
+  walkTo(clamp(tx, MARGIN + 2, MAP_W - MARGIN - 2), clamp(ty, MARGIN + 7, MAP_H - MARGIN - 1));
 });
 
 // --- the field channel: avatars (broadcast), who's here (presence), filings --
@@ -316,12 +563,24 @@ let last = performance.now();
 function frame(now: number) {
   step(Math.min((now - last) / 1000, 0.1));
   last = now;
-  if (focus) drawFocus(ctx, focus, built.get(focus.id) ?? [], ghost, focus.filer === me);
-  else draw(ctx, { held: heldPlots(), built, me, hover, selected, walkers: [...walkers.values()] });
+  if (zoom) {
+    drawZoom(now);
+  } else if (focus) {
+    fill(DIRT);
+    viewport(focusView);
+    drawFocus(ctx, focusScene(focus), now);
+    canvas.style.cursor = mineInFocus() && pointer ? (tool === "move" ? (drag ? "grabbing" : "grab") : "crosshair") : "";
+  } else {
+    fill(HILLS);
+    viewport(mapView);
+    draw(ctx, { held: heldPlots(), built, me, hover, selected, walkers: [...walkers.values()] });
+    canvas.style.cursor = "pointer";
+  }
   requestAnimationFrame(frame);
 }
 
 function upsert(f: Filing) {
+  if (painted.has(f.id)) f.ground = painted.get(f.id)!;
   filings.set(f.id, f);
   if (focus?.id === f.id) focus = f;
 }
@@ -383,8 +642,13 @@ async function start() {
     .on("postgres_changes", { event: "*", schema: "the_commons", table: "placements" }, ({ eventType, new: row, old }) => {
       // Deletes carry only the id.
       if (eventType === "DELETE") removePlacement((old as { id: number }).id);
-      else if (row && "id" in row) addPlacement(row as Placement);
-      if (focus && focus.filer !== me) renderBuild(); // the visitor's count
+      else if (row && "id" in row) {
+        const p = row as Placement;
+        if (eventType === "INSERT" && !placements.has(p.id)) land(p.id);
+        // A move echoing back mid-drag is ours; anything else is news.
+        if (drag?.p.id !== p.id) setPlacement(p);
+      }
+      if (focus) renderBuildInfo();
     });
   channel.subscribe((status) => {
     if (status === "SUBSCRIBED") channel.track(spawn);

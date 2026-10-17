@@ -1,17 +1,19 @@
 import { K } from "./content/canon/props.ts";
+import { EMPTY, paintGround } from "./content/ground.ts";
 import { propCanvas, propHas, propSize } from "./content/props.ts";
-import { BUILD_H, BUILD_W, COLS, MAP_H, MAP_W, MARGIN, PLOT_H, PLOT_W, ROWS, ZOOM, plotOrigin, type Plot } from "./layout.ts";
+import { BUILD_H, BUILD_W, COLS, MAP_H, MAP_W, MARGIN, PLOT_H, PLOT_W, ROWS, ZOOM, plotName, plotOrigin, type Plot } from "./layout.ts";
 import type { Filing, Placement } from "./net.ts";
 
 const GRASS = "#b2d878";
 const TUFT = "#98c463";
-const HILLS = "#8ec572";
-const DIRT = "#d8c08a";
+export const HILLS = "#8ec572";
+export const DIRT = "#d8c08a";
+const PEBBLE = "#c2a670";
 const FENCE = "#9a7148";
 const INK = K;
 
 /** The focused view: one plot, its fence, and a strip of path all round. */
-export const FOCUS_PAD = 10;
+export const FOCUS_PAD = 12;
 export const FOCUS_W = BUILD_W + FOCUS_PAD * 2;
 export const FOCUS_H = BUILD_H + FOCUS_PAD * 2;
 
@@ -30,10 +32,21 @@ export interface Scene {
   walkers: Walker[];
 }
 
-export interface Ghost {
-  prop: string;
-  x: number; // build cells
+/** A rectangle of build cells. */
+export interface Cells {
+  x: number;
   y: number;
+  w: number;
+  h: number;
+}
+
+export interface FocusScene {
+  filing: Filing;
+  built: Placement[];
+  mine: boolean;
+  ghost: Placement | null; // a prop about to be placed
+  brush: Cells | null; // ground about to be painted
+  hover: { p: Placement; colour: string } | null; // a prop about to be moved or taken down
 }
 
 export const plotKey = (p: Plot) => `${p.x},${p.y}`;
@@ -90,32 +103,69 @@ function drawBackground(): HTMLCanvasElement {
 const drawOrder = (ps: Placement[]) =>
   [...ps].sort((a, b) => a.y * ZOOM + propSize(a.prop).h - (b.y * ZOOM + propSize(b.prop).h) || a.id - b.id);
 
-function drawBuilt(ctx: CanvasRenderingContext2D, ps: Placement[]) {
-  for (const p of drawOrder(ps)) prop(ctx, p.prop, p.x * ZOOM, p.y * ZOOM);
+/** When each placement landed, for the drop-in; only ones placed while we watched. */
+const landed = new Map<number, number>();
+export const land = (id: number) => landed.set(id, performance.now());
+const DROP = [-4, -3, -2, -1, 0]; // art pixels above the ground, a frame-ish apart
+
+function drawBuilt(ctx: CanvasRenderingContext2D, ps: Placement[], now?: number) {
+  for (const p of drawOrder(ps)) {
+    const at = landed.get(p.id);
+    const age = now === undefined || at === undefined ? Infinity : now - at;
+    const x = p.x * ZOOM;
+    const y = p.y * ZOOM;
+    if (age < 120) {
+      prop(ctx, p.prop, x, y + DROP[Math.floor((age / 120) * DROP.length)]);
+    } else {
+      prop(ctx, p.prop, x, y);
+      if (age < 260) {
+        // A puff of dust either side of where it landed.
+        const { w, h } = propSize(p.prop);
+        ctx.fillStyle = "#f6f1dc";
+        ctx.fillRect(x - 2, y + h - 1, 1, 1);
+        ctx.fillRect(x + w + 1, y + h - 1, 1, 1);
+        if (age < 190) {
+          ctx.fillRect(x - 1, y + h - 2, 1, 1);
+          ctx.fillRect(x + w, y + h - 2, 1, 1);
+        }
+      } else if (at !== undefined) {
+        landed.delete(p.id);
+      }
+    }
+  }
 }
 
-/** The placement whose paint is under a build-space point, frontmost first. */
+/**
+ * The placement whose paint is under a build-space point, frontmost first.
+ * A pixel's grace either way, so a lamppost can be picked up by its post.
+ */
 export function placementAt(ps: Placement[], bx: number, by: number): Placement | null {
-  for (const p of drawOrder(ps).reverse()) {
-    if (propHas(p.prop, Math.floor(bx - p.x * ZOOM), Math.floor(by - p.y * ZOOM))) return p;
+  const order = drawOrder(ps).reverse();
+  for (const [dx, dy] of [[0, 0], [-1, 0], [1, 0], [0, -1], [0, 1]]) {
+    for (const p of order) {
+      if (propHas(p.prop, Math.floor(bx - p.x * ZOOM) + dx, Math.floor(by - p.y * ZOOM) + dy)) return p;
+    }
   }
   return null;
 }
 
-const minis = new Map<number, { from: Placement[]; c: HTMLCanvasElement }>();
+const minis = new Map<number, { from: Placement[]; ground: string; c: HTMLCanvasElement }>();
 
 /**
  * A plot as the map sees it: the full build shrunk to one pixel per cell, each
  * pixel the commonest colour in its block. Outline ink only wins a block that's
- * all outline, or every prop would shrink to a smudge.
+ * all outline, or every prop would shrink to a smudge. Grass stays clear so the
+ * map's own tufts show through.
  */
-function mini(filing: number, ps: Placement[]): HTMLCanvasElement {
-  const hit = minis.get(filing);
-  if (hit && hit.from === ps) return hit.c;
+function mini(f: Filing, ps: Placement[]): HTMLCanvasElement {
+  const ground = f.ground ?? EMPTY;
+  const hit = minis.get(f.id);
+  if (hit && hit.from === ps && hit.ground === ground) return hit.c;
   const full = document.createElement("canvas");
   full.width = BUILD_W;
   full.height = BUILD_H;
   const fctx = full.getContext("2d")!;
+  paintGround(fctx, ground, f.id, false);
   drawBuilt(fctx, ps);
   const src = fctx.getImageData(0, 0, BUILD_W, BUILD_H).data;
   const c = document.createElement("canvas");
@@ -139,29 +189,35 @@ function mini(filing: number, ps: Placement[]): HTMLCanvasElement {
       }
       if (opaque < (ZOOM * ZOOM) / 4) continue;
       const rgb = [...counts].sort((a, b) => b[1] - a[1])[0][0];
-      const o = (cy * PLOT_W + cx) * 4;
-      out.data.set([rgb >> 16, (rgb >> 8) & 255, rgb & 255, 255], o);
+      out.data.set([rgb >> 16, (rgb >> 8) & 255, rgb & 255, 255], (cy * PLOT_W + cx) * 4);
     }
   }
   ctx.putImageData(out, 0, 0);
-  minis.set(filing, { from: ps, c });
+  minis.set(f.id, { from: ps, ground, c });
   return c;
 }
 
 // --- the map ---------------------------------------------------------------
 
-function fence(ctx: CanvasRenderingContext2D, left: number, top: number, w: number, h: number, colour: string) {
+/** A post-and-rail fence with a gate gap in the middle of the bottom rail. */
+function fence(ctx: CanvasRenderingContext2D, left: number, top: number, w: number, h: number, colour: string, gate: number) {
+  const g0 = left + Math.floor((w - gate) / 2);
+  const g1 = g0 + gate;
   ctx.fillStyle = colour;
   ctx.fillRect(left, top + 1, w, 1);
-  ctx.fillRect(left, top + h - 1, w, 1);
+  ctx.fillRect(left, top + h - 1, g0 - left, 1);
+  ctx.fillRect(g1, top + h - 1, left + w - g1, 1);
   ctx.fillRect(left, top + 1, 1, h - 1);
   ctx.fillRect(left + w - 1, top + 1, 1, h - 1);
   const posts = Math.max(2, Math.round(w / 12));
   for (let i = 0; i <= posts; i++) {
     const px = left + Math.round(((w - 1) * i) / posts);
     ctx.fillRect(px, top, 1, 2);
-    ctx.fillRect(px, top + h - 2, 1, 2);
+    if (px < g0 - 1 || px > g1) ctx.fillRect(px, top + h - 2, 1, 2);
   }
+  // Gateposts, a touch taller than the rest.
+  ctx.fillRect(g0 - 1, top + h - 3, 1, 3);
+  ctx.fillRect(g1, top + h - 3, 1, 3);
 }
 
 function flag(ctx: CanvasRenderingContext2D, left: number, top: number) {
@@ -182,15 +238,17 @@ function drawPlot(ctx: CanvasRenderingContext2D, f: Filing, built: Placement[] |
     prop(ctx, "note", left + PLOT_W / 2 - 4, top + PLOT_H / 2 - 4);
     return;
   }
+  const colour = mine ? INK : FENCE;
   if (f.status === "committee") {
-    fence(ctx, left, top, PLOT_W, PLOT_H, mine ? INK : FENCE);
+    fence(ctx, left, top, PLOT_W, PLOT_H, colour, 4);
     prop(ctx, "note", left + PLOT_W / 2 - 4, top + PLOT_H / 2 - 4);
     return;
   }
-  if (built?.length) ctx.drawImage(mini(f.id, built), left, top);
-  else prop(ctx, "flowers", left + PLOT_W / 2 - 5, top + PLOT_H - 7);
-  fence(ctx, left, top, PLOT_W, PLOT_H, mine ? INK : FENCE);
-  if (f.status === "conditional" && !built?.length) flag(ctx, left + 4, top + 4);
+  const empty = !built?.length && !f.ground;
+  if (empty) prop(ctx, "flowers", left + PLOT_W / 2 - 5, top + PLOT_H - 8);
+  else ctx.drawImage(mini(f, built ?? []), left, top);
+  fence(ctx, left, top, PLOT_W, PLOT_H, colour, 4);
+  if (f.status === "conditional" && empty) flag(ctx, left + 4, top + 4);
 }
 
 function outline(ctx: CanvasRenderingContext2D, p: Plot, colour: string) {
@@ -235,40 +293,120 @@ export function draw(ctx: CanvasRenderingContext2D, scene: Scene) {
 
 // --- one plot, up close ----------------------------------------------------
 
-const grounds = new Map<number, HTMLCanvasElement>();
+const grounds = new Map<number, { ground: string; c: HTMLCanvasElement }>();
 
-/** Grass and a few tufts, the same every visit. */
-function ground(filing: number): HTMLCanvasElement {
-  let c = grounds.get(filing);
-  if (c) return c;
-  c = document.createElement("canvas");
+function groundCanvas(f: Filing): HTMLCanvasElement {
+  const ground = f.ground ?? EMPTY;
+  const hit = grounds.get(f.id);
+  if (hit?.ground === ground) return hit.c;
+  const c = hit?.c ?? document.createElement("canvas");
   c.width = BUILD_W;
   c.height = BUILD_H;
-  const ctx = c.getContext("2d")!;
-  ctx.fillStyle = GRASS;
-  ctx.fillRect(0, 0, BUILD_W, BUILD_H);
-  for (let i = 0; i < 9; i++) {
-    prop(ctx, "tuft", hash(filing * 7 + i) * (BUILD_W - 7), hash(filing * 11 + i * 3) * (BUILD_H - 3));
-  }
-  grounds.set(filing, c);
+  paintGround(c.getContext("2d")!, ground, f.id);
+  grounds.set(f.id, { ground, c });
   return c;
 }
 
-export function drawFocus(ctx: CanvasRenderingContext2D, f: Filing, built: Placement[], ghost: Ghost | null, mine: boolean) {
+const outlines = new Map<string, HTMLCanvasElement>();
+
+/** A prop's silhouette grown by a pixel, in one colour: a selection halo. */
+function halo(name: string, colour: string): HTMLCanvasElement {
+  const key = `${name} ${colour}`;
+  let c = outlines.get(key);
+  if (c) return c;
+  const src = propCanvas(name);
+  c = document.createElement("canvas");
+  c.width = src.width + 2;
+  c.height = src.height + 2;
+  const ctx = c.getContext("2d")!;
+  for (const [dx, dy] of [[0, 1], [2, 1], [1, 0], [1, 2]]) ctx.drawImage(src, dx, dy);
+  ctx.globalCompositeOperation = "source-in";
+  ctx.fillStyle = colour;
+  ctx.fillRect(0, 0, c.width, c.height);
+  outlines.set(key, c);
+  return c;
+}
+
+// A clerk's hand, 3x5, for the plot sign: just the letters and numbers plots use.
+const GLYPHS: Record<string, string[]> = {
+  A: [".#.", "#.#", "###", "#.#", "#.#"], B: ["##.", "#.#", "##.", "#.#", "##."],
+  C: [".##", "#..", "#..", "#..", ".##"], D: ["##.", "#.#", "#.#", "#.#", "##."],
+  E: ["###", "#..", "##.", "#..", "###"], F: ["###", "#..", "##.", "#..", "#.."],
+  G: [".##", "#..", "#.#", "#.#", ".##"], H: ["#.#", "#.#", "###", "#.#", "#.#"],
+  1: [".#.", "##.", ".#.", ".#.", "###"], 2: ["##.", "..#", ".#.", "#..", "###"],
+  3: ["##.", "..#", ".#.", "..#", "##."], 4: ["#.#", "#.#", "###", "..#", "..#"],
+  5: ["###", "#..", "##.", "..#", "##."],
+};
+
+function sign(ctx: CanvasRenderingContext2D, text: string, right: number, top: number) {
+  const w = text.length * 4 + 3;
+  const left = right - w;
+  ctx.fillStyle = "#5c3d22";
+  ctx.fillRect(left + 2, top + 8, 1, 3);
+  ctx.fillRect(left + w - 3, top + 8, 1, 3);
+  ctx.fillStyle = INK;
+  ctx.fillRect(left, top, w, 9);
+  ctx.fillStyle = "#e3c48e";
+  ctx.fillRect(left + 1, top + 1, w - 2, 7);
+  ctx.fillStyle = INK;
+  [...text].forEach((ch, i) =>
+    (GLYPHS[ch] ?? []).forEach((row, y) =>
+      [...row].forEach((px, x) => px === "#" && ctx.fillRect(left + 2 + i * 4 + x, top + 2 + y, 1, 1)),
+    ),
+  );
+}
+
+let surround: HTMLCanvasElement | null = null;
+
+/** The path round the plot, with its pebbles. */
+function drawSurround(): HTMLCanvasElement {
+  const c = document.createElement("canvas");
+  c.width = FOCUS_W;
+  c.height = FOCUS_H;
+  const ctx = c.getContext("2d")!;
   ctx.fillStyle = DIRT;
   ctx.fillRect(0, 0, FOCUS_W, FOCUS_H);
+  ctx.fillStyle = PEBBLE;
+  for (let i = 0; i < 70; i++) {
+    const x = Math.floor(hash(i * 3 + 1) * FOCUS_W);
+    const y = Math.floor(hash(i * 7 + 2) * FOCUS_H);
+    ctx.fillRect(x, y, i % 3 ? 1 : 2, 1);
+  }
+  return c;
+}
+
+const GATE = 12;
+
+/** One plot up close, in focus-space art pixels. */
+export function drawFocus(ctx: CanvasRenderingContext2D, scene: FocusScene, now: number) {
+  const f = scene.filing;
+  surround ??= drawSurround();
+  ctx.drawImage(surround, 0, 0);
   ctx.save();
   ctx.translate(FOCUS_PAD, FOCUS_PAD);
-  ctx.drawImage(ground(f.id), 0, 0);
+  ctx.drawImage(groundCanvas(f), 0, 0);
   ctx.beginPath();
   ctx.rect(0, 0, BUILD_W, BUILD_H);
   ctx.clip();
-  drawBuilt(ctx, built);
-  if (ghost) {
-    ctx.globalAlpha = 0.55;
-    prop(ctx, ghost.prop, ghost.x * ZOOM, ghost.y * ZOOM);
+  drawBuilt(ctx, scene.built, now);
+  if (scene.hover) {
+    const { p, colour } = scene.hover;
+    ctx.drawImage(halo(p.prop, colour), p.x * ZOOM - 1, p.y * ZOOM - 1);
+    prop(ctx, p.prop, p.x * ZOOM, p.y * ZOOM);
+  }
+  if (scene.ghost) {
+    ctx.globalAlpha = 0.6;
+    prop(ctx, scene.ghost.prop, scene.ghost.x * ZOOM, scene.ghost.y * ZOOM);
     ctx.globalAlpha = 1;
   }
+  if (scene.brush) {
+    const { x, y, w, h } = scene.brush;
+    ctx.strokeStyle = "#fff8e0cc";
+    ctx.lineWidth = 1;
+    ctx.strokeRect(x * ZOOM + 0.5, y * ZOOM + 0.5, w * ZOOM - 1, h * ZOOM - 1);
+  }
   ctx.restore();
-  fence(ctx, FOCUS_PAD - 1, FOCUS_PAD - 2, BUILD_W + 2, BUILD_H + 3, mine ? INK : FENCE);
+  fence(ctx, FOCUS_PAD - 1, FOCUS_PAD - 2, BUILD_W + 2, BUILD_H + 3, scene.mine ? INK : FENCE, GATE);
+  const name = plotName({ x: f.plot_x, y: f.plot_y });
+  sign(ctx, name, FOCUS_PAD + (BUILD_W - GATE) / 2 - 3, FOCUS_PAD + BUILD_H - 2);
 }

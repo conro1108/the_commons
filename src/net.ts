@@ -20,6 +20,7 @@ export interface Filing {
   permit: string | null;
   filed_at: string;
   stamped_at: string | null;
+  ground: string | null;
 }
 
 /** Statuses that hold a plot; denied and lost give it back. */
@@ -90,4 +91,16 @@ export async function place(filing: number, x: number, y: number, prop: string):
 export async function unplace(id: number): Promise<boolean> {
   const { error } = await supabase.from("placements").delete().eq("id", id);
   return !error;
+}
+
+export async function move(id: number, x: number, y: number): Promise<string | null> {
+  const { error } = await supabase.from("placements").update({ x, y }).eq("id", id);
+  if (!error) return null;
+  if (error.code === "23505") return "Something is already standing exactly there.";
+  return error.message;
+}
+
+export async function paint(filing: number, ground: string): Promise<string | null> {
+  const { error } = await supabase.from("filings").update({ ground }).eq("id", filing);
+  return error?.message ?? null;
 }

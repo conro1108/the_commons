@@ -25,6 +25,12 @@ first; taste and style are expected to take most of the later effort.
 - [x] Checked in browser: claim → approved → build → miniature on map
 - [x] Review (hash-out): 3 fixed (proto-name crash, paging order, failed take-down), startup gap accepted
 
-## Later (taste)
-Ground tiles (paths, soil, water), drag to move, a zoom transition, more
-Commons-original props, conditions that check what you built.
+## Taste pass (first)
+- [ ] Ground painting: grass/path/stone/soil/water/wildflowers, autotiled edges;
+      `filings.ground` (432 chars, owner-updatable column), shown in the miniature
+- [ ] Move tool (drag); hover outline for move / take down; drop-in when placed
+- [ ] Zoom transition map <-> focus: integer zoom steps, then crossfade
+- [ ] More Commons props (goose, weathervane, plaque, signpost, postbox, ...)
+- [ ] Palette grouped; conditions shown in words and checked against the build
+- [ ] Gate in the fence; plot sign in focus view
+- [ ] Browser check, commit, push
