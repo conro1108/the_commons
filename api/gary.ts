@@ -11,7 +11,8 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { experimental_decide as decide, generateText } from "ai";
 
 const JUDGE = "perplexity/pplx-decider-v1.2";
-const SCRIBE = "zai/glm-4.7-flash";
+const SCRIBE = "openai/gpt-5-mini";
+const NO_THINKING = { openai: { reasoningEffort: "minimal" } }; // short prose; thinking only adds cost and wait
 
 export const BYLAWS = [
   "Structures shall be modest: nothing taller than a reasonably tall goose.",
@@ -222,6 +223,7 @@ export async function rule(
     const last = drafts.at(-1);
     const { text } = await generateText({
       model: SCRIBE,
+      providerOptions: NO_THINKING,
       system: refused ? RATTLED : VOICE,
       prompt: JSON.stringify(last ? { ...input, rejected_draft: last.text, rejected_because: last.problems } : input),
       maxOutputTokens: 600,
@@ -271,6 +273,7 @@ export async function writeCondition(filing: { id: number; intent: string }, sto
     const last = tries.at(-1);
     const { text } = await generateText({
       model: SCRIBE,
+      providerOptions: NO_THINKING,
       system: CONDITIONER,
       prompt: JSON.stringify(last ? { ...input, rejected: last.text, rejected_because: last.problems } : input),
       maxOutputTokens: 300,
@@ -347,6 +350,7 @@ export async function inspect(filing: { id: number; intent: string; condition: s
     const last = drafts.at(-1);
     const { text } = await generateText({
       model: SCRIBE,
+      providerOptions: NO_THINKING,
       system: INSPECTOR,
       prompt: JSON.stringify(last ? { ...state, met, rejected: last.text, rejected_because: last.problems } : { ...state, met }),
       maxOutputTokens: 400,
