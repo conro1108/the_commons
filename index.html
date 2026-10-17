@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
     <title>The Commons</title>
     <style>
       * { box-sizing: border-box; }
@@ -109,6 +109,7 @@
         #tag, #build-info { width: auto; max-width: min(320px, calc(100% - 24px)); font-size: 12px; padding: 6px 10px; }
         #build-info .hint { display: none; }
         #palette { flex-wrap: nowrap; overflow-x: auto; padding-bottom: 4px; }
+        textarea, input { font-size: 16px; } /* any smaller and iOS zooms the page in to type */
       }
       @media (max-width: 600px) {
         #tag { top: auto; bottom: 12px; }
