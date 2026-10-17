@@ -106,6 +106,7 @@
       #palette button.on { background: #ffe9a8; box-shadow: inset 0 0 0 2px #402e3a; }
       #palette button.wanted { border-style: dashed; border-color: #b07a1e; background: #fff4c9; }
       #palette img { image-rendering: pixelated; }
+      #tabs { display: none; }
       #tool-line { display: flex; gap: 12px; margin: 0 0 6px; font-size: 12px; }
       #tool-line p { margin: 0; }
 
@@ -114,7 +115,18 @@
         body { font-size: 13px; }
         #tag, #build-info { width: auto; max-width: min(320px, calc(100% - 24px)); font-size: 12px; padding: 6px 10px; }
         #build-info .hint { display: none; }
-        #palette { flex-wrap: nowrap; overflow-x: auto; padding-bottom: 4px; }
+        #tools { width: calc(100% - 24px); }
+        #palette { gap: 6px; }
+        #palette .group:not(.open):not([data-group="Tools"]) { display: none; }
+        #palette .group:not([data-group="Tools"]) h3 { display: none; }
+        #palette .group[data-group="Tools"] { flex-basis: 100%; }
+        #palette .group[data-group="Tools"] h3 { display: none; }
+        #palette .row { flex-wrap: wrap; }
+        #palette button { min-width: 40px; height: 40px; }
+        #tabs { display: flex; flex-wrap: wrap; gap: 4px; flex-basis: 100%; }
+        #palette #tabs button { min-width: 0; height: auto; display: inline-block; margin: 0; padding: 2px 7px; font-size: 11px; font-weight: normal; box-shadow: none; background: #fffdf3; }
+        #palette #tabs button.on { background: #ffe9a8; font-weight: bold; }
+        #palette #tabs button.wanted { border-style: dashed; border-color: #b07a1e; }
         textarea, input { font-size: 16px; } /* any smaller and iOS zooms the page in to type */
       }
       @media (max-width: 600px) {

@@ -59,6 +59,7 @@ let stroke: { cells: string[]; before: string; last: Cells } | null = null; // p
 // Ground we've painted this visit. Only the holder paints a plot, so ours is
 // newer than any echo — echoes of earlier saves can arrive after later strokes.
 const painted = new Map<number, string>();
+let openGroup = "Growing"; // the palette tab showing, on a phone
 let placing = false; // a prop held under the pointer, set down where it's let go
 let drag: { p: Placement; dx: number; dy: number; x: number; y: number } | null = null; // moving a prop
 
@@ -326,7 +327,7 @@ const HINTS: Record<string, string> = {
   prop: touch ? "Touch and slide; it goes down where you let go." : "Click to place it. Right-click takes things down.",
   ground: "Drag to paint the ground.",
   move: "Drag things about.",
-  remove: "Click something to take it down.",
+  remove: `${touch ? "Tap" : "Click"} something to take it down.`,
   item: `${touch ? "Touch, slide and let go" : "Click"} to set it down. Gary reads the label before anyone else does.`,
 };
 
@@ -347,6 +348,11 @@ function renderBuildInfo() {
     b.classList.toggle("wanted", wants.has(b.dataset.tool!.slice(5)));
   }
   $("palette").querySelector(".write-in")?.classList.toggle("on", tool.startsWith("item:"));
+  for (const g of $("palette").querySelectorAll<HTMLElement>("[data-group]")) {
+    g.classList.toggle("open", g.dataset.group === openGroup);
+    $("tabs").querySelector(`[data-tab="${g.dataset.group}"]`)?.classList.toggle("wanted", !!g.querySelector(".wanted"));
+  }
+  for (const b of $("tabs").querySelectorAll<HTMLButtonElement>("[data-tab]")) b.classList.toggle("on", b.dataset.tab === openGroup);
   fitFocus(); // the info's height moves the plot on an upright screen
 }
 
@@ -376,9 +382,11 @@ function renderPalette() {
   if (!mine) return;
   const button = (t: Tool, title: string, inner: string) =>
     `<button data-tool="${t}" title="${title}">${inner}</button>`;
-  const group = (name: string, inner: string) => `<div class="group"><h3>${name}</h3><div class="row">${inner}</div></div>`;
+  const group = (name: string, inner: string) =>
+    `<div class="group" data-group="${name}"><h3>${name}</h3><div class="row">${inner}</div></div>`;
   $("palette").innerHTML = [
     group("Tools", button("move", "move things", "move") + button("remove", "take down", "take down")),
+    `<div id="tabs"></div>`,
     group("Ground", BRUSHES.map((ch) =>
       button(`ground:${ch}`, GROUND[ch].label, `<img src="${icon(`ground:${ch}`, () => swatch(ch))}" width="24" alt="${GROUND[ch].label}">`),
     ).join("")),
@@ -388,6 +396,15 @@ function renderPalette() {
     // Anything not in the palette, by name: it goes down as a labelled parcel.
     group("Write in", `<form class="write-in"><input maxlength="24" placeholder="a lobster" aria-label="something of your own" required><button>Use</button></form>`),
   ].join("");
+  // On a phone the groups are tabs, one open at a time; Tools stays out.
+  const names = ["Ground", ...PALETTE.map((g) => g.group), "Write in"];
+  $("tabs").innerHTML = names.map((n) => `<button data-tab="${n}">${n}</button>`).join("");
+  for (const b of $("tabs").querySelectorAll<HTMLButtonElement>("[data-tab]")) {
+    b.addEventListener("click", () => {
+      openGroup = b.dataset.tab!;
+      renderBuildInfo();
+    });
+  }
   const writeIn = $("palette").querySelector<HTMLFormElement>(".write-in")!;
   writeIn.addEventListener("submit", (e) => {
     e.preventDefault();
@@ -415,6 +432,7 @@ function showPanels() {
 function enterFocus(f: Filing) {
   if (zoom) return;
   focus = f;
+  openGroup = PALETTE.find((g) => f.wants && !f.met_at && g.props.includes(f.wants))?.group ?? openGroup;
   zoom = { start: performance.now(), dir: 1, filing: f };
   pointer = null;
   heading = null;
