@@ -622,6 +622,11 @@ canvas.addEventListener("click", (e) => {
     if (plotKey(plot) !== (selected && plotKey(selected))) $("problem").textContent = "";
     selected = plot;
     renderPlot();
+  } else if (selected) {
+    // Just out for a walk.
+    selected = null;
+    $("problem").textContent = "";
+    renderPlot();
   }
   walkTo(clamp(tx, MARGIN + 2, MAP_W - MARGIN - 2), clamp(ty, MARGIN + 7, MAP_H - MARGIN - 1));
 });
