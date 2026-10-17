@@ -8,8 +8,8 @@ import {
 } from "./net.ts";
 import type { RealtimeChannel } from "@supabase/supabase-js";
 import {
-  DIRT, FOCUS_H, FOCUS_PAD, FOCUS_W, HILLS, draw, drawFocus, land, placementAt, plotKey,
-  type Cells, type FocusScene, type Walker,
+  DIRT, FOCUS_H, FOCUS_PAD, FOCUS_W, HILLS, colourOf, draw, drawFocus, land, letterPhase, placementAt, plotKey,
+  type Cells, type FocusScene, type Letter, type Walker,
 } from "./render.ts";
 
 const SPEED = 40; // art pixels per second
@@ -47,6 +47,10 @@ let handles = new Map<string, string>();
 let me = "";
 let hover: Plot | null = null;
 let selected: Plot | null = null;
+const letters: Letter[] = [];
+// Our rulings still in the post: the panel keeps them sealed until the letter lands.
+const unread = new Set<number>();
+let thunk: number | null = null; // a ruling just opened, to stamp in the panel
 
 let focus: Filing | null = null; // the plot we're up close to, if any
 let zoom: { start: number; dir: 1 | -1; filing: Filing } | null = null; // flying in or out
@@ -71,7 +75,6 @@ function heldPlots() {
 
 const BUILT: Filing["status"][] = ["approved", "conditional"];
 
-const myHeld = () => [...filings.values()].find((f) => f.filer === me && HELD.includes(f.status));
 const mineInFocus = () => !!focus && focus.filer === me && !zoom;
 
 // --- panel ---------------------------------------------------------------
@@ -87,23 +90,18 @@ function renderPlot() {
   const info = $("plot");
   form.hidden = true;
   if (!selected) {
-    info.innerHTML = `<p class="hint">Click a plot to see who holds it, or an empty one to file a claim.</p>`;
+    info.innerHTML = `<p class="hint">Click a plot to see who holds it, or an empty one to file a claim. Double-click or scroll in to step inside one.</p>`;
     return;
   }
   const f = heldPlots().get(plotKey(selected));
   const title = `<h2>Plot ${plotName(selected)}</h2>`;
   if (f) {
     const enter = BUILT.includes(f.status)
-      ? `<button id="enter">${f.filer === me ? "Build here" : "Look closer"}</button>`
+      ? `<button id="enter">Step inside</button> <span class="meta">or double-click it</span>`
       : "";
     info.innerHTML = `${title}<p>Held by ${esc(who(f.filer))}: <q>${esc(f.intent)}</q></p>${ruling(f)}
       <p class="meta">Filing ${pad(f.id)}</p>${enter}`;
     document.getElementById("enter")?.addEventListener("click", () => enterFocus(f));
-    return;
-  }
-  const mine = myHeld();
-  if (mine) {
-    info.innerHTML = `${title}<p>Unclaimed. Residents may hold one plot; yours is ${plotName({ x: mine.plot_x, y: mine.plot_y })}.</p>`;
     return;
   }
   info.innerHTML = `${title}<p>Unclaimed. State your intent for this plot in one breath.</p>`;
@@ -111,11 +109,34 @@ function renderPlot() {
 }
 
 function renderMine() {
-  const latest = [...filings.values()].filter((f) => f.filer === me).sort((a, b) => b.id - a.id)[0];
-  $("mine").innerHTML = latest
-    ? `<h2>Your filing</h2><p>Filing ${pad(latest.id)}, Plot ${plotName({ x: latest.plot_x, y: latest.plot_y })}: <q>${esc(latest.intent)}</q></p>
-       ${ruling(latest)}${latest.status === "pending" ? `<p class="meta">Rulings usually take about a minute.</p>` : ""}`
+  const mine = [...filings.values()].filter((f) => f.filer === me).sort((a, b) => b.id - a.id);
+  const latest = mine[0];
+  const held = mine.filter((f) => HELD.includes(f.status)).sort((a, b) => a.plot_y - b.plot_y || a.plot_x - b.plot_x);
+  const plots = held.length
+    ? `<h2>Your plots</h2><p class="meta"><span class="swatch" style="background:${colourOf(me)}"></span>Yours fly your colours.</p>
+       <p class="yours">${held.map((f) => `<button data-filing="${f.id}" class="plot-link ${unread.has(f.id) ? "pending" : f.status}">${plotName({ x: f.plot_x, y: f.plot_y })}</button>`).join(" ")}</p>`
     : "";
+  let filing = "";
+  if (latest) {
+    const sealed = unread.has(latest.id);
+    const fresh = thunk === latest.id;
+    const shown = sealed ? `<p class="stamp pending">In the post</p>` : ruling(latest).replace('class="stamp', `class="stamp${fresh ? " thunk" : ""}`);
+    filing = `<h2>Your latest filing</h2><p>Filing ${pad(latest.id)}, Plot ${plotName({ x: latest.plot_x, y: latest.plot_y })}: <q>${esc(latest.intent)}</q></p>
+       ${shown}${latest.status === "pending" ? `<p class="meta">Rulings usually take about a minute.</p>` : ""}
+       ${sealed ? `<p class="meta">Gary's reply is on its way.</p>` : ""}`;
+  }
+  thunk = null;
+  $("mine").innerHTML = plots + filing;
+  for (const b of $("mine").querySelectorAll<HTMLButtonElement>("[data-filing]")) {
+    b.addEventListener("click", () => visit(filings.get(Number(b.dataset.filing))!));
+  }
+}
+
+/** Go to one of our plots: inside if it's granted, otherwise just pick it out on the map. */
+function visit(f: Filing) {
+  selected = { x: f.plot_x, y: f.plot_y };
+  renderPlot();
+  if (BUILT.includes(f.status)) enterFocus(f);
 }
 
 function renderBoard() {
@@ -259,10 +280,14 @@ form.addEventListener("submit", async (e) => {
   if (!selected) return;
   const button = form.querySelector("button")!;
   button.disabled = true;
-  const problem = await fileClaim(selected.x, selected.y, intent.value.trim());
+  const plot = selected;
+  const problem = await fileClaim(plot.x, plot.y, intent.value.trim());
   button.disabled = false;
   $("problem").textContent = problem ?? "";
-  if (!problem) intent.value = "";
+  if (!problem) {
+    intent.value = "";
+    letters.push({ plot, out: true });
+  }
 });
 
 // --- canvas and views --------------------------------------------------------
@@ -330,7 +355,7 @@ function drawZoom(now: number) {
     ox: Math.round(from.x + (to.x - from.x) * k - s * left),
     oy: Math.round(from.y + (to.y - from.y) * k - s * top),
   });
-  draw(ctx, { held: heldPlots(), built, me, hover: null, selected: null, walkers: [...walkers.values()] });
+  draw(ctx, { held: heldPlots(), built, me, hover: null, selected: null, walkers: [...walkers.values()], letters: [] });
   const fade = Math.max(0, (u - 0.65) / 0.35);
   if (fade > 0) {
     ctx.globalAlpha = fade;
@@ -515,6 +540,42 @@ window.addEventListener("keydown", (e) => {
   if (e.key === "Escape" && focus) leaveFocus();
 });
 
+/** The granted plot under a map point, if any: the ones you can step inside. */
+function enterableAt(e: MouseEvent) {
+  const p = toArt(e, mapView);
+  const plot = plotAt(p.x, p.y);
+  const f = plot && heldPlots().get(plotKey(plot));
+  return f && BUILT.includes(f.status) ? f : null;
+}
+
+// Double-click a plot to step inside, or the path round it to step out.
+canvas.addEventListener("dblclick", (e) => {
+  if (zoom) return;
+  if (!focus) {
+    const f = enterableAt(e);
+    if (f) enterFocus(f);
+  } else if (!toBuild(e)) {
+    leaveFocus();
+  }
+});
+
+// Scroll or pinch: in over a plot goes inside, out comes back to the commons.
+canvas.addEventListener("wheel", (e) => {
+  // Pinches arrive as ctrl-wheel; keep the browser from zooming the page.
+  if (e.ctrlKey || focus) e.preventDefault();
+  if (zoom || Math.abs(e.deltaY) < 4) return;
+  if (focus) {
+    if (e.deltaY > 0) leaveFocus();
+    return;
+  }
+  const f = e.deltaY < 0 && enterableAt(e);
+  if (!f) return;
+  e.preventDefault();
+  selected = { x: f.plot_x, y: f.plot_y };
+  renderPlot();
+  enterFocus(f);
+}, { passive: false });
+
 // --- the map ---------------------------------------------------------------
 
 canvas.addEventListener("click", (e) => {
@@ -575,10 +636,25 @@ function frame(now: number) {
   } else {
     fill(HILLS);
     viewport(mapView);
-    draw(ctx, { held: heldPlots(), built, me, hover, selected, walkers: [...walkers.values()] });
+    draw(ctx, { held: heldPlots(), built, me, hover, selected, walkers: [...walkers.values()], letters });
     canvas.style.cursor = "pointer";
+    post(now);
   }
   requestAnimationFrame(frame);
+}
+
+/** Letters on their way: when one of ours lands, open it in the panel too. */
+function post(now: number) {
+  for (let i = letters.length - 1; i >= 0; i--) {
+    const l = letters[i];
+    const phase = letterPhase(l, now);
+    const id = l.filing;
+    if (phase !== "flying" && id !== undefined && unread.delete(id)) {
+      thunk = id;
+      renderAll();
+    }
+    if (phase === "done") letters.splice(i, 1);
+  }
 }
 
 function upsert(f: Filing) {
@@ -637,6 +713,12 @@ async function start() {
     .on("postgres_changes", { event: "*", schema: "the_commons", table: "filings" }, async ({ new: row }) => {
       if (!row || !("id" in row)) return;
       const f = row as Filing;
+      // Gary's ruling on one of ours: it comes by post.
+      const was = filings.get(f.id);
+      if (f.filer === me && was?.status === "pending" && f.status !== "pending") {
+        unread.add(f.id);
+        letters.push({ plot: { x: f.plot_x, y: f.plot_y }, out: false, status: f.status, filing: f.id });
+      }
       upsert(f);
       handles = await handlesFor([f.filer]);
       renderAll();

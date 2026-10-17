@@ -41,23 +41,15 @@ create table the_commons.filings (
 );
 create unique index filings_plot_held on the_commons.filings (plot_x, plot_y)
   where status in ('pending', 'approved', 'conditional', 'committee');
-create unique index filings_one_plot_each on the_commons.filings (filer)
-  where status in ('pending', 'approved', 'conditional', 'committee');
 alter table the_commons.filings enable row level security;
 -- Pending text hasn't been past Gary yet; refused text failed moderation; lost
 -- text never reached him. None of it is anyone's business but the filer's.
 create policy "rulings are public; your own filings are yours"
   on the_commons.filings for select
   using (status not in ('pending', 'refused', 'lost') or filer = auth.uid());
--- Gary processes three filings per resident per day — a limit on the AI only.
--- A refusal uses up the whole day.
 create policy "file a claim"
   on the_commons.filings for insert to authenticated
-  with check (
-    filer = auth.uid()
-    and (select coalesce(sum(case when f.status = 'refused' then 3 else 1 end), 0) from the_commons.filings f
-         where f.filer = auth.uid() and f.filed_at > now() - interval '1 day') < 3
-  );
+  with check (filer = auth.uid());
 grant select on the_commons.filings to anon, authenticated;
 -- Once granted, the holder may paint the ground; nothing else on the row is theirs.
 create policy "paint your own granted plot"

@@ -82,8 +82,8 @@ No fail states: spread is never damage, a dispute is never a loss.
   AI SDK `experimental_decide`: typed questions in, choices and probabilities
   out). It writes no prose, so the permit is `zai/glm-4.7-flash`. Jev
   (`typesafe-ai/jev`) was the first pick but isn't free-tier. The gazette and
-  council get the best free-tier model. Gary processes three filings per resident per day
-  — a limit on the AI, never on building. Near the budget, an Edge Config
+  council get the best free-tier model. Residents may hold any number of plots
+  and file as often as they like. Near the budget, an Edge Config
   flag puts **Gary on leave**: stamps go canned until it's flipped back.
 
 ## Infra map

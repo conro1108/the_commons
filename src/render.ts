@@ -30,6 +30,32 @@ export interface Scene {
   hover: Plot | null;
   selected: Plot | null;
   walkers: Walker[];
+  letters: Letter[];
+}
+
+/**
+ * A winged envelope: a filing flying off to Gary, or his ruling flying back to
+ * its plot, where it lands and opens. Starts the first frame it's drawn, so a
+ * ruling that arrives while you're up close waits for you on the map.
+ */
+export interface Letter {
+  plot: Plot;
+  out: boolean;
+  status?: Filing["status"]; // the ruling inside, for the mark it shows on opening
+  filing?: number; // whose ruling, so the panel can open it when the letter lands
+  start?: number;
+}
+
+/** Gary's office is somewhere off the top right of the map. */
+const OFFICE = { x: MAP_W + 12, y: -12 };
+export const FLIGHT = 1500;
+const OPENING = 1100;
+
+/** Where a letter is in its life: flying, opening (incoming only), or done. */
+export function letterPhase(l: Letter, now: number): "flying" | "opening" | "done" {
+  const age = now - (l.start ?? now);
+  if (age < FLIGHT) return "flying";
+  return !l.out && age < FLIGHT + OPENING ? "opening" : "done";
 }
 
 /** A rectangle of build cells. */
@@ -227,7 +253,24 @@ function flag(ctx: CanvasRenderingContext2D, left: number, top: number) {
   ctx.fillRect(left + 1, top, 3, 2);
 }
 
+/** A pennant in the holder's colour on the corner post: yours fly yours. */
+function pennant(ctx: CanvasRenderingContext2D, left: number, top: number, colour: string) {
+  ctx.fillStyle = INK;
+  ctx.fillRect(left, top - 4, 1, 5);
+  ctx.fillStyle = colour;
+  ctx.fillRect(left + 1, top - 4, 3, 1);
+  ctx.fillRect(left + 1, top - 3, 2, 1);
+}
+
 function drawPlot(ctx: CanvasRenderingContext2D, f: Filing, built: Placement[] | undefined, mine: boolean) {
+  drawPlotBody(ctx, f, built, mine);
+  if (mine) {
+    const { left, top } = plotOrigin({ x: f.plot_x, y: f.plot_y });
+    pennant(ctx, left, top, colourOf(f.filer));
+  }
+}
+
+function drawPlotBody(ctx: CanvasRenderingContext2D, f: Filing, built: Placement[] | undefined, mine: boolean) {
   const { left, top } = plotOrigin({ x: f.plot_x, y: f.plot_y });
   if (f.status === "pending") {
     // Stakes at the corners and a note on the in-tray: claimed, not yet granted.
@@ -259,7 +302,7 @@ function outline(ctx: CanvasRenderingContext2D, p: Plot, colour: string) {
 }
 
 /** Colour per resident, from their id, so everyone keeps theirs. */
-function colourOf(id: string) {
+export function colourOf(id: string) {
   return `hsl(${parseInt(id.slice(0, 6), 16) % 360} 55% 55%)`;
 }
 
@@ -289,6 +332,84 @@ export function draw(ctx: CanvasRenderingContext2D, scene: Scene) {
   if (scene.hover) outline(ctx, scene.hover, "#ffffff88");
   if (scene.selected) outline(ctx, scene.selected, "#fff8e0");
   for (const w of [...scene.walkers].sort((a, b) => a.y - b.y)) drawWalker(ctx, w, w.id === scene.me);
+  const now = performance.now();
+  for (const l of scene.letters) drawLetter(ctx, l, now);
+}
+
+// --- the post --------------------------------------------------------------
+
+const ENVELOPE = ["kkkkkkkk", "kwkwwkwk", "kwwkkwwk", "kwwwwwwk", "kkkkkkkk"];
+const FLAP = ["...kk...", "..kwwk..", ".kwwwwk.", "kwwwwwwk"]; // folded back, above the body
+const POCKET = ["k......k", "kwk..kwk", "kwwkkwwk", "kwwwwwwk", "kkkkkkkk"]; // the front, open at the top
+const WINGS = [
+  [[-1, 0], [-2, -1], [-3, -1], [8, 0], [9, -1], [10, -1]], // up
+  [[-1, 1], [-2, 1], [-3, 2], [8, 1], [9, 1], [10, 2]], // down
+];
+// What's inside, shown as the letter opens: a tick, a squiggle, or a cross.
+const MARKS: Record<string, { rows: string[]; colour: string }> = {
+  yes: { rows: ["....#", "...#.", "#.#..", ".#..."], colour: "#3d7a3a" },
+  later: { rows: [".#..#", "#.##.", "....."], colour: "#b07a1e" },
+  no: { rows: ["#...#", ".#.#.", "..#..", ".#.#.", "#...#"], colour: "#b5404f" },
+};
+const markFor = (s?: Filing["status"]) =>
+  s === "approved" || s === "conditional" ? MARKS.yes : s === "committee" || s === "pending" ? MARKS.later : MARKS.no;
+
+function pixels(ctx: CanvasRenderingContext2D, rows: string[], left: number, top: number, colours: Record<string, string>) {
+  rows.forEach((row, y) =>
+    [...row].forEach((ch, x) => {
+      if (!colours[ch]) return;
+      ctx.fillStyle = colours[ch];
+      ctx.fillRect(left + x, top + y, 1, 1);
+    }),
+  );
+}
+
+function drawLetter(ctx: CanvasRenderingContext2D, l: Letter, now: number) {
+  l.start ??= now;
+  const age = now - l.start;
+  const phase = letterPhase(l, now);
+  if (phase === "done") return;
+  const { left, top } = plotOrigin(l.plot);
+  const home = { x: left + PLOT_W / 2 - 4, y: top + PLOT_H / 2 - 3 };
+  const [a, b] = l.out ? [home, OFFICE] : [OFFICE, home];
+  const colours = { k: INK, w: "#fffdf3" };
+  if (phase === "flying") {
+    const t = age / FLIGHT;
+    const u = l.out ? t * t : 1 - (1 - t) * (1 - t); // leaves slowly, arrives gently
+    const hop = Math.sin(Math.PI * t) * 24; // an arc, not a beeline
+    const x = Math.round(a.x + (b.x - a.x) * u);
+    const y = Math.round(a.y + (b.y - a.y) * u - hop + Math.sin(age / 90) * 1.2);
+    pixels(ctx, ENVELOPE, x, y, colours);
+    ctx.fillStyle = "#fffdf3";
+    for (const [dx, dy] of WINGS[Math.floor(age / 110) % 2]) ctx.fillRect(x + dx, y + dy, 1, 1);
+    return;
+  }
+  // Landed: a little bounce, the flap opens, and the ruling peeks out.
+  const o = age - FLIGHT;
+  const bounce = o < 160 ? -1 : 0;
+  if (o < 260) return pixels(ctx, ENVELOPE, b.x, b.y + bounce, colours);
+  const mark = markFor(l.status);
+  const blink = o > OPENING - 150 && Math.floor(o / 70) % 2;
+  pixels(ctx, FLAP, b.x, b.y - FLAP.length, colours);
+  if (!blink) {
+    // The ruling on its card, sliding up out of the pocket.
+    const w = mark.rows[0].length + 4;
+    const h = mark.rows.length + 4;
+    const rise = Math.min(h + 2, Math.floor((o - 260) / 40));
+    const cx = b.x + 4 - Math.floor(w / 2);
+    const cy = b.y + 3 - rise;
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(cx, cy, w, b.y + 4 - cy); // still tucked in below the pocket's bottom
+    ctx.clip();
+    ctx.fillStyle = INK;
+    ctx.fillRect(cx, cy, w, h);
+    ctx.fillStyle = "#fffdf3";
+    ctx.fillRect(cx + 1, cy + 1, w - 2, h - 2);
+    pixels(ctx, mark.rows, cx + 2, cy + 2, { "#": mark.colour });
+    ctx.restore();
+  }
+  pixels(ctx, POCKET, b.x, b.y, colours);
 }
 
 // --- one plot, up close ----------------------------------------------------

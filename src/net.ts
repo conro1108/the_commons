@@ -57,8 +57,6 @@ export async function fileClaim(x: number, y: number, intent: string): Promise<s
   const { error } = await supabase.from("filings").insert({ plot_x: x, plot_y: y, intent });
   if (!error) return null;
   if (error.message.includes("filings_plot_held")) return "Another filing for this plot is already in Gary's in-tray.";
-  if (error.message.includes("filings_one_plot_each")) return "Residents may hold one plot. You hold one.";
-  if (error.code === "42501") return "Gary has processed all the filings he can take from you today. The in-tray reopens tomorrow.";
   if (error.code === "23514") return "Filings must be between 3 and 120 characters.";
   return error.message;
 }
