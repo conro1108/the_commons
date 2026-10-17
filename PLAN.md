@@ -66,7 +66,11 @@ No fail states: spread is never damage, a dispute is never a loss.
 - Players' text is public and sign-in is anonymous. Gary's stamp doubles as
   moderation: an unacceptable filing is *lost in the post* (status `lost`,
   shown to nobody else).
-- Budget is $5 of AI Gateway credit. A cheap model for stamps; the gazette and
+- Budget is $5 of AI Gateway credit. Gary's *judgment* — decision, condition,
+  lost-in-the-post — is **Jev** (`typesafe-ai/jev`), an evaluation model that
+  answers typed questions with choices and probabilities, at $0.042/M input
+  and free output: effectively free. Jev writes no prose, so the permit text
+  is a cheap LLM (or templates, if that's funny enough). The gazette and
   council get the good one. Gary processes three filings per resident per day
   — a limit on the AI, never on building. Near the budget, an Edge Config
   flag puts **Gary on leave**: stamps go canned until it's flipped back.
@@ -94,7 +98,7 @@ No fail states: spread is never damage, a dispute is never a loss.
 
 The filing pipeline is the spine, and touches most of the map:
 client inserts `filings` row → trigger enqueues (pgmq) → pg_cron drains →
-pg_net POSTs `/api/gary` → AI Gateway (stamp + embedding) → write-back with
+pg_net POSTs `/api/gary` → AI Gateway (Jev decides, LLM writes the permit, embedding) → write-back with
 the secret key → Realtime delivers the stamp to the filer.
 
 Client: Vite + TypeScript + canvas, no framework — same as the siblings. Pixel
