@@ -63,6 +63,7 @@ let drag: { p: Placement; dx: number; dy: number; x: number; y: number } | null 
 
 const pad = (n: number) => String(n).padStart(4, "0");
 const esc = (s: string) => s.replace(/[&<>"]/g, (c) => `&${{ "&": "amp", "<": "lt", ">": "gt", '"': "quot" }[c]};`);
+const touch = matchMedia("(pointer: coarse)").matches;
 const unnamed = () => handles.get(me)?.startsWith("player-") ?? false;
 const who = (id: string) => (id === me ? "you" : (handles.get(id) ?? "a resident"));
 const clamp = (v: number, lo: number, hi: number) => Math.min(Math.max(v, lo), Math.max(lo, hi));
@@ -133,7 +134,7 @@ function renderTag() {
       ? `<p class="yours"><span class="swatch" style="background:${colourOf(me)}"></span>${held
           .map((f) => `<button data-filing="${f.id}" class="plot-link ${unread.has(f.id) ? "pending" : f.status}">${plotName({ x: f.plot_x, y: f.plot_y })}</button>`)
           .join("")}</p>`
-      : `<p class="hint">Click a plot to read its permit, or an empty one to claim it.</p>`}`;
+      : `<p class="hint">${touch ? "Tap" : "Click"} a plot to read its permit, or an empty one to claim it.</p>`}`;
   for (const b of $("tag").querySelectorAll<HTMLButtonElement>("[data-filing]")) {
     b.addEventListener("click", () => visit(filings.get(Number(b.dataset.filing))!));
   }
@@ -302,7 +303,7 @@ board.addEventListener("click", (e) => {
 // --- up close: the plot's card and the toolbar --------------------------------
 
 const HINTS: Record<string, string> = {
-  prop: matchMedia("(pointer: coarse)").matches ? "Tap to place it." : "Click to place it. Right-click takes things down.",
+  prop: touch ? "Tap to place it." : "Click to place it. Right-click takes things down.",
   ground: "Drag to paint the ground.",
   move: "Drag things about.",
   remove: "Click something to take it down.",
@@ -432,6 +433,26 @@ function fit(w: number, h: number, below = 0): View {
   return { s, ox: Math.floor((canvas.width - w * s) / 2), oy: Math.floor((room - h * s) / 2) };
 }
 
+/**
+ * The map whole if it fits at a tappable size; otherwise (a phone held upright)
+ * bigger than the screen, with the view following you about in follow().
+ */
+function fitMap(): View {
+  const whole = fit(MAP_W, MAP_H);
+  const s = Math.max(whole.s, Math.min(Math.round(2 * dpr), Math.floor(canvas.height / MAP_H)));
+  return s === whole.s ? whole : { s, ox: 0, oy: 0 };
+}
+
+/** Centre the map on us along any side it overflows, stopping at its edges. */
+function follow() {
+  const self = walkers.get(me);
+  const { s } = mapView;
+  const axis = (room: number, art: number, at = art / 2) =>
+    room >= art * s ? Math.floor((room - art * s) / 2) : Math.round(clamp(room / 2 - at * s, room - art * s, 0));
+  mapView.ox = axis(canvas.width, MAP_W, self?.x);
+  mapView.oy = axis(canvas.height, MAP_H, self?.y);
+}
+
 /** Up close, clear of the toolbar when there is one. */
 function fitFocus() {
   const tools = $("tools");
@@ -448,7 +469,7 @@ function resize() {
   canvas.style.width = `${box.width}px`;
   canvas.style.height = `${box.height}px`;
   ctx.imageSmoothingEnabled = false;
-  mapView = fit(MAP_W, MAP_H);
+  mapView = fitMap();
   fitFocus();
 }
 
@@ -846,6 +867,7 @@ function frame(now: number) {
     canvas.style.cursor = mineInFocus() && pointer ? (tool === "move" ? (drag ? "grabbing" : "grab") : "crosshair") : "";
   } else {
     fill(HILLS);
+    follow();
     viewport(mapView);
     const t = Date.now();
     draw(ctx, { held: heldPlots(), built, me, hover, selected, walkers: [...walkers.values()], letters, t, recent: recent() });
