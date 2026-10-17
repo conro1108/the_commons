@@ -70,7 +70,7 @@ No fail states: spread is never damage, a dispute is never a loss.
   lost-in-the-post — is **Jev** (`typesafe-ai/jev`), an evaluation model that
   answers typed questions with choices and probabilities, at $0.042/M input
   and free output: effectively free. Jev writes no prose, so the permit text
-  is a cheap LLM (or templates, if that's funny enough). The gazette and
+  is `zai/glm-5.3-flash` ($0.15/M in, $0.50/M out). The gazette and
   council get the good one. Gary processes three filings per resident per day
   — a limit on the AI, never on building. Near the budget, an Edge Config
   flag puts **Gary on leave**: stamps go canned until it's flipped back.
