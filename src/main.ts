@@ -59,6 +59,7 @@ let stroke: { cells: string[]; before: string; last: Cells } | null = null; // p
 // Ground we've painted this visit. Only the holder paints a plot, so ours is
 // newer than any echo — echoes of earlier saves can arrive after later strokes.
 const painted = new Map<number, string>();
+let placing = false; // a prop held under the pointer, set down where it's let go
 let drag: { p: Placement; dx: number; dy: number; x: number; y: number } | null = null; // moving a prop
 
 const pad = (n: number) => String(n).padStart(4, "0");
@@ -322,11 +323,11 @@ board.addEventListener("click", (e) => {
 // --- up close: the plot's card and the toolbar --------------------------------
 
 const HINTS: Record<string, string> = {
-  prop: touch ? "Tap to place it." : "Click to place it. Right-click takes things down.",
+  prop: touch ? "Touch and slide; it goes down where you let go." : "Click to place it. Right-click takes things down.",
   ground: "Drag to paint the ground.",
   move: "Drag things about.",
   remove: "Click something to take it down.",
-  item: `${touch ? "Tap" : "Click"} to set it down. Gary reads the label before anyone else does.`,
+  item: `${touch ? "Touch, slide and let go" : "Click"} to set it down. Gary reads the label before anyone else does.`,
 };
 
 function renderBuildInfo() {
@@ -560,9 +561,13 @@ function drawZoom(now: number) {
 // --- up close: building ----------------------------------------------------
 
 /** A build-space point, or null off the plot. */
+/** A finger hides what it's placing, so a touch places a little above itself. */
+const LIFT = 48; // CSS px
+
 function toBuild(e: MouseEvent) {
   const p = toArt(e, focusView);
-  const b = { x: p.x - FOCUS_PAD, y: p.y - FOCUS_PAD };
+  const lift = placing && (e as PointerEvent).pointerType !== "mouse" ? (LIFT * dpr) / focusView.s : 0;
+  const b = { x: p.x - FOCUS_PAD, y: p.y - FOCUS_PAD - lift };
   return b.x >= 0 && b.y >= 0 && b.x < BUILD_W && b.y < BUILD_H ? b : null;
 }
 
@@ -673,15 +678,14 @@ function paintTo(to: Cells) {
 }
 
 canvas.addEventListener("pointerdown", (e) => {
-  if (!focus || zoom) return;
+  if (!focus || zoom || !mineInFocus()) return;
+  const [kind] = tool.split(":");
+  placing = e.button === 0 && (kind === "prop" || kind === "item");
   const b = toBuild(e);
-  if (!b || !mineInFocus()) return;
+  if (!b) return void (placing = false);
   pointer = b;
-  const [kind, arg] = tool.split(":");
   if (e.button === 2 || kind === "remove") return takeDown(b);
   if (e.button !== 0) return;
-  if (kind === "prop") return void placeAt(arg, b);
-  if (kind === "item") return void placeAt("item", b, tool.slice(5));
   canvas.setPointerCapture(e.pointerId);
   if (kind === "ground") {
     const before = focus.ground ?? EMPTY;
@@ -703,7 +707,7 @@ canvas.addEventListener("pointermove", (e) => {
   }
   const b = toBuild(e);
   if (!b) {
-    if (!stroke && !drag) pointer = null;
+    if (!stroke && !drag && !placing) pointer = null;
     return;
   }
   pointer = b;
@@ -714,7 +718,15 @@ canvas.addEventListener("pointermove", (e) => {
   }
 });
 
-canvas.addEventListener("pointerup", async () => {
+canvas.addEventListener("pointerup", async (e) => {
+  if (placing) {
+    placing = false;
+    const at = pointer;
+    if (e.pointerType !== "mouse") pointer = null;
+    if (!at || !focus) return;
+    const [kind, arg] = tool.split(":");
+    return void (kind === "item" ? placeAt("item", at, tool.slice(5)) : placeAt(arg, at));
+  }
   if (stroke && focus) {
     const { before } = stroke;
     const f = focus;
@@ -739,6 +751,8 @@ canvas.addEventListener("pointerup", async () => {
     }
   }
 });
+
+canvas.addEventListener("pointercancel", () => void (placing = false));
 
 canvas.addEventListener("pointerleave", () => {
   hover = null;
