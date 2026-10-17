@@ -88,6 +88,12 @@
       /* Up close. */
       #build { position: absolute; inset: 0; pointer-events: none; }
       #build > * { pointer-events: auto; }
+      #build > #labels { pointer-events: none; }
+      .item-label { position: absolute; transform: translate(-50%, -100%); font-size: 11px; white-space: nowrap;
+                    background: #402e3acc; color: #fffdf3; padding: 0 5px; }
+      .write-in { display: flex; gap: 4px; }
+      .write-in input { width: 9em; font: inherit; padding: 2px 6px; border: 2px solid #402e3a; background: #fffdf3; }
+      .write-in.on input { background: #ffe9a8; }
       #leave { position: absolute; top: 12px; left: 12px; margin: 0; }
       #build-info { top: 54px; left: 12px; width: 270px; transform: rotate(-.4deg); }
       #tools { bottom: 12px; left: 50%; transform: translateX(-50%); max-width: calc(100% - 24px); padding: 8px 10px; }
@@ -127,6 +133,7 @@
       <div id="bubble" class="paper" hidden></div>
       <div id="nametag" hidden></div>
       <section id="build" hidden>
+        <div id="labels"></div>
         <button id="leave">← Back to the commons</button>
         <div id="build-info" class="paper"></div>
         <div id="tools" class="paper">

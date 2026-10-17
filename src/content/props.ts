@@ -5,6 +5,19 @@
 import { CANON, K, type PropDef } from "./canon/props.ts";
 
 const COMMONS: Record<string, PropDef> = {
+  item: {
+    // anything at all, written in: a parcel, its label tied on with string
+    rows: [
+      ".kkkkkkk.",
+      "ktttttttk",
+      "ktkkkwwwk",
+      "ktttwkkwk",
+      "kbbbwwwwk",
+      "kbbbbbbbk",
+      ".kkkkkkk.",
+    ],
+    palette: { k: K, t: "#c9a06a", b: "#a97048", w: "#fffdf3" },
+  },
   bench: {
     // for looking at the pond with
     rows: [

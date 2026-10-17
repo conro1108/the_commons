@@ -89,6 +89,11 @@ create table the_commons.placements (
   x         smallint not null check (x between 0 and 23),
   y         smallint not null check (y between 0 and 17),
   prop      text not null check (prop ~ '^[a-z_]{1,24}$'),
+  -- A written-in item ('item') carries its own name, shown once Gary has read
+  -- it (label_ok); until then it's a parcel to everyone but its builder.
+  label     text check (label is null or (prop = 'item' and length(btrim(label)) between 1 and 24)),
+  label_ok  boolean,
+  label_check jsonb, -- the decision model's raw answer
   placed_at timestamptz not null default now(),
   unique (filing, x, y)
 );
@@ -110,7 +115,7 @@ create policy "take down what's on your plot"
   using (exists (select 1 from the_commons.filings f
     where f.id = filing and f.filer = auth.uid()));
 grant select on the_commons.placements to anon, authenticated;
-grant insert (filing, x, y, prop), update (x, y), delete on the_commons.placements to authenticated;
+grant insert (filing, x, y, prop, label), update (x, y), delete on the_commons.placements to authenticated;
 grant all on the_commons.placements to service_role;
 alter publication supabase_realtime add table the_commons.placements;
 
@@ -157,6 +162,17 @@ revoke execute on function the_commons.enqueue_filing() from public, anon, authe
 create trigger filings_enqueue after insert on the_commons.filings
   for each row execute function the_commons.enqueue_filing();
 
+-- A written-in item's name goes in the same in-tray.
+create function the_commons.enqueue_item() returns trigger
+language plpgsql security definer set search_path = '' as $$
+begin
+  perform pgmq.send('the_commons_gary', jsonb_build_object('item', new.id));
+  return new;
+end $$;
+revoke execute on function the_commons.enqueue_item() from public, anon, authenticated;
+create trigger placements_enqueue after insert on the_commons.placements
+  for each row when (new.label is not null) execute function the_commons.enqueue_item();
+
 -- Every five seconds: hand each queued filing to /api/gary. A message stays in the
 -- queue (invisible for two minutes, then retried) until its filing is no longer
 -- pending. After five tries it backs off to hourly; the filing stays pending —
@@ -172,6 +188,21 @@ begin
   select decrypted_secret into secret from vault.decrypted_secrets where name = 'the_commons_gary';
   if secret is null then return; end if;
   for m in select * from pgmq.read('the_commons_gary', 120, 10) loop
+    -- An item's name: read until it's been ruled on, or given up as unlabelled.
+    if m.message ? 'item' then
+      if m.read_ct > 20 or not exists (select 1 from the_commons.placements
+          where id = (m.message->>'item')::bigint and label_ok is null) then
+        perform pgmq.delete('the_commons_gary', m.msg_id);
+      else
+        perform net.http_post(
+          url := 'https://the-commons-eosin.vercel.app/api/gary',
+          body := jsonb_build_object('item', (m.message->>'item')::bigint),
+          headers := jsonb_build_object('Content-Type', 'application/json',
+                                        'Authorization', 'Bearer ' || secret),
+          timeout_milliseconds := 30000);
+      end if;
+      continue;
+    end if;
     select * into f from the_commons.filings where id = (m.message->>'id')::bigint;
     if f.id is null or f.status <> 'pending' then
       perform pgmq.delete('the_commons_gary', m.msg_id);

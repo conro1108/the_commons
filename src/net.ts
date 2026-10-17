@@ -99,20 +99,24 @@ export interface Placement {
   x: number;
   y: number;
   prop: string;
+  label?: string | null; // a written-in item's name
+  label_ok?: boolean | null; // Gary's read of it: null while he hasn't
 }
 
 export async function loadPlacements(): Promise<Placement[]> {
   const all: Placement[] = [];
   for (let from = 0; ; from += 1000) {
-    const { data, error } = await supabase.from("placements").select("id, filing, x, y, prop").order("id").range(from, from + 999);
+    const { data, error } = await supabase.from("placements").select(COLUMNS).order("id").range(from, from + 999);
     if (error) throw error;
     all.push(...data);
     if (data.length < 1000) return all;
   }
 }
 
-export async function place(filing: number, x: number, y: number, prop: string): Promise<Placement | string> {
-  const { data, error } = await supabase.from("placements").insert({ filing, x, y, prop }).select("id, filing, x, y, prop").single();
+const COLUMNS = "id, filing, x, y, prop, label, label_ok";
+
+export async function place(filing: number, x: number, y: number, prop: string, label?: string): Promise<Placement | string> {
+  const { data, error } = await supabase.from("placements").insert({ filing, x, y, prop, label }).select(COLUMNS).single();
   if (!error) return data;
   if (error.code === "23505") return "Something is already standing exactly there.";
   return said(error);

@@ -325,6 +325,7 @@ const HINTS: Record<string, string> = {
   ground: "Drag to paint the ground.",
   move: "Drag things about.",
   remove: "Click something to take it down.",
+  item: `${touch ? "Tap" : "Click"} to set it down. Gary reads the label before anyone else does.`,
 };
 
 function renderBuildInfo() {
@@ -343,6 +344,7 @@ function renderBuildInfo() {
     b.classList.toggle("on", b.dataset.tool === tool);
     b.classList.toggle("wanted", wants.has(b.dataset.tool!.slice(5)));
   }
+  $("palette").querySelector(".write-in")?.classList.toggle("on", tool.startsWith("item:"));
 }
 
 const icons = new Map<string, string>();
@@ -380,7 +382,15 @@ function renderPalette() {
     ...PALETTE.map(({ group: name, props }) => group(name, props
       .map((p) => button(`prop:${p}`, p, `<img src="${icon(p, () => propCanvas(p))}" width="${Math.min(propSize(p).w * 2, 40)}" alt="${p}">`))
       .join(""))),
+    // Anything not in the palette, by name: it goes down as a labelled parcel.
+    group("Write in", `<form class="write-in"><input maxlength="24" placeholder="a lobster" aria-label="something of your own" required><button>Use</button></form>`),
   ].join("");
+  const writeIn = $("palette").querySelector<HTMLFormElement>(".write-in")!;
+  writeIn.addEventListener("submit", (e) => {
+    e.preventDefault();
+    tool = `item:${writeIn.querySelector("input")!.value.trim()}`;
+    renderBuildInfo();
+  });
   for (const b of $("palette").querySelectorAll<HTMLButtonElement>("[data-tool]")) {
     b.addEventListener("click", () => {
       tool = b.dataset.tool!;
@@ -579,8 +589,9 @@ function focusScene(f: Filing): FocusScene {
     const moved = { ...drag.p, x: drag.x, y: drag.y };
     scene.built = ps.map((p) => (p.id === moved.id ? moved : p));
     scene.hover = { p: moved, colour: "#fff8e0" };
-  } else if (kind === "prop") {
-    scene.ghost = { id: 0, filing: f.id, prop: arg, ...propAt(arg, pointer.x, pointer.y) };
+  } else if (kind === "prop" || kind === "item") {
+    const prop = kind === "item" ? "item" : arg;
+    scene.ghost = { id: 0, filing: f.id, prop, ...propAt(prop, pointer.x, pointer.y) };
   } else if (kind === "ground") {
     scene.brush = brushAt(pointer.x, pointer.y);
   } else {
@@ -588,6 +599,26 @@ function focusScene(f: Filing): FocusScene {
     if (p) scene.hover = { p, colour: kind === "move" ? "#fff8e0" : "#e05c48" };
   }
   return scene;
+}
+
+/** Written-in items' names, hung over them up close. Unread or declined ones are just parcels, except to their builder. */
+function labelItems() {
+  const box = $("labels");
+  const f = focus;
+  const items = f && !zoom ? (built.get(f.id) ?? []).filter((p) => p.prop === "item") : [];
+  while (box.children.length < items.length) box.append(Object.assign(document.createElement("div"), { className: "item-label" }));
+  while (box.children.length > items.length) box.lastChild!.remove();
+  const { w } = propSize("item");
+  items.forEach((p, i) => {
+    const el = box.children[i] as HTMLElement;
+    const text = p.label_ok
+      ? p.label!
+      : f!.filer !== me ? "a parcel" : p.label_ok === false ? "a parcel (Gary declined the label)" : `${p.label} (Gary is reading it)`;
+    if (el.textContent !== text) el.textContent = text;
+    const at = drag?.p.id === p.id ? drag : p;
+    el.style.left = `${(focusView.ox + (FOCUS_PAD + at.x * ZOOM + w / 2) * focusView.s) / dpr}px`;
+    el.style.top = `${(focusView.oy + (FOCUS_PAD + at.y * ZOOM - 1) * focusView.s) / dpr}px`;
+  });
 }
 
 function problem(text: string) {
@@ -609,10 +640,10 @@ function takeDown(b: { x: number; y: number }) {
   unplace(p.id).then((ok) => ok || setPlacement(p));
 }
 
-async function placeAt(prop: string, b: { x: number; y: number }) {
+async function placeAt(prop: string, b: { x: number; y: number }, label?: string) {
   const f = focus!;
   const at = propAt(prop, b.x, b.y);
-  const result = await place(f.id, at.x, at.y, prop);
+  const result = await place(f.id, at.x, at.y, prop, label);
   if (typeof result === "string") return problem(result);
   problem("");
   land(result.id);
@@ -644,6 +675,7 @@ canvas.addEventListener("pointerdown", (e) => {
   if (e.button === 2 || kind === "remove") return takeDown(b);
   if (e.button !== 0) return;
   if (kind === "prop") return void placeAt(arg, b);
+  if (kind === "item") return void placeAt("item", b, tool.slice(5));
   canvas.setPointerCapture(e.pointerId);
   if (kind === "ground") {
     const before = focus.ground ?? EMPTY;
@@ -886,6 +918,7 @@ function frame(now: number) {
     fill(DIRT);
     viewport(focusView);
     drawFocus(ctx, focusScene(focus), now);
+    labelItems();
     canvas.style.cursor = mineInFocus() && pointer ? (tool === "move" ? (drag ? "grabbing" : "grab") : "crosshair") : "";
   } else {
     fill(HILLS);

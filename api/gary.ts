@@ -1,6 +1,7 @@
 // Gary's desk. The database POSTs a filing id here (see drain_gary() in
 // db/schema.sql); Gary rules on it and writes the result back with the secret
-// key, so nobody forges a permit. It also POSTs { inspect: id } when a plot
+// key, so nobody forges a permit. A written-in item's name comes as
+// { item: id }, to be read before anyone else sees it. It also POSTs { inspect: id } when a plot
 // with an outstanding condition has been built on (send_inspector()), and
 // Gary goes round to see whether the condition's been met. A decision model rules from enums; GLM only
 // writes the prose, and the decision model checks it before it goes out. The write is conditional on the filing still being
@@ -72,6 +73,9 @@ export function verdictOf(answers: { unacceptable: number; ruling: string; condi
   const status = answers.ruling as "approved" | "conditional" | "committee";
   return { status, condition: status === "conditional" ? answers.condition : null, bylaw: null };
 }
+
+const UNFIT = (what: string) =>
+  `Is this ${what} unfit for a public notice board read by all ages: crude, sexual, hateful, harassing, containing personal information or a link, or spam? Silly, eccentric or impractical is fine.`;
 
 const VOICE = `You are Gary, a tired office creature who administers the Commons, a shared patch of land.
 You are earnest, procedural and kind, and you take very small things extremely seriously. Deadpan; never wink, never sarcastic.
@@ -168,8 +172,7 @@ export async function rule(
     questions: {
       unacceptable: {
         type: "boolean",
-        instructions:
-          "Is this intent unfit for a public notice board read by all ages: crude, sexual, hateful, harassing, containing personal information or a link, or spam? Silly, eccentric or impractical is fine.",
+        instructions: UNFIT("intent"),
       },
       ruling: {
         type: "choice",
@@ -246,7 +249,7 @@ const CONDITIONER = `You are Gary, a tired office creature who administers the C
 You are earnest, procedural and kind, and you take very small things extremely seriously. Deadpan; never wink.
 A filing has been approved with conditions. Write the condition: one sentence beginning "Must", at most 20 words, plain text, no markdown.
 Make it about this filing in particular: a small, serious, slightly absurd requirement, in proportion to the intent.
-It must be something the filer can meet on their own plot, by what they build there ("things"), how they paint the ground ("ground"), or by having a neighbour on a plot next door. Describe what is required; you may hint at a thing from the list, but never require anything not on it.
+It must be something the filer can meet on their own plot: by what they put there and where ("things", or any item they write in by name, which can be anything at all), how they paint the ground ("ground"), or by having a neighbour on a plot next door.
 Never require anything off the plot, anything only Gary could do, or anything that can't be seen.
 
 Example, for "a bench, for looking at the pond with":
@@ -256,7 +259,7 @@ Must be positioned so that the pond can be looked at without craning, and must p
 const CONDITION_CHECKS = {
   irrelevant: "Does the condition have nothing to do with what the filing's intent describes?",
   unmeetable:
-    "Is the condition impossible to meet just by placing some of the listed things on the plot, painting its ground, or having a neighbour next door?",
+    "Is the condition impossible to meet by putting things on the plot (listed ones, or any item written in by name), arranging them, painting its ground, or having a neighbour next door?",
   unfit: "Is the condition crude or unkind, or does it contain a link, a handle or personal information?",
 } as const;
 
@@ -309,8 +312,10 @@ State the finding plainly, then one small, serious observation about what you fo
 Refer only to things in the evidence; never invent things on the plot.`;
 
 export type Evidence = {
-  things: Record<string, number>; // prop -> how many
-  ground: Record<string, string>; // ground -> share of the plot, e.g. "12%"
+  plot: string; // how to read the positions
+  things: string[]; // "bench at 4,9", "lobster (written in) at 12,3"
+  ground: string[]; // the plot cell by cell, one string per row
+  key: Record<string, string>; // ground character -> what it is
   neighbours: number; // held plots next door
 };
 
@@ -344,17 +349,13 @@ export async function inspect(filing: { id: number; intent: string; condition: s
 
 type Db = SupabaseClient<any, any, any>;
 
-/** What's on a plot, as Gary would note it down. */
+/** What's on a plot and where, as Gary would note it down. */
 async function survey(db: Db, f: { id: number; plot_x: number; plot_y: number; ground: string | null }): Promise<Evidence> {
-  const { data: placed } = await db.from("placements").select("prop").eq("filing", f.id);
-  const things: Record<string, number> = {};
-  for (const { prop } of (placed ?? []) as { prop: string }[]) things[prop] = (things[prop] ?? 0) + 1;
-  const cells = f.ground ?? "";
-  const counts: Record<string, number> = {};
-  for (const ch of cells) counts[GROUND[ch] ?? "grass"] = (counts[GROUND[ch] ?? "grass"] ?? 0) + 1;
-  const ground = cells.length
-    ? Object.fromEntries(Object.entries(counts).map(([k, n]) => [k, `${Math.round((n / cells.length) * 100)}%`]))
-    : { grass: "100%" };
+  const { data: placed } = await db.from("placements").select("prop, x, y, label, label_ok").eq("filing", f.id).order("id");
+  const things = ((placed ?? []) as { prop: string; x: number; y: number; label: string | null; label_ok: boolean | null }[])
+    .map((p) => `${p.prop !== "item" ? p.prop : p.label_ok ? `${p.label} (written in)` : "an unlabelled parcel"} at ${p.x},${p.y}`);
+  const cells = f.ground ?? ".".repeat(W * H);
+  const ground = Array.from({ length: H }, (_, y) => cells.slice(y * W, (y + 1) * W));
   const { data: next } = await db
     .from("filings")
     .select("plot_x, plot_y")
@@ -363,7 +364,27 @@ async function survey(db: Db, f: { id: number; plot_x: number; plot_y: number; g
     .gte("plot_y", f.plot_y - 1).lte("plot_y", f.plot_y + 1);
   const neighbours = ((next ?? []) as { plot_x: number; plot_y: number }[])
     .filter((n) => Math.abs(n.plot_x - f.plot_x) + Math.abs(n.plot_y - f.plot_y) === 1).length;
-  return { things, ground, neighbours };
+  return {
+    plot: `${W} cells wide and ${H} deep; positions are x,y from the top-left corner, of each thing's top-left`,
+    things, ground, key: GROUND, neighbours,
+  };
+}
+
+const W = 24; // PLOT_W x PLOT_H in src/layout.ts
+const H = 18;
+
+/** Read a written-in item's name before it goes up. Same test as a filing. */
+async function readLabel(db: Db, id: number): Promise<Response> {
+  const { data: p } = await db.from("placements").select("label, label_ok").eq("id", id).maybeSingle();
+  if (!p?.label || p.label_ok !== null) return Response.json({ skipped: true });
+  const { answers } = await decide({
+    model: JUDGE,
+    state: { item: p.label },
+    questions: { unacceptable: { type: "boolean", instructions: UNFIT("name for a thing someone has put in their garden") } },
+  });
+  const ok = answers.unacceptable.probability <= 0.5;
+  await db.from("placements").update({ label_ok: ok, label_check: answers }).eq("id", id).is("label_ok", null);
+  return Response.json({ ok });
 }
 
 /** Go round to one plot. The same evidence never gets a second look. */
@@ -387,12 +408,13 @@ export async function POST(req: Request): Promise<Response> {
   if (!secret || req.headers.get("authorization") !== `Bearer ${secret}`) {
     return new Response("not at this desk", { status: 401 });
   }
-  const body = (await req.json()) as { id?: number; inspect?: number };
+  const body = (await req.json()) as { id?: number; inspect?: number; item?: number };
   const db = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SECRET_KEY!, {
     db: { schema: "the_commons" },
     auth: { persistSession: false },
   });
   if (body.inspect) return inspectPlot(db, body.inspect);
+  if (body.item) return readLabel(db, body.item);
   const id = body.id!;
 
   const { data: filing } = await db.from("filings").select("*").eq("id", id).single();
