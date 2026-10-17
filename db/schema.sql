@@ -19,7 +19,7 @@ create schema the_commons;
 grant usage on schema the_commons to anon, authenticated, service_role;
 
 -- Filings: the whole map. A plot is held by its one filing in a held status;
--- denied and lost filings free it again. Clients insert only the three columns
+-- denied, refused and lost filings free it again. Clients insert only the three columns
 -- they get to choose; everything else is Gary's, written by /api/gary.
 create table the_commons.filings (
   id         bigint generated always as identity primary key, -- "Filing 0041"
@@ -28,7 +28,7 @@ create table the_commons.filings (
   plot_y     smallint not null check (plot_y between 0 and 4),
   intent     text not null check (length(btrim(intent)) between 3 and 120),
   status     text not null default 'pending'
-             check (status in ('pending', 'approved', 'conditional', 'committee', 'denied', 'lost')),
+             check (status in ('pending', 'approved', 'conditional', 'committee', 'denied', 'refused', 'lost')),
   condition  text,
   bylaw      smallint,
   permit     text,
@@ -44,16 +44,18 @@ create unique index filings_plot_held on the_commons.filings (plot_x, plot_y)
 create unique index filings_one_plot_each on the_commons.filings (filer)
   where status in ('pending', 'approved', 'conditional', 'committee');
 alter table the_commons.filings enable row level security;
--- Pending text hasn't been past Gary yet, and lost text never will be.
+-- Pending text hasn't been past Gary yet; refused text failed moderation; lost
+-- text never reached him. None of it is anyone's business but the filer's.
 create policy "rulings are public; your own filings are yours"
   on the_commons.filings for select
-  using (status not in ('pending', 'lost') or filer = auth.uid());
+  using (status not in ('pending', 'refused', 'lost') or filer = auth.uid());
 -- Gary processes three filings per resident per day — a limit on the AI only.
+-- A refusal uses up the whole day.
 create policy "file a claim"
   on the_commons.filings for insert to authenticated
   with check (
     filer = auth.uid()
-    and (select count(*) from the_commons.filings f
+    and (select coalesce(sum(case when f.status = 'refused' then 3 else 1 end), 0) from the_commons.filings f
          where f.filer = auth.uid() and f.filed_at > now() - interval '1 day') < 3
   );
 grant select on the_commons.filings to anon, authenticated;

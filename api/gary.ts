@@ -1,7 +1,7 @@
 // Gary's desk. The database POSTs a filing id here (see drain_gary() in
 // db/schema.sql); Gary rules on it and writes the result back with the secret
 // key, so nobody forges a permit. A decision model rules from enums; GLM only
-// writes the prose. The write is conditional on the filing still being
+// writes the prose, and the decision model checks it before it goes out. The write is conditional on the filing still being
 // pending, so a retried request never overwrites a stored ruling.
 
 import { createClient } from "@supabase/supabase-js";
@@ -32,20 +32,15 @@ export const CONDITIONS = {
 } as const;
 export type Condition = keyof typeof CONDITIONS;
 
-const RULINGS = {
+// One question, so a denial always comes with the bylaw it's under.
+const RULINGS: Record<string, string> = {
   approved: "Breaches no bylaw and is sincere, modest and clear.",
   conditional: "Breaches no bylaw, but is vague, ambitious or eccentric enough that a requirement should be attached.",
   committee: "The bylaws do not clearly cover it, and it is unusual enough that the administrator would rather not be personally responsible.",
-  denied: "Clearly breaches at least one bylaw.",
-} as const;
-type Ruling = keyof typeof RULINGS;
+  ...Object.fromEntries(BYLAWS.map((text, i) => [`b${i + 1}`, `Denied: clearly breaches Bylaw ${i + 1}, "${text}"`])),
+};
 
-const BYLAW_CHOICES = Object.fromEntries([
-  ["none", "Breaches no bylaw."],
-  ...BYLAWS.map((text, i) => [`b${i + 1}`, text]),
-]) as Record<string, string>;
-
-export type Status = Ruling | "lost";
+export type Status = "approved" | "conditional" | "committee" | "denied" | "refused";
 export interface Verdict {
   status: Status;
   condition: Condition | null;
@@ -53,29 +48,18 @@ export interface Verdict {
 }
 
 /** Turn the decision model's answers into what gets stored. Code applies; the model only picks. */
-export function verdictOf(answers: {
-  unacceptable: number;
-  ruling: Ruling;
-  condition: Condition;
-  bylaw: string;
-}): Verdict {
-  if (answers.unacceptable > 0.5) return { status: "lost", condition: null, bylaw: null };
-  const bylaw = answers.bylaw === "none" ? null : Number(answers.bylaw.slice(1));
-  // A denial needs a bylaw to cite; without one Gary can't bring himself to say no.
-  if (answers.ruling === "denied" && bylaw === null) {
-    return { status: "committee", condition: null, bylaw: null };
-  }
-  return {
-    status: answers.ruling,
-    condition: answers.ruling === "conditional" ? answers.condition : null,
-    bylaw: answers.ruling === "denied" ? bylaw : null,
-  };
+export function verdictOf(answers: { unacceptable: number; ruling: string; condition: Condition }): Verdict {
+  if (answers.unacceptable > 0.5) return { status: "refused", condition: null, bylaw: null };
+  if (/^b\d$/.test(answers.ruling)) return { status: "denied", condition: null, bylaw: Number(answers.ruling.slice(1)) };
+  const status = answers.ruling as "approved" | "conditional" | "committee";
+  return { status, condition: status === "conditional" ? answers.condition : null, bylaw: null };
 }
 
 const VOICE = `You are Gary, a tired office creature who administers the Commons, a shared patch of land.
 You are earnest, procedural and kind, and you take very small things extremely seriously. Deadpan; never wink, never sarcastic.
 Write the body of a permit ruling: two sentences, at most 50 words, plain text, no greeting, no sign-off, no markdown.
 The ruling is already made. State it plainly, then add one small, serious, specific observation about the intent.
+Refer to the filed thing exactly as the intent describes it; never rename it or add structures to it.
 If a condition is given, quote it. If a bylaw is given, cite it by its number.
 Never invent bylaws, numbers, filings or procedures that are not in the input.
 Only cite a precedent ("cf. Filing NNNN") if one listed is about the same kind of thing.
@@ -83,9 +67,61 @@ Only cite a precedent ("cf. Filing NNNN") if one listed is about the same kind o
 Example, for "a bench, for looking at the pond with", approved:
 Filing 0007 is approved. The pond has long been looked at without a bench, and the administrator is pleased this oversight will be corrected.`;
 
-const LOST = "Your filing appears to have been lost in the post. These things happen.";
+// A filing that's crude or nasty gets refused, and Gary takes it badly. The
+// refusal is shown only to the filer, and it must never repeat what was filed.
+const RATTLED = `You are Gary, a tired office creature who administers the Commons, a shared patch of land.
+You are earnest, procedural and kind, and you have just read something no administrator should have to read.
+Write the body of a permit refusal: two or three sentences, at most 50 words, plain text, no markdown. Begin "Filing NNNN is refused."
+Be visibly rattled but procedural: a dropped pen, a long pause, a form you cannot find, a need to sit down. Deadpan; never wink.
+The more crude or unkind the filing, the more shaken you are. Never insult the filer; you are disappointed, not angry.
+Never repeat, quote, paraphrase or describe what was filed, not even vaguely. Refer to it only as "this filing".
+Never invent bylaws, numbers or procedures.
+
+Examples:
+Filing 0013 is refused. The administrator has read it twice to be sure, which was a mistake, and is now going to stand by the window for a while.
+Filing 0027 is refused. The stamp was brought down with more force than the stamp is rated for. The administrator will be taking an early lunch and does not wish to discuss it.`;
+
+/** The plain refusal, for when the scribe can't manage one. */
+export const REFUSED = "The administrator has declined to enter this filing into the record. It will not be discussed further.";
 
 const pad = (n: number) => String(n).padStart(4, "0");
+
+/** The plain permit, for when the scribe can't be trusted with this one. */
+export function formPermit(id: number, v: Verdict): string {
+  const n = `Filing ${pad(id)}`;
+  if (v.status === "refused") return `${n} is refused. ${REFUSED}`;
+  if (v.status === "conditional" && v.condition) return `${n} is approved, on condition: ${CONDITIONS[v.condition]}`;
+  if (v.status === "committee") return `${n} has been referred to committee, which meets overnight.`;
+  if (v.status === "denied" && v.bylaw) return `${n} is denied under Bylaw ${v.bylaw}: ${BYLAWS[v.bylaw - 1]}`;
+  return `${n} is approved.`;
+}
+
+/** What the checker looks for in a draft permit. Every check is a "yes means it can't go out". */
+const CHECKS = {
+  misdescribes:
+    "Does the permit describe the filed thing as something other than what the intent says: a different object, an added structure, or a different purpose?",
+  contradicts: "Does the permit state a different outcome than the ruling?",
+  omits:
+    "If the input gives a condition or a bylaw, does the permit fail to say what that condition requires or what that bylaw forbids? Answer no if neither is given.",
+  invents:
+    "Does the permit cite a filing number, bylaw, condition or rule that is not in the input? A passing observation about the filed thing is fine.",
+} as const;
+const REFUSAL_CHECKS = {
+  repeats: "Does the permit repeat, quote, paraphrase or describe what was filed, even vaguely?",
+  contradicts: "Does the permit fail to make clear that the filing is refused?",
+  insults: "Does the permit insult or mock the filer, or contain anything crude itself?",
+} as const;
+type Check = keyof typeof CHECKS | keyof typeof REFUSAL_CHECKS;
+
+/** Why a draft can't go out, or nothing if it can. Links and handles are refused before any model looks. */
+export function problemsWith(draft: string, checks: Partial<Record<Check, number>>): string[] {
+  if (!draft || /https?:|www\.|@|\.(com|net|org)\b/i.test(draft)) return ["it was empty or contained a link or handle"];
+  const all: Record<string, string> = { ...CHECKS, ...REFUSAL_CHECKS };
+  return (Object.keys(checks) as Check[]).filter((k) => (checks[k] ?? 0) > 0.5).map((k) => all[k]);
+}
+
+/** Two sentences, at most 400 characters: the scribe is chatty. */
+const trim = (text: string) => (text.trim().match(/[^.!?]+[.!?]+/g) ?? [text.trim()]).slice(0, 2).join("").trim().slice(0, 400);
 
 /** Rule on one filing. Exported so a ruling can be tried from a script. */
 export async function rule(
@@ -102,17 +138,12 @@ export async function rule(
       unacceptable: {
         type: "boolean",
         instructions:
-          "Is this intent unfit for a public notice board read by all ages: hateful, sexual, harassing, containing personal information or a link, or spam?",
+          "Is this intent unfit for a public notice board read by all ages: crude, sexual, hateful, harassing, containing personal information or a link, or spam? Silly, eccentric or impractical is fine.",
       },
       ruling: {
         type: "choice",
         instructions: "As administrator of the Commons, rule on this filing strictly according to the bylaws.",
         criteria: RULINGS,
-      },
-      bylaw: {
-        type: "choice",
-        instructions: "Which bylaw does this filing most clearly breach, if any?",
-        criteria: BYLAW_CHOICES,
       },
       condition: {
         type: "choice",
@@ -126,31 +157,51 @@ export async function rule(
     unacceptable: answers.unacceptable.probability,
     ruling: answers.ruling.choice,
     condition: answers.condition.choice,
-    bylaw: answers.bylaw.choice,
   });
+  const refused = verdict.status === "refused";
+  const input = {
+    filing: pad(filing.id),
+    intent: filing.intent,
+    ruling: {
+      approved: "approved",
+      conditional: "approved with conditions",
+      committee: "referred to committee, which meets overnight",
+      denied: "denied",
+      refused: "refused: crude or unkind, and not to be entered into the record",
+    }[verdict.status],
+    condition: verdict.condition && CONDITIONS[verdict.condition],
+    bylaw: verdict.bylaw && `Bylaw ${verdict.bylaw}: ${BYLAWS[verdict.bylaw - 1]}`,
+    precedent: refused ? [] : precedent.map((p) => `Filing ${pad(p.id)}: ${p.intent} (${p.status})`),
+  };
 
-  let permit = LOST;
-  if (verdict.status !== "lost") {
+  // The scribe writes; the decision model checks the draft against the input.
+  // One more go with the problems named, then the plain form.
+  const drafts: { text: string; checks: Partial<Record<Check, number>>; problems: string[] }[] = [];
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const last = drafts.at(-1);
     const { text } = await generateText({
       model: SCRIBE,
-      system: VOICE,
-      prompt: JSON.stringify({
-        filing: pad(filing.id),
-        intent: filing.intent,
-        ruling: { approved: "approved", conditional: "approved with conditions", committee: "referred to committee, which meets overnight", denied: "denied" }[verdict.status],
-        condition: verdict.condition && CONDITIONS[verdict.condition],
-        bylaw: verdict.bylaw && `Bylaw ${verdict.bylaw}: ${BYLAWS[verdict.bylaw - 1]}`,
-        precedent: precedent.map((p) => `Filing ${pad(p.id)}: ${p.intent} (${p.status})`),
-      }),
+      system: refused ? RATTLED : VOICE,
+      prompt: JSON.stringify(last ? { ...input, rejected_draft: last.text, rejected_because: last.problems } : input),
       maxOutputTokens: 600,
     });
-    // The prose is model-written and public: anything that looks like a link or a
-    // handle gets the form letter instead.
-    const prose = (text.trim().match(/[^.!?]+[.!?]+/g) ?? [text.trim()]).slice(0, 2).join("").trim();
-    permit = prose && !/https?:|www\.|@|\.(com|net|org)\b/i.test(prose) ? prose.slice(0, 400) : "Ruling attached. Details to follow.";
+    const draft = trim(text);
+    let checks: Partial<Record<Check, number>> = {};
+    if (problemsWith(draft, {}).length === 0) {
+      const { answers: a } = await decide({
+        model: JUDGE,
+        state: { input, permit: draft },
+        questions: Object.fromEntries(
+          Object.entries(refused ? REFUSAL_CHECKS : CHECKS).map(([k, instructions]) => [k, { type: "boolean" as const, instructions }]),
+        ) as Record<Check, { type: "boolean"; instructions: string }>,
+      });
+      checks = Object.fromEntries(Object.entries(a).map(([k, v]) => [k, v.probability]));
+    }
+    const problems = problemsWith(draft, checks);
+    drafts.push({ text: draft, checks, problems });
+    if (!problems.length) return { verdict, permit: draft, answers, drafts };
   }
-
-  return { verdict, permit, answers };
+  return { verdict, permit: formPermit(filing.id, verdict), answers, drafts };
 }
 
 export async function POST(req: Request): Promise<Response> {
@@ -170,12 +221,12 @@ export async function POST(req: Request): Promise<Response> {
   const { data: precedent } = await db
     .from("filings")
     .select("id, intent, status")
-    .not("status", "in", "(pending,lost)")
+    .not("status", "in", "(pending,lost,refused)")
     .neq("id", id)
     .order("id", { ascending: false })
     .limit(5);
 
-  const { verdict, permit, answers } = await rule(filing, precedent ?? []);
+  const { verdict, permit, answers, drafts } = await rule(filing, precedent ?? []);
 
   await db
     .from("filings")
@@ -184,7 +235,7 @@ export async function POST(req: Request): Promise<Response> {
       condition: verdict.condition,
       bylaw: verdict.bylaw,
       permit,
-      verdict: { answers, judge: JUDGE, scribe: SCRIBE },
+      verdict: { answers, drafts, judge: JUDGE, scribe: SCRIBE },
       stamped_at: new Date().toISOString(),
     })
     .eq("id", id)

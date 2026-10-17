@@ -65,8 +65,16 @@ No fail states: spread is never damage, a dispute is never a loss.
   It never mutates state directly.
 - Every result is stored and never regenerated for the same input.
 - Players' text is public and sign-in is anonymous. Gary's stamp doubles as
-  moderation: an unacceptable filing is *lost in the post* (status `lost`,
-  shown to nobody else).
+  moderation: a crude or nasty filing is *refused* (status `refused`, shown to
+  nobody else, and it uses up the filer's day). Gary still writes back, visibly
+  rattled in proportion, and never repeats what was filed.
+  *Lost in the post* is only for filings Gary never received.
+- Gary's ruling is one choice — approve, conditional, committee, or denied
+  under a specific bylaw — so a denial always cites one. GLM writes the
+  permit; the decision model then checks the draft against the input
+  (misdescribes the filing? contradicts the ruling? invents things?). One
+  retry with the problems named, then a plain permit written by code. Every
+  draft and check is stored in `verdict`.
 - Budget is the Gateway's free $5/month — buying any credits forfeits it, so
   only models marked *Free AI Gateway Credit* (models page column; not in the
   public API) are usable. Gary's *judgment* — decision, condition, bylaw,

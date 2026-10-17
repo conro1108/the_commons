@@ -1,6 +1,6 @@
 import { BRUSHES, EMPTY, GROUND, paintGround } from "./content/ground.ts";
 import { PALETTE, propCanvas, propSize } from "./content/props.ts";
-import { CONDITIONS } from "./conditions.ts";
+import { BYLAWS, CONDITIONS } from "./rulebook.ts";
 import { BUILD_H, BUILD_W, MAP_H, MAP_W, MARGIN, PATH, PLOT_H, PLOT_W, ZOOM, plotAt, plotName, plotOrigin, type Plot } from "./layout.ts";
 import {
   HELD, fileClaim, handlesFor, loadFilings, loadPlacements, move, paint, place, signIn, supabase, unplace,
@@ -21,6 +21,7 @@ const STAMP: Record<Filing["status"], string> = {
   conditional: "Approved with conditions",
   committee: "Referred to committee",
   denied: "Denied",
+  refused: "Refused",
   lost: "Lost in the post",
 };
 
@@ -76,8 +77,9 @@ const mineInFocus = () => !!focus && focus.filer === me && !zoom;
 // --- panel ---------------------------------------------------------------
 
 function ruling(f: Filing) {
-  const extra = f.status === "denied" && f.bylaw ? ` (Bylaw ${f.bylaw})` : "";
-  return `<p class="stamp ${f.status}">${STAMP[f.status]}${extra}</p>
+  const bylaw = f.status === "denied" && f.bylaw ? BYLAWS[f.bylaw - 1] : null;
+  return `<p class="stamp ${f.status}">${STAMP[f.status]}${bylaw ? ` (Bylaw ${f.bylaw})` : ""}</p>
+    ${bylaw ? `<p class="meta"><b>Bylaw ${f.bylaw}.</b> ${bylaw}</p>` : ""}
     ${f.permit ? `<p class="permit">${esc(f.permit)}</p>` : ""}`;
 }
 
@@ -118,7 +120,7 @@ function renderMine() {
 
 function renderBoard() {
   const recent = [...filings.values()]
-    .filter((f) => f.stamped_at && f.status !== "lost")
+    .filter((f) => f.stamped_at && f.status !== "lost" && f.status !== "refused")
     .sort((a, b) => b.stamped_at!.localeCompare(a.stamped_at!))
     .slice(0, 8);
   $("board").innerHTML = recent.length

@@ -6,7 +6,7 @@ export const supabase = createClient(
   { db: { schema: "the_commons" } },
 );
 
-export type Status = "pending" | "approved" | "conditional" | "committee" | "denied" | "lost";
+export type Status = "pending" | "approved" | "conditional" | "committee" | "denied" | "refused" | "lost";
 
 export interface Filing {
   id: number;
@@ -23,7 +23,7 @@ export interface Filing {
   ground: string | null;
 }
 
-/** Statuses that hold a plot; denied and lost give it back. */
+/** Statuses that hold a plot; denied, refused and lost give it back. */
 export const HELD: Status[] = ["pending", "approved", "conditional", "committee"];
 
 export async function signIn(): Promise<string> {
@@ -58,7 +58,7 @@ export async function fileClaim(x: number, y: number, intent: string): Promise<s
   if (!error) return null;
   if (error.message.includes("filings_plot_held")) return "Another filing for this plot is already in Gary's in-tray.";
   if (error.message.includes("filings_one_plot_each")) return "Residents may hold one plot. You hold one.";
-  if (error.code === "42501") return "Gary has processed three of your filings today. The in-tray reopens tomorrow.";
+  if (error.code === "42501") return "Gary has processed all the filings he can take from you today. The in-tray reopens tomorrow.";
   if (error.code === "23514") return "Filings must be between 3 and 120 characters.";
   return error.message;
 }
