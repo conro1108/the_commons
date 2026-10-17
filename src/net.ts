@@ -62,6 +62,12 @@ export async function handlesFor(ids: string[]): Promise<Map<string, string>> {
   return handles;
 }
 
+/** Look a handle up again, after word that it changed. */
+export async function rehandle(id: string) {
+  handles.delete(id);
+  return handlesFor([id]);
+}
+
 /** Put a name on file: the handle every toy shows for you. */
 export async function rename(id: string, name: string): Promise<string | null> {
   const { error } = await supabase.schema("app").from("profiles").update({ handle: name, display_name: name }).eq("id", id);

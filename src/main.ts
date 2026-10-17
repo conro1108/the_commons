@@ -3,7 +3,7 @@ import { PALETTE, propCanvas, propSize } from "./content/props.ts";
 import { BYLAWS, CONDITIONS } from "./rulebook.ts";
 import { BUILD_H, BUILD_W, MAP_H, MAP_W, MARGIN, PATH, PLOT_H, PLOT_W, ZOOM, plotAt, plotName, plotOrigin, type Plot } from "./layout.ts";
 import {
-  HELD, fileClaim, handlesFor, loadFilings, loadPlacements, move, paint, place, rename, signIn, supabase, unplace,
+  HELD, fileClaim, handlesFor, loadFilings, loadPlacements, move, paint, place, rehandle, rename, signIn, supabase, unplace,
   type Filing, type Placement,
 } from "./net.ts";
 import type { RealtimeChannel } from "@supabase/supabase-js";
@@ -64,7 +64,6 @@ let drag: { p: Placement; dx: number; dy: number; x: number; y: number } | null 
 const pad = (n: number) => String(n).padStart(4, "0");
 const esc = (s: string) => s.replace(/[&<>"]/g, (c) => `&${{ "&": "amp", "<": "lt", ">": "gt", '"': "quot" }[c]};`);
 const touch = matchMedia("(pointer: coarse)").matches;
-const unnamed = () => handles.get(me)?.startsWith("player-") ?? false;
 const who = (id: string) => (id === me ? "you" : (handles.get(id) ?? "a resident"));
 const clamp = (v: number, lo: number, hi: number) => Math.min(Math.max(v, lo), Math.max(lo, hi));
 
@@ -124,12 +123,24 @@ function conditionHtml(f: Filing) {
     <p class="stamp ${met ? "approved" : "pending"}">${met ? "Met" : "Outstanding"}</p> <span class="meta">${note}</span></div>`;
 }
 
+// Your name on file, changed from the tag whenever you like; filings just use it.
+let renaming = false;
+let renameProblem = "";
+
 function renderTag() {
+  const typed = $("tag").querySelector<HTMLInputElement>("input[name=name]");
+  const draft = typed?.value;
+  const typing = document.activeElement === typed;
   const names = [...walkers.keys()].map(who).sort((a, b) => (a === "you" ? -1 : b === "you" ? 1 : a.localeCompare(b)));
   const held = [...filings.values()]
     .filter((f) => f.filer === me && (HELD.includes(f.status) || unread.has(f.id)))
     .sort((a, b) => a.plot_y - b.plot_y || a.plot_x - b.plot_x);
+  const mine = handles.get(me) ?? "…";
   $("tag").innerHTML = `<h1>The Commons</h1><p class="meta">Administered by Gary. Here: ${names.map(esc).join(", ")}</p>
+    ${renaming
+      ? `<form class="filed-by">On file as <input name="name" maxlength="24" required value="${esc(mine)}"><button>Sign</button></form>`
+      : `<p class="meta">On file as <button class="plot-link rename">${esc(mine)}</button></p>`}
+    ${renameProblem ? `<p class="problem">${esc(renameProblem)}</p>` : ""}
     ${held.length
       ? `<p class="yours"><span class="swatch" style="background:${colourOf(me)}"></span>${held
           .map((f) => `<button data-filing="${f.id}" class="plot-link ${unread.has(f.id) ? "pending" : f.status}">${plotName({ x: f.plot_x, y: f.plot_y })}</button>`)
@@ -138,6 +149,24 @@ function renderTag() {
   for (const b of $("tag").querySelectorAll<HTMLButtonElement>("[data-filing]")) {
     b.addEventListener("click", () => visit(filings.get(Number(b.dataset.filing))!));
   }
+  $("tag").querySelector(".rename")?.addEventListener("click", () => {
+    renaming = true;
+    renderTag();
+    $("tag").querySelector<HTMLInputElement>("input[name=name]")!.select();
+  });
+  const form = $("tag").querySelector("form");
+  if (!form) return;
+  const input = form.querySelector("input")!;
+  if (draft !== undefined) input.value = draft;
+  if (typing) input.focus();
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const name = input.value.trim();
+    renameProblem = name === mine ? "" : ((await rename(me, name)) ?? "");
+    renaming = !!renameProblem;
+    if (!renameProblem) channel?.send({ type: "broadcast", event: "renamed", payload: { id: me } });
+    renderAll();
+  });
 }
 
 /** Go to one of our plots: inside if it's granted, otherwise its card on the map. */
@@ -175,9 +204,6 @@ function renderCard() {
   const draft = card.querySelector("textarea");
   const typed = draft?.value ?? "";
   const typing = document.activeElement === draft;
-  const named = card.querySelector<HTMLInputElement>("input[name=name]");
-  const name = named?.value ?? "";
-  const naming = document.activeElement === named;
   const f = reply !== null ? filings.get(reply) : heldPlots().get(plotKey(plot));
   const fresh = thunk !== null && thunk === f?.id;
   thunk = null;
@@ -190,7 +216,6 @@ function renderCard() {
   } else {
     body = `<h2>Plot ${plotName(plot)}</h2><p>Unclaimed. State your intent for this plot in one breath.</p>
       <form><textarea rows="2" maxlength="120" placeholder="a bench, for looking at the pond with" required></textarea>
-      ${unnamed() ? `<label class="filed-by">Filed by <input name="name" maxlength="24" placeholder="${esc(handles.get(me)!)}"></label>` : ""}
       <button>Submit to Gary</button><p class="problem"></p></form>`;
   }
   const enter = f && BUILT.includes(f.status) && !unread.has(f.id) ? `<button class="enter">Step inside</button>` : "";
@@ -203,11 +228,6 @@ function renderCard() {
     const box = form.querySelector("textarea")!;
     box.value = typed;
     if (typing) box.focus();
-    const input = form.querySelector<HTMLInputElement>("input[name=name]");
-    if (input) {
-      input.value = name;
-      if (naming) input.focus();
-    }
     form.addEventListener("submit", (e) => {
       e.preventDefault();
       void claim(plot, form);
@@ -220,9 +240,7 @@ async function claim(plot: Plot, form: HTMLFormElement) {
   const box = form.querySelector("textarea")!;
   const button = form.querySelector("button")!;
   button.disabled = true;
-  // Still on file as player-1a2b3c4d: the first filing is the chance to say otherwise.
-  const name = form.querySelector<HTMLInputElement>("input[name=name]")?.value.trim();
-  const problem = (name && (await rename(me, name))) || (await fileClaim(plot.x, plot.y, box.value.trim()));
+  const problem = await fileClaim(plot.x, plot.y, box.value.trim());
   button.disabled = false;
   form.querySelector(".problem")!.textContent = problem ?? "";
   if (problem) return;
@@ -696,7 +714,11 @@ canvas.addEventListener("contextmenu", (e) => {
 
 window.addEventListener("keydown", (e) => {
   if (e.key !== "Escape") return;
-  if (reading !== null) {
+  if (renaming) {
+    renaming = false;
+    renameProblem = "";
+    renderTag();
+  } else if (reading !== null) {
     reading = null;
     renderBoard();
   } else if (!board.hidden) closeBoard();
@@ -935,6 +957,12 @@ async function start() {
       const w = walkers.get(id);
       if (!w || id === me || ![x, y, tx, ty].every(Number.isFinite)) return;
       Object.assign(w, { x, y, tx, ty });
+    })
+    // Someone renamed: ask the database what they're called now, rather than the message.
+    .on("broadcast", { event: "renamed" }, async ({ payload }) => {
+      if (typeof payload?.id !== "string" || !walkers.has(payload.id)) return;
+      handles = await rehandle(payload.id);
+      renderAll();
     })
     .on("presence", { event: "sync" }, async () => {
       const state = channel.presenceState<{ x: number; y: number }>();
