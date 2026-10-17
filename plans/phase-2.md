@@ -23,7 +23,7 @@ first; taste and style are expected to take most of the later effort.
 - [x] Prop registry (canon + commons), focus view, palette, place/take down
 - [x] Map miniature; realtime placements
 - [x] Checked in browser: claim → approved → build → miniature on map
-- [ ] Review (hash-out)
+- [x] Review (hash-out): 3 fixed (proto-name crash, paging order, failed take-down), startup gap accepted
 
 ## Later (taste)
 Ground tiles (paths, soil, water), drag to move, a zoom transition, more
