@@ -246,14 +246,7 @@ function fence(ctx: CanvasRenderingContext2D, left: number, top: number, w: numb
   ctx.fillRect(g1, top + h - 3, 1, 3);
 }
 
-function flag(ctx: CanvasRenderingContext2D, left: number, top: number) {
-  ctx.fillStyle = INK;
-  ctx.fillRect(left, top, 1, 6);
-  ctx.fillStyle = "#e06a7c";
-  ctx.fillRect(left + 1, top, 3, 2);
-}
-
-/** A pennant in the holder's colour on the corner post: yours fly yours. */
+/** A pennant in the holder's colour on the corner post: what a plot gets when it's granted. */
 function pennant(ctx: CanvasRenderingContext2D, left: number, top: number, colour: string) {
   ctx.fillStyle = INK;
   ctx.fillRect(left, top - 4, 1, 5);
@@ -264,9 +257,13 @@ function pennant(ctx: CanvasRenderingContext2D, left: number, top: number, colou
 
 function drawPlot(ctx: CanvasRenderingContext2D, f: Filing, built: Placement[] | undefined, mine: boolean) {
   drawPlotBody(ctx, f, built, mine);
-  if (mine) {
-    const { left, top } = plotOrigin({ x: f.plot_x, y: f.plot_y });
-    pennant(ctx, left, top, colourOf(f.filer));
+  const { left, top } = plotOrigin({ x: f.plot_x, y: f.plot_y });
+  if (!mine) return;
+  if (f.status !== "pending") pennant(ctx, left, top, colourOf(f.filer));
+  else {
+    // Not granted yet, so no pennant; our filing is pinned up with our colour.
+    ctx.fillStyle = colourOf(f.filer);
+    ctx.fillRect(left + PLOT_W / 2 - 1, top + PLOT_H / 2 - 5, 1, 1);
   }
 }
 
@@ -288,10 +285,8 @@ function drawPlotBody(ctx: CanvasRenderingContext2D, f: Filing, built: Placement
     return;
   }
   const empty = !built?.length && !f.ground;
-  if (empty) prop(ctx, "flowers", left + PLOT_W / 2 - 5, top + PLOT_H - 8);
-  else ctx.drawImage(mini(f, built ?? []), left, top);
+  if (!empty) ctx.drawImage(mini(f, built ?? []), left, top);
   fence(ctx, left, top, PLOT_W, PLOT_H, colour, 4);
-  if (f.status === "conditional" && empty) flag(ctx, left + 4, top + 4);
 }
 
 function outline(ctx: CanvasRenderingContext2D, p: Plot, colour: string) {
