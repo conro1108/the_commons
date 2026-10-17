@@ -27,7 +27,8 @@ const COMMONS: Record<string, PropDef> = {
   },
 };
 
-const PROPS: Record<string, PropDef> = { ...CANON, ...COMMONS };
+// No prototype, so a stored name like "constructor" is just unknown.
+const PROPS: Record<string, PropDef> = Object.assign(Object.create(null), CANON, COMMONS);
 
 /** The build palette, in order. Gary keeps the note. */
 export const BUILDABLE = [

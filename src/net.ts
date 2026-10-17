@@ -73,7 +73,7 @@ export interface Placement {
 export async function loadPlacements(): Promise<Placement[]> {
   const all: Placement[] = [];
   for (let from = 0; ; from += 1000) {
-    const { data, error } = await supabase.from("placements").select("id, filing, x, y, prop").range(from, from + 999);
+    const { data, error } = await supabase.from("placements").select("id, filing, x, y, prop").order("id").range(from, from + 999);
     if (error) throw error;
     all.push(...data);
     if (data.length < 1000) return all;
@@ -87,6 +87,7 @@ export async function place(filing: number, x: number, y: number, prop: string):
   return error.message;
 }
 
-export async function unplace(id: number): Promise<void> {
-  await supabase.from("placements").delete().eq("id", id);
+export async function unplace(id: number): Promise<boolean> {
+  const { error } = await supabase.from("placements").delete().eq("id", id);
+  return !error;
 }

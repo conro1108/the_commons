@@ -228,7 +228,7 @@ function takeDown(e: MouseEvent) {
   const p = placementAt(built.get(focus.id) ?? [], b.x, b.y);
   if (!p) return;
   removePlacement(p.id);
-  unplace(p.id);
+  unplace(p.id).then((ok) => ok || addPlacement(p));
 }
 
 async function buildClick(e: MouseEvent) {
