@@ -31,8 +31,9 @@ against a short list of absurd bylaws — and a denial frees the plot to refile.
 - [x] Vercel: project linked, env `SUPABASE_URL`, `SUPABASE_SECRET_KEY`, `GARY_SECRET`
 - [ ] **BLOCKED on user:** AI Gateway needs a credit card on the Vercel team
   (403 customer_verification_required). Until then filings fall to committee.
-- [ ] Client: canon props, map render, anonymous sign-in, filings + realtime
-- [ ] Client: avatars (broadcast) + who's here (presence)
-- [ ] Client: claim form, plot info panel, notice board
+- [x] Client: canon props, map render, anonymous sign-in, filings + realtime
+- [x] Client: avatars (broadcast) + who's here (presence)
+- [x] Client: claim form, plot info panel, notice board
+- [x] RLS probed: second plot rejected, forged status rejected
 - [ ] End-to-end on production: file → stamped within ~1 min
 - [ ] Review (hash-out), fixes, PLAN.md updated, pushed
