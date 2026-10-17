@@ -796,6 +796,25 @@ window.addEventListener("keydown", (e) => {
   else closeCard();
 });
 
+// Arrow keys walk you about the commons, for as long as they're held.
+const ARROWS: Record<string, [number, number]> = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] };
+const pressed = new Set<string>();
+function arrows(e: KeyboardEvent) {
+  if (!(e.key in ARROWS) || (e.target as HTMLElement).closest?.("input, textarea")) return;
+  e.preventDefault();
+  const was = pressed.size;
+  if (e.type === "keydown") pressed.add(e.key);
+  else pressed.delete(e.key);
+  const self = walkers.get(me);
+  if (!self || focus || zoom || (e.repeat && pressed.size === was)) return;
+  heading = null;
+  const [dx, dy] = [...pressed].reduce(([x, y], k) => [x + ARROWS[k][0], y + ARROWS[k][1]], [0, 0]);
+  walkTo(clamp(self.x + dx * 1000, MARGIN + 2, MAP_W - MARGIN - 2), clamp(self.y + dy * 1000, MARGIN + 7, MAP_H - MARGIN - 1));
+}
+window.addEventListener("keydown", arrows);
+window.addEventListener("keyup", arrows);
+window.addEventListener("blur", () => pressed.clear());
+
 /** The granted plot under a map point, if any: the ones you can step inside. */
 function enterableAt(e: MouseEvent) {
   const p = toArt(e, mapView);
