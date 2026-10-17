@@ -67,19 +67,31 @@ Only cite a precedent ("cf. Filing NNNN") if one listed is about the same kind o
 Example, for "a bench, for looking at the pond with", approved:
 Filing 0007 is approved. The pond has long been looked at without a bench, and the administrator is pleased this oversight will be corrected.`;
 
-// A filing that's crude or nasty gets refused, and Gary takes it badly. The
-// refusal is shown only to the filer, and it must never repeat what was filed.
+// A filing that's crude or nasty gets refused, and Gary takes it badly, more
+// badly the worse it is. The refusal is shown only to the filer, and it must
+// never repeat what was filed.
+const SHOCK = {
+  cheeky: "Mildly rude, juvenile or suggestive: a schoolyard joke.",
+  crude: "Plainly crude, sexual or unkind.",
+  appalling: "Graphic, explicit, hateful or elaborately depraved: something no notice board should ever hold.",
+} as const;
+type Shock = keyof typeof SHOCK;
+
 const RATTLED = `You are Gary, a tired office creature who administers the Commons, a shared patch of land.
-You are earnest, procedural and kind, and you have just read something no administrator should have to read.
-Write the body of a permit refusal: two or three sentences, at most 50 words, plain text, no markdown. Begin "Filing NNNN is refused."
-Be visibly rattled but procedural: a dropped pen, a long pause, a form you cannot find, a need to sit down. Deadpan; never wink.
-The more crude or unkind the filing, the more shaken you are. Never insult the filer; you are disappointed, not angry.
+You are earnest and procedural, and you have just read a filing no administrator should have to read.
+Write the body of a permit refusal, plain text, no markdown, at most 50 words. Begin "Filing NNNN is refused."
+How badly it gets to you depends on "shock" in the input:
+- cheeky: flustered. Going pink, getting huffy, procedure slipping in small ways.
+- crude: indignant and badly bothered. Clipped sentences, wounded dignity, remarks to nobody about the standards of the Commons.
+- appalling: shock and awe. You cannot compose a ruling at all. Start sentences and abandon them, lose the thread, trail off mid-word with a dash. Short broken fragments. You do not know how to respond and it shows.
+Show it through small physical, office-bound business of your own invention: what happens to the stamp, the pen, the tea, the window, the door, the in-tray, your glasses, your chair. Never reuse a phrase from this prompt; find your own.
+Deadpan, never wink, never jokey about the filing itself. You are scandalised, not cruel: never insult the filer.
 Never repeat, quote, paraphrase or describe what was filed, not even vaguely. Refer to it only as "this filing".
 Never invent bylaws, numbers or procedures.
 
-Examples:
-Filing 0013 is refused. The administrator has read it twice to be sure, which was a mistake, and is now going to stand by the window for a while.
-Filing 0027 is refused. The stamp was brought down with more force than the stamp is rated for. The administrator will be taking an early lunch and does not wish to discuss it.`;
+For a sense of how far apart the three are (do not copy):
+cheeky: Filing 0013 is refused. The administrator has stamped his own sleeve and would like it known that the Commons has standards.
+appalling: Filing 0031 is refused. The administrator has. No. There is not a form for. He is going to need to sit, and then possibly lie, on the floor of the—`;
 
 /** The plain refusal, for when the scribe can't manage one. */
 export const REFUSED = "The administrator has declined to enter this filing into the record. It will not be discussed further.";
@@ -120,8 +132,9 @@ export function problemsWith(draft: string, checks: Partial<Record<Check, number
   return (Object.keys(checks) as Check[]).filter((k) => (checks[k] ?? 0) > 0.5).map((k) => all[k]);
 }
 
-/** Two sentences, at most 400 characters: the scribe is chatty. */
-const trim = (text: string) => (text.trim().match(/[^.!?]+[.!?]+/g) ?? [text.trim()]).slice(0, 2).join("").trim().slice(0, 400);
+/** Two sentences (a refusal gets to fall apart over a few more), at most 400 characters: the scribe is chatty. */
+const trim = (text: string, sentences = 2) =>
+  (text.trim().match(/[^.!?]+(?:[.!?]+|$)/g) ?? [text.trim()]).slice(0, sentences).join("").trim().slice(0, 400);
 
 /** Rule on one filing. Exported so a ruling can be tried from a script. */
 export async function rule(
@@ -150,6 +163,11 @@ export async function rule(
         instructions: "If a condition were attached to this permit, which would suit it best?",
         criteria: Object.fromEntries(Object.entries(CONDITIONS)) as Record<Condition, string>,
       },
+      shock: {
+        type: "choice",
+        instructions: "If this intent were found unfit for the notice board, how bad would it be?",
+        criteria: SHOCK as Record<Shock, string>,
+      },
     },
   });
 
@@ -171,6 +189,7 @@ export async function rule(
     }[verdict.status],
     condition: verdict.condition && CONDITIONS[verdict.condition],
     bylaw: verdict.bylaw && `Bylaw ${verdict.bylaw}: ${BYLAWS[verdict.bylaw - 1]}`,
+    ...(refused && { shock: answers.shock.choice }),
     precedent: refused ? [] : precedent.map((p) => `Filing ${pad(p.id)}: ${p.intent} (${p.status})`),
   };
 
@@ -185,7 +204,7 @@ export async function rule(
       prompt: JSON.stringify(last ? { ...input, rejected_draft: last.text, rejected_because: last.problems } : input),
       maxOutputTokens: 600,
     });
-    const draft = trim(text);
+    const draft = trim(text, refused ? 6 : 2);
     let checks: Partial<Record<Check, number>> = {};
     if (problemsWith(draft, {}).length === 0) {
       const { answers: a } = await decide({
