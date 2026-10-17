@@ -152,6 +152,11 @@ questions).
 
 ## Open questions
 
+- **Drawn write-ins.** A written-in item is a labelled parcel, so "a beach
+  umbrella" reads as shade to the inspector but looks like a box. Follow-up:
+  draw a sprite for each approved label (generated once, stored, reused by
+  name) so the umbrella looks like one. Hold off until a generator can match
+  the canon art; a bad sprite is worse than a parcel.
 - The schema rebuild wipes the commons — and its cron jobs and queue, which
   live in the schema too. Fine while prototyping; once people live here, the
   commons is the one toy whose data isn't disposable. **Needed soon, before

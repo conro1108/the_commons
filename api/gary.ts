@@ -311,6 +311,13 @@ Write your inspection note: at most two sentences, at most 35 words, plain text,
 State the finding plainly, then one small, serious observation about what you found. If it is not met, say kindly what is still wanting.
 Refer only to things in the evidence; never invent things on the plot. Never give coordinates or cell numbers: say where things are in words (by the water, in the far corner).`;
 
+/** What the checker looks for in an inspection note. Every check is a "yes means it can't be used". */
+const REMARK_CHECKS = {
+  invents: "Does the remark mention anything on or about the plot (a thing, a kind of ground, sun, shade, a neighbour) that is not in the evidence, or claim something the evidence does not show?",
+  contradicts: "Does the remark fail to make the finding clear, or say the opposite of it (met when it is not, or not met when it is)?",
+  unfit: "Is the remark crude or unkind, or does it contain a link, a handle or personal information?",
+} as const;
+
 export type Evidence = {
   plot: string; // how to read the positions
   things: string[]; // "bench at 4,9", "lobster (written in) at 12,3"
@@ -334,17 +341,38 @@ export async function inspect(filing: { id: number; intent: string; condition: s
     },
   });
   const met = answers.met.probability > 0.5;
-  const { text } = await generateText({
-    model: SCRIBE,
-    system: INSPECTOR,
-    prompt: JSON.stringify({ ...state, met }),
-    maxOutputTokens: 400,
-  });
-  const draft = trim(text, 2);
-  const remark = problemsWith(draft, {}).length
-    ? met ? "Inspected. The condition is met, and the administrator is satisfied." : "Inspected. The condition remains outstanding. The administrator will come round again."
-    : draft;
-  return { met, remark, answers };
+  // The scribe writes; the decision model checks it saw only what's there. One more go, then the plain form.
+  const drafts: { text: string; checks: Record<string, number>; problems: string[] }[] = [];
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const last = drafts.at(-1);
+    const { text } = await generateText({
+      model: SCRIBE,
+      system: INSPECTOR,
+      prompt: JSON.stringify(last ? { ...state, met, rejected: last.text, rejected_because: last.problems } : { ...state, met }),
+      maxOutputTokens: 400,
+    });
+    const draft = trim(text, 2);
+    let problems = problemsWith(draft, {});
+    if (/\d\s*[,x×]\s*\d|\b(row|column|cell|tile)\s+\d/i.test(draft)) problems = ["it gave coordinates or cell numbers"];
+    let checks: Record<string, number> = {};
+    if (!problems.length) {
+      const { answers: a } = await decide({
+        model: JUDGE,
+        state: { ...state, met, remark: draft },
+        questions: Object.fromEntries(
+          Object.entries(REMARK_CHECKS).map(([k, instructions]) => [k, { type: "boolean" as const, instructions }]),
+        ) as Record<keyof typeof REMARK_CHECKS, { type: "boolean"; instructions: string }>,
+      });
+      checks = Object.fromEntries(Object.entries(a).map(([k, v]) => [k, v.probability]));
+      problems = Object.entries(checks).filter(([, p]) => p > 0.5).map(([k]) => REMARK_CHECKS[k as keyof typeof REMARK_CHECKS]);
+    }
+    drafts.push({ text: draft, checks, problems });
+    if (!problems.length) return { met, remark: draft, answers: { ...answers, drafts } };
+  }
+  const remark = met
+    ? "Inspected. The condition is met, and the administrator is satisfied."
+    : "Inspected. The condition remains outstanding. The administrator will come round again.";
+  return { met, remark, answers: { ...answers, drafts } };
 }
 
 type Db = SupabaseClient<any, any, any>;
