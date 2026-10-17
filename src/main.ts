@@ -139,6 +139,22 @@ function visit(f: Filing) {
   if (BUILT.includes(f.status)) enterFocus(f);
 }
 
+const opened = new Set<number>(); // notice board entries unfolded to the full exchange
+
+const when = (iso: string) => new Date(iso).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
+
+/** The whole exchange: what was asked, when, and everything Gary said back. */
+function exchange(f: Filing) {
+  const c = f.condition ? CONDITIONS[f.condition] : null;
+  return `<div class="exchange">
+    <p class="meta">Filing ${pad(f.id)}, Plot ${plotName({ x: f.plot_x, y: f.plot_y })}. Filed by ${esc(who(f.filer))}, ${when(f.filed_at)}.</p>
+    <p><q>${esc(f.intent)}</q></p>
+    ${ruling(f)}
+    ${c ? `<p><b>Condition.</b> ${c.text}</p>` : ""}
+    ${f.stamped_at ? `<p class="meta">Stamped ${when(f.stamped_at)}.</p>` : ""}
+  </div>`;
+}
+
 function renderBoard() {
   const recent = [...filings.values()]
     .filter((f) => f.stamped_at && f.status !== "lost" && f.status !== "refused")
@@ -146,10 +162,20 @@ function renderBoard() {
     .slice(0, 8);
   $("board").innerHTML = recent.length
     ? `<h2>Notice board</h2><ul>${recent
-        .map((f) => `<li><span class="stamp ${f.status}">${STAMP[f.status]}</span> ${plotName({ x: f.plot_x, y: f.plot_y })}
-          <q>${esc(f.intent)}</q> <span class="meta">— ${esc(who(f.filer))}</span></li>`)
+        .map((f) => `<li data-filing="${f.id}" class="${opened.has(f.id) ? "open" : ""}" title="Read the full ruling">
+          <span class="stamp ${f.status}">${STAMP[f.status]}</span> ${plotName({ x: f.plot_x, y: f.plot_y })}
+          <q>${esc(f.intent)}</q> <span class="meta">— ${esc(who(f.filer))}</span>
+          ${opened.has(f.id) ? exchange(f) : ""}</li>`)
         .join("")}</ul>`
     : `<h2>Notice board</h2><p class="hint">No rulings yet. Gary is ready.</p>`;
+  for (const li of $("board").querySelectorAll<HTMLElement>("[data-filing]")) {
+    li.addEventListener("click", (e) => {
+      if ((e.target as HTMLElement).closest(".exchange")) return; // reading, maybe selecting; not closing
+      const id = Number(li.dataset.filing);
+      if (!opened.delete(id)) opened.add(id);
+      renderBoard();
+    });
+  }
 }
 
 function renderHere() {
