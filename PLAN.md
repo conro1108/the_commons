@@ -126,14 +126,20 @@ later `petitions`/`signatures`. Users are `auth.users` ids; names come from
   Management API, if the tick ever leaves SQL.
 - Schema `the_commons` is created and exposed to PostgREST.
 
-## First slice
+## Phases
 
-1. Plot grid renders from the DB; Realtime shows others' changes live;
-   Presence shows who's here.
-2. Anonymous sign-in; file a claim; the full filing pipeline; Gary stamps it.
-3. Place a handful of canon props on your plot.
-4. One world-tick rule (hedges spread) on pg_cron.
-5. Nightly gazette with an OG front page.
+Each phase gets its own live checklist in `plans/phase-N.md`, written when the
+phase starts and kept current while building, so work can resume mid-phase.
+
+1. **Claim a spot** — done ([plans/phase-1.md](plans/phase-1.md)). Shared map,
+   avatars and who's here, file a claim, Gary rules on it.
+2. **Build it** — place canon props on your plot, free and uncapped.
+3. **The field changes while you're away** — the world tick: hedges spread,
+   paths wear in, the cast notices what got built.
+4. **The daily newspaper** — the nightly Gazette, with an OG front page.
+
+Later: petitions and the council, mail, public works, identity (see Open
+questions).
 
 ## Open questions
 
