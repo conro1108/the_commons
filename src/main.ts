@@ -48,6 +48,7 @@ let me = "";
 let hover: Plot | null = null;
 let selected: Plot | null = null;
 const letters: Letter[] = [];
+let heading: Filing | null = null; // walking to this plot's gate, to step inside on arrival
 // Our rulings still in the post: the panel keeps them sealed until the letter lands.
 const unread = new Set<number>();
 let thunk: number | null = null; // a ruling just opened, to stamp in the panel
@@ -105,7 +106,7 @@ function renderPlot() {
       : "";
     info.innerHTML = `${title}<p>Held by ${esc(who(f.filer))}: <q>${esc(f.intent)}</q></p>${ruling(f)}
       <p class="meta">Filing ${pad(f.id)}</p>${enter}`;
-    document.getElementById("enter")?.addEventListener("click", () => enterFocus(f));
+    document.getElementById("enter")?.addEventListener("click", () => walkInto(f));
     return;
   }
   info.innerHTML = `${title}<p>Unclaimed. State your intent for this plot in one breath.</p>`;
@@ -583,7 +584,7 @@ canvas.addEventListener("dblclick", (e) => {
   if (zoom) return;
   if (!focus) {
     const f = enterableAt(e);
-    if (f) enterFocus(f);
+    if (f) walkInto(f);
   } else if (!toBuild(e)) {
     leaveFocus();
   }
@@ -601,6 +602,7 @@ canvas.addEventListener("wheel", (e) => {
   const f = e.deltaY < 0 && enterableAt(e);
   if (!f) return;
   e.preventDefault();
+  heading = null;
   selected = { x: f.plot_x, y: f.plot_y };
   renderPlot();
   enterFocus(f);
@@ -608,17 +610,31 @@ canvas.addEventListener("wheel", (e) => {
 
 // --- the map ---------------------------------------------------------------
 
+/** Where you stand to go into a plot: on the path, just outside its gate. */
+function gate(plot: Plot) {
+  const { left, top } = plotOrigin(plot);
+  return { x: left + PLOT_W / 2, y: top + PLOT_H + PATH / 2 + 3 };
+}
+
+/** Walk to a plot's gate and step inside on arrival. */
+function walkInto(f: Filing) {
+  const self = walkers.get(me);
+  const g = gate({ x: f.plot_x, y: f.plot_y });
+  if (!self || Math.hypot(self.x - g.x, self.y - g.y) < 1) return enterFocus(f);
+  heading = f;
+  walkTo(g.x, g.y);
+}
+
 canvas.addEventListener("click", (e) => {
   if (focus || zoom) return;
+  heading = null;
   const p = toArt(e, mapView);
   const plot = plotAt(p.x, p.y);
   let tx = p.x;
   let ty = p.y;
   if (plot) {
     // Walk to the gate, as one does before filing.
-    const { left, top } = plotOrigin(plot);
-    tx = left + PLOT_W / 2;
-    ty = top + PLOT_H + PATH / 2 + 3;
+    ({ x: tx, y: ty } = gate(plot));
     if (plotKey(plot) !== (selected && plotKey(selected))) $("problem").textContent = "";
     selected = plot;
     renderPlot();
@@ -653,7 +669,11 @@ function step(dt: number) {
     w.x += (dx / dist) * move;
     w.y += (dy / dist) * move;
     // Arrived: tell presence where we are, for anyone who joins later.
-    if (w.id === me && move === dist) channel.track({ x: w.x, y: w.y });
+    if (w.id === me && move === dist) {
+      channel.track({ x: w.x, y: w.y });
+      if (heading && !focus && !zoom) enterFocus(heading);
+      heading = null;
+    }
   }
 }
 
