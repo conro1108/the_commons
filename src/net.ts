@@ -1,10 +1,20 @@
-import { createClient } from "@supabase/supabase-js";
+import { createClient, type PostgrestError } from "@supabase/supabase-js";
 
 export const supabase = createClient(
   import.meta.env.VITE_SUPABASE_URL,
   import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
   { db: { schema: "the_commons" } },
 );
+
+// A session that can't be refreshed (a tab left asleep too long) is dropped,
+// and every write after it would be refused. Start over as someone new instead.
+supabase.auth.onAuthStateChange((event) => {
+  if (event === "SIGNED_OUT") location.reload();
+});
+
+/** A write's error, in words; "permission denied" means the session lapsed. */
+const said = (error: PostgrestError) =>
+  error.code === "42501" ? "Gary can't find your papers. Reload the page and he'll issue new ones." : error.message;
 
 export type Status = "pending" | "approved" | "conditional" | "committee" | "denied" | "refused" | "lost";
 
@@ -52,13 +62,24 @@ export async function handlesFor(ids: string[]): Promise<Map<string, string>> {
   return handles;
 }
 
+/** Put a name on file: the handle every toy shows for you. */
+export async function rename(id: string, name: string): Promise<string | null> {
+  const { error } = await supabase.schema("app").from("profiles").update({ handle: name, display_name: name }).eq("id", id);
+  if (!error) {
+    handles.set(id, name);
+    return null;
+  }
+  if (error.code === "23505") return "That name is already on file for someone else.";
+  return said(error);
+}
+
 /** File a claim; returns a clerk's explanation if the in-tray says no. */
 export async function fileClaim(x: number, y: number, intent: string): Promise<string | null> {
   const { error } = await supabase.from("filings").insert({ plot_x: x, plot_y: y, intent });
   if (!error) return null;
   if (error.message.includes("filings_plot_held")) return "Another filing for this plot is already in Gary's in-tray.";
   if (error.code === "23514") return "Filings must be between 3 and 120 characters.";
-  return error.message;
+  return said(error);
 }
 
 export interface Placement {
@@ -83,7 +104,7 @@ export async function place(filing: number, x: number, y: number, prop: string):
   const { data, error } = await supabase.from("placements").insert({ filing, x, y, prop }).select("id, filing, x, y, prop").single();
   if (!error) return data;
   if (error.code === "23505") return "Something is already standing exactly there.";
-  return error.message;
+  return said(error);
 }
 
 export async function unplace(id: number): Promise<boolean> {
@@ -95,10 +116,10 @@ export async function move(id: number, x: number, y: number): Promise<string | n
   const { error } = await supabase.from("placements").update({ x, y }).eq("id", id);
   if (!error) return null;
   if (error.code === "23505") return "Something is already standing exactly there.";
-  return error.message;
+  return said(error);
 }
 
 export async function paint(filing: number, ground: string): Promise<string | null> {
   const { error } = await supabase.from("filings").update({ ground }).eq("id", filing);
-  return error?.message ?? null;
+  return error && said(error);
 }

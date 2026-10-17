@@ -3,7 +3,7 @@ import { PALETTE, propCanvas, propSize } from "./content/props.ts";
 import { BYLAWS, CONDITIONS } from "./rulebook.ts";
 import { BUILD_H, BUILD_W, MAP_H, MAP_W, MARGIN, PATH, PLOT_H, PLOT_W, ZOOM, plotAt, plotName, plotOrigin, type Plot } from "./layout.ts";
 import {
-  HELD, fileClaim, handlesFor, loadFilings, loadPlacements, move, paint, place, signIn, supabase, unplace,
+  HELD, fileClaim, handlesFor, loadFilings, loadPlacements, move, paint, place, rename, signIn, supabase, unplace,
   type Filing, type Placement,
 } from "./net.ts";
 import type { RealtimeChannel } from "@supabase/supabase-js";
@@ -63,6 +63,7 @@ let drag: { p: Placement; dx: number; dy: number; x: number; y: number } | null 
 
 const pad = (n: number) => String(n).padStart(4, "0");
 const esc = (s: string) => s.replace(/[&<>"]/g, (c) => `&${{ "&": "amp", "<": "lt", ">": "gt", '"': "quot" }[c]};`);
+const unnamed = () => handles.get(me)?.startsWith("player-") ?? false;
 const who = (id: string) => (id === me ? "you" : (handles.get(id) ?? "a resident"));
 const clamp = (v: number, lo: number, hi: number) => Math.min(Math.max(v, lo), Math.max(lo, hi));
 
@@ -173,6 +174,9 @@ function renderCard() {
   const draft = card.querySelector("textarea");
   const typed = draft?.value ?? "";
   const typing = document.activeElement === draft;
+  const named = card.querySelector<HTMLInputElement>("input[name=name]");
+  const name = named?.value ?? "";
+  const naming = document.activeElement === named;
   const f = reply !== null ? filings.get(reply) : heldPlots().get(plotKey(plot));
   const fresh = thunk !== null && thunk === f?.id;
   thunk = null;
@@ -185,6 +189,7 @@ function renderCard() {
   } else {
     body = `<h2>Plot ${plotName(plot)}</h2><p>Unclaimed. State your intent for this plot in one breath.</p>
       <form><textarea rows="2" maxlength="120" placeholder="a bench, for looking at the pond with" required></textarea>
+      ${unnamed() ? `<label class="filed-by">Filed by <input name="name" maxlength="24" placeholder="${esc(handles.get(me)!)}"></label>` : ""}
       <button>Submit to Gary</button><p class="problem"></p></form>`;
   }
   const enter = f && BUILT.includes(f.status) && !unread.has(f.id) ? `<button class="enter">Step inside</button>` : "";
@@ -197,6 +202,11 @@ function renderCard() {
     const box = form.querySelector("textarea")!;
     box.value = typed;
     if (typing) box.focus();
+    const input = form.querySelector<HTMLInputElement>("input[name=name]");
+    if (input) {
+      input.value = name;
+      if (naming) input.focus();
+    }
     form.addEventListener("submit", (e) => {
       e.preventDefault();
       void claim(plot, form);
@@ -209,7 +219,9 @@ async function claim(plot: Plot, form: HTMLFormElement) {
   const box = form.querySelector("textarea")!;
   const button = form.querySelector("button")!;
   button.disabled = true;
-  const problem = await fileClaim(plot.x, plot.y, box.value.trim());
+  // Still on file as player-1a2b3c4d: the first filing is the chance to say otherwise.
+  const name = form.querySelector<HTMLInputElement>("input[name=name]")?.value.trim();
+  const problem = (name && (await rename(me, name))) || (await fileClaim(plot.x, plot.y, box.value.trim()));
   button.disabled = false;
   form.querySelector(".problem")!.textContent = problem ?? "";
   if (problem) return;
