@@ -1,14 +1,14 @@
 // Gary's desk. The database POSTs a filing id here (see drain_gary() in
 // db/schema.sql); Gary rules on it and writes the result back with the secret
-// key, so nobody forges a permit. Jev makes the ruling from enums; GLM only
+// key, so nobody forges a permit. A decision model rules from enums; GLM only
 // writes the prose. The write is conditional on the filing still being
 // pending, so a retried request never overwrites a stored ruling.
 
 import { createClient } from "@supabase/supabase-js";
 import { experimental_decide as decide, generateText } from "ai";
 
-const JUDGE = "typesafe-ai/jev";
-const SCRIBE = "zai/glm-5.3-flash";
+const JUDGE = "perplexity/pplx-decider-v1.2";
+const SCRIBE = "zai/glm-4.7-flash";
 
 export const BYLAWS = [
   "Structures shall be modest: nothing taller than a reasonably tall goose.",
@@ -52,7 +52,7 @@ export interface Verdict {
   bylaw: number | null;
 }
 
-/** Turn Jev's answers into what gets stored. Code applies; the model only picks. */
+/** Turn the decision model's answers into what gets stored. Code applies; the model only picks. */
 export function verdictOf(answers: {
   unacceptable: number;
   ruling: Ruling;
@@ -73,10 +73,15 @@ export function verdictOf(answers: {
 }
 
 const VOICE = `You are Gary, a tired office creature who administers the Commons, a shared patch of land.
-You are earnest, procedural and kind, and you take very small things extremely seriously. Deadpan; never wink.
-Write the body of a permit ruling: two or three sentences, at most 60 words, plain text, no greeting, no sign-off, no markdown.
-The ruling has already been made; state it, do not change it. If a condition or bylaw is given, mention it.
-You may cite one precedent as "cf. Filing NNNN" only if one listed is genuinely similar.`;
+You are earnest, procedural and kind, and you take very small things extremely seriously. Deadpan; never wink, never sarcastic.
+Write the body of a permit ruling: two sentences, at most 50 words, plain text, no greeting, no sign-off, no markdown.
+The ruling is already made. State it plainly, then add one small, serious, specific observation about the intent.
+If a condition is given, quote it. If a bylaw is given, cite it by its number.
+Never invent bylaws, numbers, filings or procedures that are not in the input.
+Only cite a precedent ("cf. Filing NNNN") if one listed is about the same kind of thing.
+
+Example, for "a bench, for looking at the pond with", approved:
+Filing 0007 is approved. The pond has long been looked at without a bench, and the administrator is pleased this oversight will be corrected.`;
 
 const LOST = "Your filing appears to have been lost in the post. These things happen.";
 
@@ -139,14 +144,18 @@ export async function rule(
       }),
       maxOutputTokens: 600,
     });
-    permit = text.trim() || "Ruling attached. Details to follow.";
+    // The prose is model-written and public: anything that looks like a link or a
+    // handle gets the form letter instead.
+    const prose = (text.trim().match(/[^.!?]+[.!?]+/g) ?? [text.trim()]).slice(0, 2).join("").trim();
+    permit = prose && !/https?:|www\.|@|\.(com|net|org)\b/i.test(prose) ? prose.slice(0, 400) : "Ruling attached. Details to follow.";
   }
 
   return { verdict, permit, answers };
 }
 
 export async function POST(req: Request): Promise<Response> {
-  if (req.headers.get("authorization") !== `Bearer ${process.env.GARY_SECRET}`) {
+  const secret = process.env.GARY_SECRET;
+  if (!secret || req.headers.get("authorization") !== `Bearer ${secret}`) {
     return new Response("not at this desk", { status: 401 });
   }
   const { id } = (await req.json()) as { id: number };

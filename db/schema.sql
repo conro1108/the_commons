@@ -69,12 +69,15 @@ begin
   perform pgmq.send('the_commons_gary', jsonb_build_object('id', new.id));
   return new;
 end $$;
+revoke execute on function the_commons.enqueue_filing() from public, anon, authenticated;
 create trigger filings_enqueue after insert on the_commons.filings
   for each row execute function the_commons.enqueue_filing();
 
 -- Every minute: hand each queued filing to /api/gary. A message stays in the
 -- queue (invisible for two minutes, then retried) until its filing is no longer
--- pending; one Gary can't get to after five tries goes to committee instead.
+-- pending. After five tries it backs off to hourly; the filing stays pending —
+-- and so unpublished — until Gary has actually read it. One he still can't read
+-- after two days is lost in the post, which is private and frees the plot.
 create function the_commons.drain_gary() returns void
 language plpgsql security definer set search_path = '' as $$
 declare
@@ -88,13 +91,14 @@ begin
     select * into f from the_commons.filings where id = (m.message->>'id')::bigint;
     if f.id is null or f.status <> 'pending' then
       perform pgmq.delete('the_commons_gary', m.msg_id);
-    elsif m.read_ct > 5 then
+    elsif m.read_ct > 53 then
       update the_commons.filings
-        set status = 'committee', stamped_at = now(),
-            permit = 'This filing has been referred to committee, which will convene overnight.'
+        set status = 'lost', stamped_at = now(),
+            permit = 'Your filing appears to have been lost in the post. These things happen.'
         where id = f.id;
       perform pgmq.delete('the_commons_gary', m.msg_id);
     else
+      if m.read_ct > 5 then perform pgmq.set_vt('the_commons_gary', m.msg_id, 3600); end if;
       perform net.http_post(
         url := 'https://the-commons-eosin.vercel.app/api/gary',
         body := jsonb_build_object('id', f.id),
@@ -104,13 +108,14 @@ begin
     end if;
   end loop;
 end $$;
+revoke execute on function the_commons.drain_gary() from public, anon, authenticated;
 
 select cron.unschedule(jobname) from cron.job where jobname like 'the_commons_%';
 select cron.schedule('the_commons_gary', '* * * * *', 'select the_commons.drain_gary()');
 -- The committee meets at 4am and has never once said no.
 select cron.schedule('the_commons_committee', '0 4 * * *', $$
   update the_commons.filings
-    set status = 'approved',
+    set status = 'approved', stamped_at = now(),
         permit = coalesce(permit || ' ', '') || 'The committee has met, and approves.'
     where status = 'committee'
 $$);

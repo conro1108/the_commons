@@ -22,10 +22,11 @@ tool for**, and no job is done twice. See the infra map.
    for looking at the pond with"). It goes into Gary's in-tray and comes back
    a minute or so later — the delay is the joke, and it's also the queue.
    Gary returns a decision from a fixed set — *approved*, *approved with
-   conditions*, *referred to committee* — plus the permit's prose, maybe a
+   conditions*, *referred to committee*, *denied* — plus the permit's prose, maybe a
    condition from an enum ("must face north", "must include a small flag"),
-   and citations of precedent ("cf. Filing 0041, also a bench"). Nothing is
-   ever denied; committee resolves overnight.
+   and citations of precedent ("cf. Filing 0041, also a bench"). Denials cite
+   one of a few absurd bylaws (no moats; no livestock larger than a goat) and
+   free the plot to refile; committee resolves overnight.
 2. **Build on your plot.** Canon props and tiles, free and uncapped.
 3. **The commons reacts.** The world is server-simulated, so what one player
    does changes what everyone comes back to. See below — this is the
@@ -66,12 +67,14 @@ No fail states: spread is never damage, a dispute is never a loss.
 - Players' text is public and sign-in is anonymous. Gary's stamp doubles as
   moderation: an unacceptable filing is *lost in the post* (status `lost`,
   shown to nobody else).
-- Budget is $5 of AI Gateway credit. Gary's *judgment* — decision, condition,
-  lost-in-the-post — is **Jev** (`typesafe-ai/jev`), an evaluation model that
-  answers typed questions with choices and probabilities, at $0.042/M input
-  and free output: effectively free. Jev writes no prose, so the permit text
-  is `zai/glm-5.3-flash` ($0.15/M in, $0.50/M out). The gazette and
-  council get the good one. Gary processes three filings per resident per day
+- Budget is the Gateway's free $5/month — buying any credits forfeits it, so
+  only models marked *Free AI Gateway Credit* (models page column; not in the
+  public API) are usable. Gary's *judgment* — decision, condition, bylaw,
+  lost-in-the-post — is a decision model (`perplexity/pplx-decider-v1.2`,
+  AI SDK `experimental_decide`: typed questions in, choices and probabilities
+  out). It writes no prose, so the permit is `zai/glm-4.7-flash`. Jev
+  (`typesafe-ai/jev`) was the first pick but isn't free-tier. The gazette and
+  council get the best free-tier model. Gary processes three filings per resident per day
   — a limit on the AI, never on building. Near the budget, an Edge Config
   flag puts **Gary on leave**: stamps go canned until it's flipped back.
 
@@ -98,7 +101,7 @@ No fail states: spread is never damage, a dispute is never a loss.
 
 The filing pipeline is the spine, and touches most of the map:
 client inserts `filings` row → trigger enqueues (pgmq) → pg_cron drains →
-pg_net POSTs `/api/gary` → AI Gateway (Jev decides, LLM writes the permit, embedding) → write-back with
+pg_net POSTs `/api/gary` → AI Gateway (decision model rules, GLM writes the permit) → write-back with
 the secret key → Realtime delivers the stamp to the filer.
 
 Client: Vite + TypeScript + canvas, no framework — same as the siblings. Pixel

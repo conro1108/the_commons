@@ -14,10 +14,12 @@ against a short list of absurd bylaws — and a denial frees the plot to refile.
   only `plot_x, plot_y, intent` (column grant); 3 filings/day per resident.
 - Pipeline: insert → trigger `pgmq.send` → pg_cron every minute
   `drain_gary()` → `net.http_post` to `/api/gary` with Vault secret
-  `the_commons_gary` → Jev (`typesafe-ai/jev`, `experimental_decide`) rules,
-  GLM (`zai/glm-5.3-flash`) writes the permit → conditional update
+  `the_commons_gary` → `perplexity/pplx-decider-v1.2` (`experimental_decide`)
+  rules, `zai/glm-4.7-flash` writes the permit (both on the Gateway free tier;
+  Jev isn't, and buying credits forfeits the free $5/mo) → conditional update
   `where status = 'pending'` → Realtime. Drain deletes queue messages whose
-  filing is no longer pending; >5 tries → committee.
+  filing is no longer pending; >5 tries → hourly; >53 → lost (private).
+  Never published until a model has ruled.
 - Committee resolves at 04:00 via pg_cron (always approves).
 - Names: `app.profiles.handle` (auto-created for anonymous users).
 - Avatars: Broadcast positions on channel `the_commons:field`; Presence for
@@ -29,11 +31,13 @@ against a short list of absurd bylaws — and a denial frees the plot to refile.
 - [x] `api/gary.ts`: Jev ruling + GLM permit + write-back; test for verdict mapping
   (`rule()` is exported; try it locally with `.env.local`'s OIDC token)
 - [x] Vercel: project linked, env `SUPABASE_URL`, `SUPABASE_SECRET_KEY`, `GARY_SECRET`
-- [ ] **BLOCKED on user:** AI Gateway needs a credit card on the Vercel team
+- [x] Gateway: card added; switched off Jev to free-tier models
   (403 customer_verification_required). Until then filings fall to committee.
 - [x] Client: canon props, map render, anonymous sign-in, filings + realtime
 - [x] Client: avatars (broadcast) + who's here (presence)
 - [x] Client: claim form, plot info panel, notice board
 - [x] RLS probed: second plot rejected, forged status rejected
 - [ ] End-to-end on production: file → stamped within ~1 min
-- [ ] Review (hash-out), fixes, PLAN.md updated, pushed
+- [x] Review (hash-out): 7 fixed, #3 (global pending cap) dropped by agreement,
+  poison-filing fallback added
+- [x] PLAN.md updated, pushed

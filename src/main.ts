@@ -208,13 +208,16 @@ async function start() {
   channel = supabase.channel("the_commons:field", { config: { presence: { key: me } } });
   channel
     .on("broadcast", { event: "walk" }, ({ payload }) => {
-      const w = walkers.get(payload.id);
-      if (w) Object.assign(w, payload);
-      else walkers.set(payload.id, payload);
+      // Broadcasts aren't tied to their sender: only move residents presence
+      // vouches for, never ourselves, and only by numbers.
+      const { id, x, y, tx, ty } = payload;
+      const w = walkers.get(id);
+      if (!w || id === me || ![x, y, tx, ty].every(Number.isFinite)) return;
+      Object.assign(w, { x, y, tx, ty });
     })
     .on("presence", { event: "sync" }, async () => {
       const state = channel.presenceState<{ x: number; y: number }>();
-      for (const id of walkers.keys()) if (!(id in state)) walkers.delete(id);
+      for (const id of walkers.keys()) if (id !== me && !(id in state)) walkers.delete(id);
       for (const [id, [p]] of Object.entries(state)) {
         if (!walkers.has(id)) walkers.set(id, { id, x: p.x, y: p.y, tx: p.x, ty: p.y });
       }
