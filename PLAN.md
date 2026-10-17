@@ -133,7 +133,8 @@ phase starts and kept current while building, so work can resume mid-phase.
 
 1. **Claim a spot** — done ([plans/phase-1.md](plans/phase-1.md)). Shared map,
    avatars and who's here, file a claim, Gary rules on it.
-2. **Build it** — place canon props on your plot, free and uncapped.
+2. **Build it** — in progress ([plans/phase-2.md](plans/phase-2.md)). Place
+   props on your plot, free and uncapped, in a focused view of the plot.
 3. **The field changes while you're away** — the world tick: hedges spread,
    paths wear in, the cast notices what got built.
 4. **The daily newspaper** — the nightly Gazette, with an OG front page.

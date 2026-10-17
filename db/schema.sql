@@ -58,6 +58,36 @@ grant insert (plot_x, plot_y, intent) on the_commons.filings to authenticated;
 grant all on the_commons.filings to service_role;
 alter publication supabase_realtime add table the_commons.filings;
 
+-- Placements: what's been built. Only on a plot you hold outright (approved or
+-- conditional) — building needs no paperwork, which Gary finds difficult. x/y
+-- are build cells, one per plot pixel on the map (PLOT_W x PLOT_H in
+-- src/layout.ts). One prop anchored per cell; uncapped otherwise. The prop is
+-- free text so new art is a client change; RLS can't judge art, only ownership.
+create table the_commons.placements (
+  id        bigint generated always as identity primary key,
+  filing    bigint not null references the_commons.filings on delete cascade,
+  x         smallint not null check (x between 0 and 23),
+  y         smallint not null check (y between 0 and 17),
+  prop      text not null check (prop ~ '^[a-z_]{1,24}$'),
+  placed_at timestamptz not null default now(),
+  unique (filing, x, y)
+);
+alter table the_commons.placements enable row level security;
+create policy "placements are public"
+  on the_commons.placements for select using (true);
+create policy "build on your own granted plot"
+  on the_commons.placements for insert to authenticated
+  with check (exists (select 1 from the_commons.filings f
+    where f.id = filing and f.filer = auth.uid() and f.status in ('approved', 'conditional')));
+create policy "take down what's on your plot"
+  on the_commons.placements for delete to authenticated
+  using (exists (select 1 from the_commons.filings f
+    where f.id = filing and f.filer = auth.uid()));
+grant select on the_commons.placements to anon, authenticated;
+grant insert (filing, x, y, prop), delete on the_commons.placements to authenticated;
+grant all on the_commons.placements to service_role;
+alter publication supabase_realtime add table the_commons.placements;
+
 -- Gary's in-tray.
 select pgmq.drop_queue('the_commons_gary')
   where exists (select 1 from pgmq.list_queues() where queue_name = 'the_commons_gary');

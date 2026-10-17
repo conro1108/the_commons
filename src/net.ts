@@ -61,3 +61,32 @@ export async function fileClaim(x: number, y: number, intent: string): Promise<s
   if (error.code === "23514") return "Filings must be between 3 and 120 characters.";
   return error.message;
 }
+
+export interface Placement {
+  id: number;
+  filing: number;
+  x: number;
+  y: number;
+  prop: string;
+}
+
+export async function loadPlacements(): Promise<Placement[]> {
+  const all: Placement[] = [];
+  for (let from = 0; ; from += 1000) {
+    const { data, error } = await supabase.from("placements").select("id, filing, x, y, prop").range(from, from + 999);
+    if (error) throw error;
+    all.push(...data);
+    if (data.length < 1000) return all;
+  }
+}
+
+export async function place(filing: number, x: number, y: number, prop: string): Promise<Placement | string> {
+  const { data, error } = await supabase.from("placements").insert({ filing, x, y, prop }).select("id, filing, x, y, prop").single();
+  if (!error) return data;
+  if (error.code === "23505") return "Something is already standing exactly there.";
+  return error.message;
+}
+
+export async function unplace(id: number): Promise<void> {
+  await supabase.from("placements").delete().eq("id", id);
+}

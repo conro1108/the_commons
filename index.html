@@ -28,7 +28,12 @@
       button { font: inherit; font-weight: bold; margin-top: 6px; padding: 4px 10px; border: 2px solid #402e3a;
                background: #ffe9a8; cursor: pointer; }
       button:disabled { opacity: .5; }
-      #problem { color: #b5404f; }
+      #problem, #build-problem { color: #b5404f; }
+      #palette { display: flex; flex-wrap: wrap; gap: 4px; margin: 8px 0; }
+      #palette button { margin: 0; min-width: 44px; height: 44px; padding: 2px; background: #fffdf3;
+                        display: grid; place-items: center; }
+      #palette button.on { background: #ffe9a8; outline: 2px solid #402e3a; }
+      #palette img { image-rendering: pixelated; }
       #here { margin-top: 4px; }
       @media (max-width: 760px) {
         body { grid-template-columns: 1fr; grid-template-rows: 55vh auto; height: auto; }
@@ -48,6 +53,7 @@
         <button>Submit to Gary</button>
         <p id="problem"></p>
       </form>
+      <section id="build" hidden></section>
       <section id="mine"></section>
       <section id="board"></section>
     </aside>

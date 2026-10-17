@@ -34,3 +34,9 @@ export function plotAt(px: number, py: number): Plot | null {
 
 /** "C4": column letter, row number, the way a clerk would write it. */
 export const plotName = ({ x, y }: Plot) => `${String.fromCharCode(65 + x)}${y + 1}`;
+
+// Building: a plot is PLOT_W x PLOT_H cells, and each cell is ZOOM art pixels
+// in the focused view — so on the map, a cell is one pixel of the plot.
+export const ZOOM = 4;
+export const BUILD_W = PLOT_W * ZOOM;
+export const BUILD_H = PLOT_H * ZOOM;
