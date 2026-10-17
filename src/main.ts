@@ -8,9 +8,10 @@ import {
 } from "./net.ts";
 import type { RealtimeChannel } from "@supabase/supabase-js";
 import {
-  DIRT, FOCUS_H, FOCUS_PAD, FOCUS_W, HILLS, colourOf, draw, drawFocus, land, letterPhase, placementAt, plotKey,
+  BOARD, DIRT, FOCUS_H, FOCUS_PAD, FOCUS_W, HILLS, colourOf, draw, drawFocus, land, letterPhase, placementAt, plotKey,
   type Cells, type FocusScene, type Letter, type Walker,
 } from "./render.ts";
+import { GARY_LINES, garyAt } from "./life.ts";
 
 const SPEED = 40; // art pixels per second
 const ZOOM_MS = 520; // map <-> plot
@@ -36,8 +37,6 @@ type Tool = string;
 const canvas = document.querySelector("canvas")!;
 const ctx = canvas.getContext("2d")!;
 const $ = (id: string) => document.getElementById(id)!;
-const form = $("claim") as HTMLFormElement;
-const intent = form.querySelector("textarea")!;
 
 const filings = new Map<number, Filing>();
 const placements = new Map<number, Placement>();
@@ -48,10 +47,9 @@ let me = "";
 let hover: Plot | null = null;
 let selected: Plot | null = null;
 const letters: Letter[] = [];
-let heading: Filing | null = null; // walking to this plot's gate, to step inside on arrival
+let heading: (() => void) | null = null; // what to do when we get where we're walking
 // Our rulings still in the post: the panel keeps them sealed until the letter lands.
 const unread = new Set<number>();
-let thunk: number | null = null; // a ruling just opened, to stamp in the panel
 
 let focus: Filing | null = null; // the plot we're up close to, if any
 let zoom: { start: number; dir: 1 | -1; filing: Filing } | null = null; // flying in or out
@@ -80,120 +78,42 @@ function heldPlots() {
 
 const BUILT: Filing["status"][] = ["approved", "conditional"];
 
+/** Newest granted plots first, the same on every screen, since Gary's rounds depend on it. */
+const recent = () =>
+  [...filings.values()]
+    .filter((f) => BUILT.includes(f.status) && f.stamped_at)
+    .sort((a, b) => b.stamped_at!.localeCompare(a.stamped_at!) || b.id - a.id)
+    .slice(0, 5)
+    .map((f) => ({ x: f.plot_x, y: f.plot_y }));
+
 const mineInFocus = () => !!focus && focus.filer === me && !zoom;
 
-// --- panel ---------------------------------------------------------------
+// --- paper: the corner tag, cards by the things you click, the board ---------
 
-function ruling(f: Filing) {
+function ruling(f: Filing, fresh = false) {
+  if (unread.has(f.id)) return `<p class="stamp pending">In the post</p><p class="meta">Gary's reply is on its way.</p>`;
   const bylaw = f.status === "denied" && f.bylaw ? BYLAWS[f.bylaw - 1] : null;
-  return `<p class="stamp ${f.status}">${STAMP[f.status]}${bylaw ? ` (Bylaw ${f.bylaw})` : ""}</p>
+  return `<p class="stamp ${f.status}${fresh ? " thunk" : ""}">${STAMP[f.status]}${bylaw ? ` (Bylaw ${f.bylaw})` : ""}</p>
     ${bylaw ? `<p class="meta"><b>Bylaw ${f.bylaw}.</b> ${bylaw}</p>` : ""}
     ${f.permit ? `<p class="permit">${esc(f.permit)}</p>` : ""}`;
 }
 
-function renderPlot() {
-  const info = $("plot");
-  form.hidden = true;
-  if (!selected) {
-    info.innerHTML = `<p class="hint">Click a plot to see who holds it, or an empty one to file a claim. Double-click or scroll in to step inside one.</p>`;
-    return;
-  }
-  const f = heldPlots().get(plotKey(selected));
-  const title = `<h2>Plot ${plotName(selected)}</h2>`;
-  if (f) {
-    const enter = BUILT.includes(f.status)
-      ? `<button id="enter">Step inside</button> <span class="meta">or double-click it</span>`
-      : "";
-    info.innerHTML = `${title}<p>Held by ${esc(who(f.filer))}: <q>${esc(f.intent)}</q></p>${ruling(f)}
-      <p class="meta">Filing ${pad(f.id)}</p>${enter}`;
-    document.getElementById("enter")?.addEventListener("click", () => walkInto(f));
-    return;
-  }
-  info.innerHTML = `${title}<p>Unclaimed. State your intent for this plot in one breath.</p>`;
-  form.hidden = false;
-}
-
-function renderMine() {
-  const mine = [...filings.values()].filter((f) => f.filer === me).sort((a, b) => b.id - a.id);
-  const latest = mine[0];
-  const held = mine.filter((f) => HELD.includes(f.status)).sort((a, b) => a.plot_y - b.plot_y || a.plot_x - b.plot_x);
-  const plots = held.length
-    ? `<h2>Your plots</h2><p class="meta"><span class="swatch" style="background:${colourOf(me)}"></span>Yours fly your colours.</p>
-       <p class="yours">${held.map((f) => `<button data-filing="${f.id}" class="plot-link ${unread.has(f.id) ? "pending" : f.status}">${plotName({ x: f.plot_x, y: f.plot_y })}</button>`).join(" ")}</p>`
-    : "";
-  let filing = "";
-  if (latest) {
-    const sealed = unread.has(latest.id);
-    const fresh = thunk === latest.id;
-    const shown = sealed ? `<p class="stamp pending">In the post</p>` : ruling(latest).replace('class="stamp', `class="stamp${fresh ? " thunk" : ""}`);
-    filing = `<h2>Your latest filing</h2><p>Filing ${pad(latest.id)}, Plot ${plotName({ x: latest.plot_x, y: latest.plot_y })}: <q>${esc(latest.intent)}</q></p>
-       ${shown}
-       ${sealed ? `<p class="meta">Gary's reply is on its way.</p>` : ""}`;
-  }
-  thunk = null;
-  $("mine").innerHTML = plots + filing;
-  for (const b of $("mine").querySelectorAll<HTMLButtonElement>("[data-filing]")) {
-    b.addEventListener("click", () => visit(filings.get(Number(b.dataset.filing))!));
-  }
-}
-
-/** Go to one of our plots: inside if it's granted, otherwise just pick it out on the map. */
-function visit(f: Filing) {
-  selected = { x: f.plot_x, y: f.plot_y };
-  renderPlot();
-  if (BUILT.includes(f.status)) enterFocus(f);
-}
-
-const opened = new Set<number>(); // notice board entries unfolded to the full exchange
-
 const when = (iso: string) => new Date(iso).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
 
 /** The whole exchange: what was asked, when, and everything Gary said back. */
-function exchange(f: Filing) {
-  const c = f.condition ? CONDITIONS[f.condition] : null;
-  return `<div class="exchange">
-    <p class="meta">Filing ${pad(f.id)}, Plot ${plotName({ x: f.plot_x, y: f.plot_y })}. Filed by ${esc(who(f.filer))}, ${when(f.filed_at)}.</p>
+function exchange(f: Filing, fresh = false) {
+  return `<p class="meta">Filing ${pad(f.id)}, Plot ${plotName({ x: f.plot_x, y: f.plot_y })}. Filed by ${esc(who(f.filer))}, ${when(f.filed_at)}.</p>
     <p><q>${esc(f.intent)}</q></p>
-    ${ruling(f)}
-    ${c ? `<p><b>Condition.</b> ${c.text}</p>` : ""}
-    ${f.stamped_at ? `<p class="meta">Stamped ${when(f.stamped_at)}.</p>` : ""}
-  </div>`;
+    ${ruling(f, fresh)}
+    ${conditionHtml(f)}
+    ${f.stamped_at && !unread.has(f.id) ? `<p class="meta">Stamped ${when(f.stamped_at)}.</p>` : ""}`;
 }
-
-function renderBoard() {
-  const recent = [...filings.values()]
-    .filter((f) => f.stamped_at && f.status !== "lost" && f.status !== "refused")
-    .sort((a, b) => b.stamped_at!.localeCompare(a.stamped_at!))
-    .slice(0, 8);
-  $("board").innerHTML = recent.length
-    ? `<h2>Notice board</h2><ul>${recent
-        .map((f) => `<li data-filing="${f.id}" class="${opened.has(f.id) ? "open" : ""}" title="Read the full ruling">
-          <span class="stamp ${f.status}">${STAMP[f.status]}</span> ${plotName({ x: f.plot_x, y: f.plot_y })}
-          <q>${esc(f.intent)}</q> <span class="meta">— ${esc(who(f.filer))}</span>
-          ${opened.has(f.id) ? exchange(f) : ""}</li>`)
-        .join("")}</ul>`
-    : `<h2>Notice board</h2><p class="hint">No rulings yet. Gary is ready.</p>`;
-  for (const li of $("board").querySelectorAll<HTMLElement>("[data-filing]")) {
-    li.addEventListener("click", (e) => {
-      if ((e.target as HTMLElement).closest(".exchange")) return; // reading, maybe selecting; not closing
-      const id = Number(li.dataset.filing);
-      if (!opened.delete(id)) opened.add(id);
-      renderBoard();
-    });
-  }
-}
-
-function renderHere() {
-  const names = [...walkers.keys()].map(who).sort((a, b) => (a === "you" ? -1 : b === "you" ? 1 : a.localeCompare(b)));
-  $("here").textContent = `On the commons: ${names.join(", ")}`;
-}
-
-// --- panel, up close -------------------------------------------------------
 
 /** The condition on a plot, and whether what's built answers it. */
 function conditionHtml(f: Filing) {
   const c = f.condition ? CONDITIONS[f.condition] : null;
-  if (!c) return "";
+  if (!c || unread.has(f.id)) return "";
+  if (!BUILT.includes(f.status)) return `<p><b>Condition.</b> ${c.text}</p>`;
   const neighbours = [[0, -1], [0, 1], [-1, 0], [1, 0]].filter(([dx, dy]) =>
     heldPlots().has(plotKey({ x: f.plot_x + dx, y: f.plot_y + dy })),
   ).length;
@@ -201,6 +121,173 @@ function conditionHtml(f: Filing) {
   return `<div class="condition"><p><b>Condition.</b> ${c.text}</p>
     <p class="stamp ${met ? "approved" : "pending"}">${met ? "Met" : "Outstanding"}</p> <span class="meta">${note}</span></div>`;
 }
+
+function renderTag() {
+  const names = [...walkers.keys()].map(who).sort((a, b) => (a === "you" ? -1 : b === "you" ? 1 : a.localeCompare(b)));
+  const held = [...filings.values()]
+    .filter((f) => f.filer === me && (HELD.includes(f.status) || unread.has(f.id)))
+    .sort((a, b) => a.plot_y - b.plot_y || a.plot_x - b.plot_x);
+  $("tag").innerHTML = `<h1>The Commons</h1><p class="meta">Administered by Gary. Here: ${names.map(esc).join(", ")}</p>
+    ${held.length
+      ? `<p class="yours"><span class="swatch" style="background:${colourOf(me)}"></span>${held
+          .map((f) => `<button data-filing="${f.id}" class="plot-link ${unread.has(f.id) ? "pending" : f.status}">${plotName({ x: f.plot_x, y: f.plot_y })}</button>`)
+          .join("")}</p>`
+      : `<p class="hint">Click a plot to read its permit, or an empty one to claim it.</p>`}`;
+  for (const b of $("tag").querySelectorAll<HTMLButtonElement>("[data-filing]")) {
+    b.addEventListener("click", () => visit(filings.get(Number(b.dataset.filing))!));
+  }
+}
+
+/** Go to one of our plots: inside if it's granted, otherwise its card on the map. */
+function visit(f: Filing) {
+  if (BUILT.includes(f.status) && !unread.has(f.id)) {
+    closeCard();
+    enterFocus(f);
+  } else openCard({ x: f.plot_x, y: f.plot_y });
+}
+
+// The card: a plot's permit, a claim form, or Gary's reply to one of ours.
+const card = $("card");
+let reply: number | null = null; // a filing whose reply the card is showing, rather than the plot
+let thunk: number | null = null; // a ruling just opened, to stamp as the card appears
+
+function openCard(plot: Plot, filing: number | null = null) {
+  if (selected && plotKey(selected) !== plotKey(plot)) heading = null;
+  selected = plot;
+  reply = filing;
+  renderCard();
+}
+
+function closeCard() {
+  selected = null;
+  reply = null;
+  card.hidden = true;
+}
+
+function renderCard() {
+  if (!selected || focus) {
+    card.hidden = true;
+    return;
+  }
+  const plot = selected;
+  const draft = card.querySelector("textarea");
+  const typed = draft?.value ?? "";
+  const typing = document.activeElement === draft;
+  const f = reply !== null ? filings.get(reply) : heldPlots().get(plotKey(plot));
+  const fresh = thunk !== null && thunk === f?.id;
+  thunk = null;
+  let body: string;
+  if (f && reply !== null) {
+    body = `<h2>A reply from Gary</h2>${exchange(f, fresh)}`;
+  } else if (f) {
+    body = `<h2>Plot ${plotName(plot)}</h2><p>Held by ${esc(who(f.filer))}: <q>${esc(f.intent)}</q></p>
+      ${ruling(f, fresh)}${conditionHtml(f)}<p class="meta">Filing ${pad(f.id)}</p>`;
+  } else {
+    body = `<h2>Plot ${plotName(plot)}</h2><p>Unclaimed. State your intent for this plot in one breath.</p>
+      <form><textarea rows="2" maxlength="120" placeholder="a bench, for looking at the pond with" required></textarea>
+      <button>Submit to Gary</button><p class="problem"></p></form>`;
+  }
+  const enter = f && BUILT.includes(f.status) && !unread.has(f.id) ? `<button class="enter">Step inside</button>` : "";
+  card.innerHTML = `<button class="close" aria-label="Close">×</button>${body}${enter}`;
+  card.hidden = false;
+  card.querySelector(".close")!.addEventListener("click", closeCard);
+  if (f) card.querySelector(".enter")?.addEventListener("click", () => walkInto(f));
+  const form = card.querySelector("form");
+  if (form) {
+    const box = form.querySelector("textarea")!;
+    box.value = typed;
+    if (typing) box.focus();
+    form.addEventListener("submit", (e) => {
+      e.preventDefault();
+      void claim(plot, form);
+    });
+  }
+  placeCard();
+}
+
+async function claim(plot: Plot, form: HTMLFormElement) {
+  const box = form.querySelector("textarea")!;
+  const button = form.querySelector("button")!;
+  button.disabled = true;
+  const problem = await fileClaim(plot.x, plot.y, box.value.trim());
+  button.disabled = false;
+  form.querySelector(".problem")!.textContent = problem ?? "";
+  if (problem) return;
+  box.value = "";
+  letters.push({ plot, out: true });
+  closeCard();
+}
+
+/** Hang the card above its plot, or below it if there's no room, kept on screen. */
+function placeCard() {
+  if (card.hidden || !selected) return;
+  const { left, top } = plotOrigin(selected);
+  const v = mapView;
+  const w = card.offsetWidth;
+  const h = card.offsetHeight;
+  const x = v.ox + (left + PLOT_W / 2) * v.s - w / 2;
+  let y = v.oy + top * v.s - h - 12;
+  if (y < 8) y = v.oy + (top + PLOT_H) * v.s + 12;
+  card.style.left = `${clamp(x, 8, canvas.width - w - 8)}px`;
+  card.style.top = `${clamp(y, 8, canvas.height - h - 8)}px`;
+}
+
+// The notice board, read up close.
+const board = $("board");
+let reading: number | null = null; // the notice taken down to read
+
+function openBoard() {
+  closeCard();
+  board.hidden = false;
+  renderBoard();
+}
+
+function closeBoard() {
+  board.hidden = true;
+  reading = null;
+}
+
+/** A notice's lean, from its number, so it hangs the same way every visit. */
+const lean = (id: number) => `${(((id * 7919) % 11) - 5) * 0.7}deg`;
+
+function renderBoard() {
+  if (board.hidden) return;
+  const recent = [...filings.values()]
+    .filter((f) => f.stamped_at && f.status !== "lost" && f.status !== "refused" && !unread.has(f.id))
+    .sort((a, b) => b.stamped_at!.localeCompare(a.stamped_at!))
+    .slice(0, 18);
+  const notice = (f: Filing) => `<div class="notice" data-filing="${f.id}" style="--r:${lean(f.id)}">
+      <span class="pin" style="background:${colourOf(f.filer)}"></span>
+      <span class="stamp ${f.status}">${STAMP[f.status]}</span>
+      <q>${esc(f.intent)}</q><span class="meta">Plot ${plotName({ x: f.plot_x, y: f.plot_y })} — ${esc(who(f.filer))}</span></div>`;
+  const open = reading !== null ? filings.get(reading) : null;
+  board.innerHTML = `<div class="cork">
+      <div class="plank"><h2>Notices</h2><span>by order of the administrator <button class="close" aria-label="Close">×</button></span></div>
+      ${recent.length ? `<div class="pins">${recent.map(notice).join("")}</div>` : `<p class="empty-board">Nothing pinned up yet. Gary is ready.</p>`}
+      ${open ? `<div class="reading"><div class="notice"><span class="pin" style="background:${colourOf(open.filer)}"></span>
+        <button class="close back" aria-label="Pin it back">×</button>${exchange(open)}</div></div>` : ""}
+    </div>`;
+  board.querySelector(".plank .close")!.addEventListener("click", closeBoard);
+  for (const n of board.querySelectorAll<HTMLElement>(".pins [data-filing]")) {
+    n.addEventListener("click", () => {
+      reading = Number(n.dataset.filing);
+      renderBoard();
+    });
+  }
+  board.querySelector(".reading")?.addEventListener("click", (e) => {
+    const t = e.target as HTMLElement;
+    if (t.classList.contains("reading") || t.classList.contains("back")) {
+      reading = null;
+      renderBoard();
+    }
+  });
+}
+
+board.addEventListener("click", (e) => {
+  if (e.target === board) closeBoard();
+});
+
+// --- up close: the plot's card and the toolbar --------------------------------
 
 const HINTS: Record<string, string> = {
   prop: "Click to place it. Right-click takes things down.",
@@ -246,21 +333,23 @@ function swatch(ch: string) {
   return c;
 }
 
-/** The palette, built once per visit; tool changes only flip classes. */
+/** The toolbar, built once per visit; tool changes only flip classes. */
 function renderPalette() {
   const mine = focus?.filer === me;
   $("tools").hidden = !mine;
   if (!mine) return;
   const button = (t: Tool, title: string, inner: string) =>
     `<button data-tool="${t}" title="${title}">${inner}</button>`;
-  $("palette").innerHTML = `
-    <div class="row">${button("move", "move things", "move")}${button("remove", "take down", "take down")}</div>
-    <h3>Ground</h3><div class="row">${BRUSHES.map((ch) =>
+  const group = (name: string, inner: string) => `<div class="group"><h3>${name}</h3><div class="row">${inner}</div></div>`;
+  $("palette").innerHTML = [
+    group("Tools", button("move", "move things", "move") + button("remove", "take down", "take down")),
+    group("Ground", BRUSHES.map((ch) =>
       button(`ground:${ch}`, GROUND[ch].label, `<img src="${icon(`ground:${ch}`, () => swatch(ch))}" width="24" alt="${GROUND[ch].label}">`),
-    ).join("")}</div>
-    ${PALETTE.map(({ group, props }) => `<h3>${group}</h3><div class="row">${props
-      .map((name) => button(`prop:${name}`, name, `<img src="${icon(name, () => propCanvas(name))}" width="${propSize(name).w * 2}" alt="${name}">`))
-      .join("")}</div>`).join("")}`;
+    ).join("")),
+    ...PALETTE.map(({ group: name, props }) => group(name, props
+      .map((p) => button(`prop:${p}`, p, `<img src="${icon(p, () => propCanvas(p))}" width="${Math.min(propSize(p).w * 2, 40)}" alt="${p}">`))
+      .join(""))),
+  ].join("");
   for (const b of $("palette").querySelectorAll<HTMLButtonElement>("[data-tool]")) {
     b.addEventListener("click", () => {
       tool = b.dataset.tool!;
@@ -270,9 +359,13 @@ function renderPalette() {
 }
 
 function showPanels() {
-  for (const id of ["plot", "mine", "board"]) $(id).hidden = !!focus;
-  if (focus) form.hidden = true;
+  $("tag").hidden = !!focus;
   $("build").hidden = !focus;
+  if (focus) {
+    card.hidden = true;
+    $("bubble").hidden = true;
+    $("nametag").hidden = true;
+  }
 }
 
 function enterFocus(f: Filing) {
@@ -280,10 +373,12 @@ function enterFocus(f: Filing) {
   focus = f;
   zoom = { start: performance.now(), dir: 1, filing: f };
   pointer = null;
+  heading = null;
   $("build-problem").textContent = "";
   showPanels();
   renderPalette();
   renderBuildInfo();
+  fitFocus();
 }
 
 function leaveFocus() {
@@ -292,6 +387,7 @@ function leaveFocus() {
   focus = null;
   stroke = null;
   drag = null;
+  selected = null;
   showPanels();
   renderAll();
 }
@@ -300,26 +396,10 @@ $("leave").addEventListener("click", leaveFocus);
 
 function renderAll() {
   if (focus) return renderBuildInfo();
-  renderPlot();
-  renderMine();
+  renderTag();
+  renderCard();
   renderBoard();
-  renderHere();
 }
-
-form.addEventListener("submit", async (e) => {
-  e.preventDefault();
-  if (!selected) return;
-  const button = form.querySelector("button")!;
-  button.disabled = true;
-  const plot = selected;
-  const problem = await fileClaim(plot.x, plot.y, intent.value.trim());
-  button.disabled = false;
-  $("problem").textContent = problem ?? "";
-  if (!problem) {
-    intent.value = "";
-    letters.push({ plot, out: true });
-  }
-});
 
 // --- canvas and views --------------------------------------------------------
 
@@ -332,9 +412,17 @@ interface View {
 let mapView: View = { s: 1, ox: 0, oy: 0 };
 let focusView: View = { s: 1, ox: 0, oy: 0 };
 
-function fit(w: number, h: number): View {
-  const s = Math.max(1, Math.floor(Math.min(canvas.width / w, canvas.height / h)));
-  return { s, ox: Math.floor((canvas.width - w * s) / 2), oy: Math.floor((canvas.height - h * s) / 2) };
+/** The biggest whole-pixel view of w x h, centred, leaving `below` px clear at the bottom. */
+function fit(w: number, h: number, below = 0): View {
+  const room = canvas.height - below;
+  const s = Math.max(1, Math.floor(Math.min(canvas.width / w, room / h)));
+  return { s, ox: Math.floor((canvas.width - w * s) / 2), oy: Math.floor((room - h * s) / 2) };
+}
+
+/** Up close, clear of the toolbar when there is one. */
+function fitFocus() {
+  const tools = $("tools");
+  focusView = fit(FOCUS_W, FOCUS_H, focus && !tools.hidden ? tools.offsetHeight + 16 : 0);
 }
 
 function resize() {
@@ -345,7 +433,7 @@ function resize() {
   canvas.style.height = `${canvas.height}px`;
   ctx.imageSmoothingEnabled = false;
   mapView = fit(MAP_W, MAP_H);
-  focusView = fit(FOCUS_W, FOCUS_H);
+  fitFocus();
 }
 
 function toArt(e: MouseEvent, v: View) {
@@ -386,7 +474,7 @@ function drawZoom(now: number) {
     ox: Math.round(from.x + (to.x - from.x) * k - s * left),
     oy: Math.round(from.y + (to.y - from.y) * k - s * top),
   });
-  draw(ctx, { held: heldPlots(), built, me, hover: null, selected: null, walkers: [...walkers.values()], letters: [] });
+  draw(ctx, { held: heldPlots(), built, me, hover: null, selected: null, walkers: [...walkers.values()], letters: [], t: Date.now(), recent: recent() });
   const fade = Math.max(0, (u - 0.65) / 0.35);
   if (fade > 0) {
     ctx.globalAlpha = fade;
@@ -516,6 +604,7 @@ canvas.addEventListener("pointerdown", (e) => {
 canvas.addEventListener("pointermove", (e) => {
   if (!focus) {
     const p = toArt(e, mapView);
+    mouse = p;
     hover = plotAt(p.x, p.y);
     return;
   }
@@ -560,6 +649,7 @@ canvas.addEventListener("pointerup", async () => {
 
 canvas.addEventListener("pointerleave", () => {
   hover = null;
+  mouse = null;
   if (!stroke && !drag) pointer = null;
 });
 
@@ -568,7 +658,13 @@ canvas.addEventListener("contextmenu", (e) => {
 });
 
 window.addEventListener("keydown", (e) => {
-  if (e.key === "Escape" && focus) leaveFocus();
+  if (e.key !== "Escape") return;
+  if (reading !== null) {
+    reading = null;
+    renderBoard();
+  } else if (!board.hidden) closeBoard();
+  else if (focus) leaveFocus();
+  else closeCard();
 });
 
 /** The granted plot under a map point, if any: the ones you can step inside. */
@@ -602,9 +698,7 @@ canvas.addEventListener("wheel", (e) => {
   const f = e.deltaY < 0 && enterableAt(e);
   if (!f) return;
   e.preventDefault();
-  heading = null;
-  selected = { x: f.plot_x, y: f.plot_y };
-  renderPlot();
+  closeCard();
   enterFocus(f);
 }, { passive: false });
 
@@ -616,35 +710,56 @@ function gate(plot: Plot) {
   return { x: left + PLOT_W / 2, y: top + PLOT_H + PATH / 2 + 3 };
 }
 
+/** Walk somewhere, then do something there. */
+function goTo(x: number, y: number, then: () => void) {
+  const self = walkers.get(me);
+  if (!self || Math.hypot(self.x - x, self.y - y) < 1) return then();
+  heading = then;
+  walkTo(x, y);
+}
+
 /** Walk to a plot's gate and step inside on arrival. */
 function walkInto(f: Filing) {
-  const self = walkers.get(me);
   const g = gate({ x: f.plot_x, y: f.plot_y });
-  if (!self || Math.hypot(self.x - g.x, self.y - g.y) < 1) return enterFocus(f);
-  heading = f;
-  walkTo(g.x, g.y);
+  goTo(g.x, g.y, () => enterFocus(f));
+}
+
+/** Whether a map point is on Gary, give or take a pixel. */
+function onGary(p: { x: number; y: number }) {
+  const g = garyAt(Date.now(), recent());
+  return Math.abs(p.x - g.x) <= 4 && p.y >= g.y - 12 && p.y <= g.y + 1;
+}
+
+const onBoard = (p: { x: number; y: number }) =>
+  p.x >= BOARD.x - 1 && p.x < BOARD.x + BOARD.w + 1 && p.y >= BOARD.y - 1 && p.y < MAP_H;
+
+/** Gary says something, for a few seconds. */
+let said: { line: string; until: number } | null = null;
+function speak() {
+  const lines = GARY_LINES.filter((l) => l !== said?.line);
+  said = { line: lines[Math.floor(Math.random() * lines.length)], until: performance.now() + 4500 };
+  $("bubble").textContent = said.line;
 }
 
 canvas.addEventListener("click", (e) => {
   if (focus || zoom) return;
   heading = null;
   const p = toArt(e, mapView);
-  const plot = plotAt(p.x, p.y);
-  let tx = p.x;
-  let ty = p.y;
-  if (plot) {
-    // Walk to the gate, as one does before filing.
-    ({ x: tx, y: ty } = gate(plot));
-    if (plotKey(plot) !== (selected && plotKey(selected))) $("problem").textContent = "";
-    selected = plot;
-    renderPlot();
-  } else if (selected) {
-    // Just out for a walk.
-    selected = null;
-    $("problem").textContent = "";
-    renderPlot();
+  if (onGary(p)) return speak();
+  const walk = (x: number, y: number) => walkTo(clamp(x, MARGIN + 2, MAP_W - MARGIN - 2), clamp(y, MARGIN + 7, MAP_H - MARGIN - 1));
+  if (onBoard(p)) {
+    closeCard();
+    return goTo(BOARD.x + BOARD.w / 2, MAP_H - MARGIN - 1, openBoard);
   }
-  walkTo(clamp(tx, MARGIN + 2, MAP_W - MARGIN - 2), clamp(ty, MARGIN + 7, MAP_H - MARGIN - 1));
+  const plot = plotAt(p.x, p.y);
+  if (plot) {
+    // Walk to the gate, as one does before filing, and read what's pinned there.
+    const g = gate(plot);
+    openCard(plot);
+    return walk(g.x, g.y);
+  }
+  closeCard(); // just out for a walk
+  walk(p.x, p.y);
 });
 
 // --- the field channel: avatars (broadcast), who's here (presence), filings --
@@ -671,10 +786,32 @@ function step(dt: number) {
     // Arrived: tell presence where we are, for anyone who joins later.
     if (w.id === me && move === dist) {
       channel.track({ x: w.x, y: w.y });
-      if (heading && !focus && !zoom) enterFocus(heading);
+      const then = heading;
       heading = null;
+      if (then && !focus && !zoom) then();
     }
   }
+}
+
+let mouse: { x: number; y: number } | null = null; // map art space, while over the map
+
+/** Things that follow the map about: Gary's speech bubble, a name over whoever you point at. */
+function overlays(now: number, t: number) {
+  const screen = (x: number, y: number) => ({ left: `${mapView.ox + x * mapView.s}px`, top: `${mapView.oy + y * mapView.s}px` });
+  const gary = garyAt(t, recent());
+  const bubble = $("bubble");
+  bubble.hidden = !said || now > said.until;
+  if (!bubble.hidden) Object.assign(bubble.style, screen(gary.x, gary.y - 15));
+  const tag = $("nametag");
+  const over = mouse && [...walkers.values()].find((w) => Math.abs(mouse!.x - w.x) <= 3 && mouse!.y >= w.y - 8 && mouse!.y <= w.y + 1);
+  const name = over ? who(over.id) : mouse && onGary(mouse) ? "Gary" : mouse && onBoard(mouse) ? "the notice board" : null;
+  tag.hidden = !name || !bubble.hidden && name === "Gary";
+  if (name) {
+    tag.textContent = name;
+    const at = over ?? (name === "Gary" ? gary : { x: BOARD.x + BOARD.w / 2, y: BOARD.y + 1 });
+    Object.assign(tag.style, screen(at.x, at.y - (over ? 9 : name === "Gary" ? 13 : 2)));
+  }
+  canvas.style.cursor = name && !over ? "pointer" : hover ? "pointer" : "";
 }
 
 let last = performance.now();
@@ -691,9 +828,11 @@ function frame(now: number) {
   } else {
     fill(HILLS);
     viewport(mapView);
-    draw(ctx, { held: heldPlots(), built, me, hover, selected, walkers: [...walkers.values()], letters });
-    canvas.style.cursor = "pointer";
+    const t = Date.now();
+    draw(ctx, { held: heldPlots(), built, me, hover, selected, walkers: [...walkers.values()], letters, t, recent: recent() });
     post(now);
+    placeCard();
+    overlays(now, t);
   }
   requestAnimationFrame(frame);
 }
@@ -706,7 +845,7 @@ function post(now: number) {
     const id = l.filing;
     if (phase !== "flying" && id !== undefined && unread.delete(id)) {
       thunk = id;
-      renderAll();
+      if (!focus) openCard(l.plot, id);
     }
     if (phase === "done") letters.splice(i, 1);
   }
@@ -763,7 +902,7 @@ async function start() {
         if (!walkers.has(id)) walkers.set(id, { id, x: p.x, y: p.y, tx: p.x, ty: p.y });
       }
       handles = await handlesFor(Object.keys(state));
-      renderHere();
+      renderTag();
     })
     .on("postgres_changes", { event: "*", schema: "the_commons", table: "filings" }, async ({ new: row }) => {
       if (!row || !("id" in row)) return;
@@ -800,5 +939,5 @@ async function start() {
 resize();
 window.addEventListener("resize", resize);
 start().catch((err) => {
-  $("plot").textContent = `The commons is closed: ${err.message ?? err}`;
+  $("tag").textContent = `The commons is closed: ${err.message ?? err}`;
 });

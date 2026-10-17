@@ -3,6 +3,7 @@ import { EMPTY, paintGround } from "./content/ground.ts";
 import { propCanvas, propHas, propSize } from "./content/props.ts";
 import { BUILD_H, BUILD_W, COLS, MAP_H, MAP_W, MARGIN, PLOT_H, PLOT_W, ROWS, ZOOM, plotName, plotOrigin, type Plot } from "./layout.ts";
 import type { Filing, Placement } from "./net.ts";
+import { drawAir, drawCritters, drawUnder } from "./life.ts";
 
 const GRASS = "#b2d878";
 const TUFT = "#98c463";
@@ -31,6 +32,8 @@ export interface Scene {
   selected: Plot | null;
   walkers: Walker[];
   letters: Letter[];
+  t: number; // Date.now(), for the commons' own life
+  recent: Plot[]; // newest granted plots, newest first: where Gary goes to look
 }
 
 /**
@@ -116,11 +119,40 @@ function drawBackground(): HTMLCanvasElement {
     prop(ctx, "tree", MAP_W - 17 + hash(y + 3) * 2, y);
   }
   for (let x = -4; x < MAP_W; x += 17) {
-    if (Math.abs(x - MAP_W / 2) < 24) continue;
+    if (Math.abs(x - MAP_W / 2) < 24 || (x + 20 > BOARD.x - 2 && x < BOARD.x + BOARD.w + 2)) continue;
     prop(ctx, "tree", x + hash(x + 9) * 4, MAP_H - 15);
   }
   prop(ctx, "pond", MAP_W / 2 - 12, MAP_H - 12);
+  noticeBoard(ctx);
   return c;
+}
+
+/** The notice board, in the border by the pond: walk up to it to read it. */
+export const BOARD = { x: 96, y: MAP_H - 17, w: 28, h: 17 };
+
+function noticeBoard(ctx: CanvasRenderingContext2D) {
+  const { x, y, w, h } = BOARD;
+  ctx.fillStyle = "#5c3d22";
+  ctx.fillRect(x + 3, y + 12, 2, h - 12);
+  ctx.fillRect(x + w - 5, y + 12, 2, h - 12);
+  ctx.fillStyle = INK;
+  ctx.fillRect(x, y + 1, w, 12);
+  ctx.fillRect(x - 1, y, w + 2, 2);
+  ctx.fillStyle = "#a97048";
+  ctx.fillRect(x, y, w, 1);
+  ctx.fillStyle = "#7a5230";
+  ctx.fillRect(x + 1, y + 2, w - 2, 10);
+  ctx.fillStyle = "#c9a06a";
+  ctx.fillRect(x + 2, y + 3, w - 4, 8);
+  // Notices, a little uneven, each with its pin.
+  for (const [nx, ny, pin] of [[4, 4, "#e05c48"], [10, 5, "#3e8a5a"], [16, 4, "#5b7fc9"], [21, 6, "#e8c56a"]] as const) {
+    ctx.fillStyle = "#fffdf3";
+    ctx.fillRect(x + nx, y + ny, 4, 4);
+    ctx.fillStyle = "#b0a4b4";
+    ctx.fillRect(x + nx + 1, y + ny + 2, 2, 1);
+    ctx.fillStyle = pin;
+    ctx.fillRect(x + nx + 1, y + ny, 1, 1);
+  }
 }
 
 // --- what's built, full size and in miniature -------------------------------
@@ -287,6 +319,12 @@ function drawPlotBody(ctx: CanvasRenderingContext2D, f: Filing, built: Placement
   const empty = !built?.length && !f.ground;
   if (!empty) ctx.drawImage(mini(f, built ?? []), left, top);
   fence(ctx, left, top, PLOT_W, PLOT_H, colour, 4);
+  // The permit, pinned to the gatepost for anyone passing to read.
+  const g1 = left + PLOT_W / 2 + 2;
+  ctx.fillStyle = INK;
+  ctx.fillRect(g1 + 1, top + PLOT_H - 5, 4, 4);
+  ctx.fillStyle = "#fffdf3";
+  ctx.fillRect(g1 + 2, top + PLOT_H - 4, 2, 2);
 }
 
 function outline(ctx: CanvasRenderingContext2D, p: Plot, colour: string) {
@@ -323,10 +361,13 @@ function drawWalker(ctx: CanvasRenderingContext2D, w: Walker, mine: boolean) {
 export function draw(ctx: CanvasRenderingContext2D, scene: Scene) {
   background ??= drawBackground();
   ctx.drawImage(background, 0, 0);
+  drawUnder(ctx, scene.t);
   for (const f of scene.held.values()) drawPlot(ctx, f, scene.built.get(f.id), f.filer === scene.me);
   if (scene.hover) outline(ctx, scene.hover, "#ffffff88");
   if (scene.selected) outline(ctx, scene.selected, "#fff8e0");
+  drawCritters(ctx, scene.t, scene.recent);
   for (const w of [...scene.walkers].sort((a, b) => a.y - b.y)) drawWalker(ctx, w, w.id === scene.me);
+  drawAir(ctx, scene.t);
   const now = performance.now();
   for (const l of scene.letters) drawLetter(ctx, l, now);
 }
