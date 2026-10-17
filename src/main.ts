@@ -346,6 +346,7 @@ function renderBuildInfo() {
     b.classList.toggle("wanted", wants.has(b.dataset.tool!.slice(5)));
   }
   $("palette").querySelector(".write-in")?.classList.toggle("on", tool.startsWith("item:"));
+  fitFocus(); // the info's height moves the plot on an upright screen
 }
 
 const icons = new Map<string, string>();
@@ -456,10 +457,10 @@ let dpr = 1; // device pixels per CSS pixel: views are in device pixels, the DOM
 let focusView: View = { s: 1, ox: 0, oy: 0 };
 
 /** The biggest whole-pixel view of w x h, centred, leaving `below` px clear at the bottom. */
-function fit(w: number, h: number, below = 0): View {
-  const room = canvas.height - below;
+function fit(w: number, h: number, below = 0, above = 0): View {
+  const room = canvas.height - below - above;
   const s = Math.max(1, Math.floor(Math.min(canvas.width / w, room / h)));
-  return { s, ox: Math.floor((canvas.width - w * s) / 2), oy: Math.floor((room - h * s) / 2) };
+  return { s, ox: Math.floor((canvas.width - w * s) / 2), oy: above + Math.floor((room - h * s) / 2) };
 }
 
 /**
@@ -483,9 +484,13 @@ function follow() {
 }
 
 /** Up close, clear of the toolbar when there is one. */
+/** The plot between the papers: below the info as well as above the tools when the screen is upright. */
 function fitFocus() {
   const tools = $("tools");
-  focusView = fit(FOCUS_W, FOCUS_H, focus && !tools.hidden ? (tools.offsetHeight + 16) * dpr : 0);
+  const info = $("build-info");
+  const below = focus && !tools.hidden ? (tools.offsetHeight + 16) * dpr : 0;
+  const above = focus && canvas.height > canvas.width ? (info.offsetTop + info.offsetHeight + 8) * dpr : 0;
+  focusView = fit(FOCUS_W, FOCUS_H, below, above);
 }
 
 function resize() {
