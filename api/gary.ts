@@ -1,7 +1,7 @@
 // Gary's desk. The database POSTs a filing id here (see drain_gary() in
 // db/schema.sql); Gary rules on it and writes the result back with the secret
 // key, so nobody forges a permit. A written-in item's name comes as
-// { item: id }, to be read before anyone else sees it. It also POSTs { inspect: id } when a plot
+// { item: id }, to be read before anyone else sees it, then drawn. It also POSTs { inspect: id } when a plot
 // with an outstanding condition has been built on (send_inspector()), and
 // Gary goes round to see whether the condition's been met. A decision model rules from enums; GLM only
 // writes the prose, and the decision model checks it before it goes out. The write is conditional on the filing still being
@@ -13,6 +13,7 @@ import { experimental_decide as decide, generateText } from "ai";
 const JUDGE = "perplexity/pplx-decider-v1.2";
 const SCRIBE = "openai/gpt-5-mini";
 const NO_THINKING = { openai: { reasoningEffort: "minimal" } }; // short prose; thinking only adds cost and wait
+const THINKING = { openai: { reasoningEffort: "medium" } }; // drawing is spatial; worth the wait
 
 export const BYLAWS = [
   "Structures shall be modest: nothing taller than a reasonably tall goose.",
@@ -416,7 +417,76 @@ async function readLabel(db: Db, id: number): Promise<Response> {
   });
   const ok = answers.unacceptable.probability <= 0.5;
   await db.from("placements").update({ label_ok: ok, label_check: answers }).eq("id", id).is("label_ok", null);
-  return Response.json({ ok });
+  if (!ok) return Response.json({ ok });
+
+  // Then he draws it, once per name: anything already drawn under it is reused.
+  const { data: seen } = await db
+    .from("placements").select("sprite").ilike("label", p.label.trim().replace(/[\\%_]/g, "\\$&")).not("sprite", "is", null).limit(1).maybeSingle();
+  const { sprite, drafts } = seen ? { sprite: seen.sprite as Sprite, drafts: null } : await draw(p.label.trim());
+  await db.from("placements").update({ sprite, sprite_drafts: drafts }).eq("id", id).is("sprite", null);
+  return Response.json({ ok, drawn: !!sprite });
+}
+
+interface Sprite {
+  rows: string[];
+  palette: Record<string, string>;
+}
+
+const INK = "#402e3a";
+const DRAWER = `You draw tiny pixel-art sprites for a cosy top-down garden game, seen from slightly above and in front, like a storybook.
+Output only JSON: {"rows": [...], "palette": {...}}. No markdown, no commentary.
+"rows" is a character grid, one string per row, top to bottom. "." is transparent. Every other character must be a key in "palette".
+"palette" maps single characters to hex colours "#rrggbb". Use "k" for the outline, always "${INK}", and outline the whole silhouette with it.
+At most 16 wide and 16 tall; small things smaller (a cat is about 8x7, a bench 16x9, a goose 10x12). Rows may be shorter than the widest; they are padded on the right.
+At most 6 colours besides the outline. Soft, warm, slightly muted colours. Simple, readable shapes; one or two highlight pixels, no dithering.
+Draw exactly the thing named, alone, with no ground, shadow, text or background.
+
+Example, "duck":
+{"rows":["..kk.....",".kggk....","ookgk....","..kwkkkk.",".kbbbbbbk","..kkkkkk."],"palette":{"k":"${INK}","o":"#f59a3e","g":"#3e8a5a","w":"#f7ecd8","b":"#a97048"}}`;
+
+/** What's wrong with a drawn sprite, if anything. Code checks it; the model only draws. */
+function spriteProblems(raw: string): { sprite?: Sprite; problems: string[] } {
+  let s: Sprite;
+  try {
+    s = JSON.parse(raw.replace(/^```(json)?|```$/gm, "").trim());
+  } catch {
+    return { problems: ["it wasn't valid JSON"] };
+  }
+  if (!Array.isArray(s?.rows) || !s.rows.every((r) => typeof r === "string") || typeof s.palette !== "object" || !s.palette) {
+    return { problems: ["it wasn't {rows: string[], palette: object}"] };
+  }
+  const problems: string[] = [];
+  const rows = s.rows.map((r) => r.replace(/\s+$/, ""));
+  while (rows.length && !rows.at(-1)!.replace(/\./g, "")) rows.pop();
+  while (rows.length && !rows[0].replace(/\./g, "")) rows.shift();
+  if (rows.length < 3 || rows.length > 16) problems.push(`it was ${rows.length} rows tall; 3 to 16`);
+  const wide = Math.max(0, ...rows.map((r) => r.length));
+  if (wide < 3 || wide > 16) problems.push(`it was ${wide} wide; 3 to 16`);
+  const bad = Object.entries(s.palette).filter(([c, v]) => c.length !== 1 || c === "." || typeof v !== "string" || !/^#[0-9a-f]{6}$/i.test(v));
+  if (bad.length) problems.push(`bad palette entries: ${bad.map(([c]) => JSON.stringify(c)).join(", ")}`);
+  if (Object.keys(s.palette).length > 7) problems.push("more than 6 colours besides the outline");
+  const unknown = [...new Set(rows.join("").replace(/\./g, ""))].filter((c) => !(c in s.palette));
+  if (unknown.length) problems.push(`characters not in the palette: ${unknown.join("")}`);
+  return { sprite: { rows, palette: { ...s.palette, k: INK } }, problems };
+}
+
+/** Draw a written-in item. Every attempt is kept; null if none was usable. */
+export async function draw(label: string): Promise<{ sprite: Sprite | null; drafts: { text: string; problems: string[] }[] }> {
+  const drafts: { text: string; problems: string[] }[] = [];
+  for (let i = 0; i < 3; i++) {
+    const last = drafts.at(-1);
+    const { text } = await generateText({
+      model: SCRIBE,
+      providerOptions: THINKING,
+      system: DRAWER,
+      prompt: JSON.stringify(last ? { draw: label, rejected: last.text, rejected_because: last.problems } : { draw: label }),
+      maxOutputTokens: 8000, // reasoning counts against it
+    });
+    const { sprite, problems } = spriteProblems(text);
+    drafts.push({ text, problems });
+    if (sprite && !problems.length) return { sprite, drafts };
+  }
+  return { sprite: null, drafts };
 }
 
 /** Go round to one plot. The same evidence never gets a second look. */

@@ -364,6 +364,14 @@ export const PALETTE: { group: string; props: string[] }[] = [
   { group: "Festive", props: ["bunting", "lanterns"] },
 ];
 
+/** The prop a placement draws as: a written-in item Gary has drawn wears its drawing, filed under its name. */
+export function look(p: { prop: string; label?: string | null; sprite?: PropDef | null }): string {
+  if (!p.sprite || !p.label) return p.prop;
+  const name = `item:${p.label.trim().toLowerCase()}`;
+  PROPS[name] ??= p.sprite;
+  return name;
+}
+
 const cache = new Map<string, HTMLCanvasElement>();
 
 /** A prop rasterised at one canvas pixel per cell, cached. Unknown names draw nothing. */

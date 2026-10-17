@@ -1,4 +1,5 @@
 import { createClient, type PostgrestError } from "@supabase/supabase-js";
+import type { PropDef } from "./content/canon/props.ts";
 
 export const supabase = createClient(
   import.meta.env.VITE_SUPABASE_URL,
@@ -101,6 +102,7 @@ export interface Placement {
   prop: string;
   label?: string | null; // a written-in item's name
   label_ok?: boolean | null; // Gary's read of it: null while he hasn't
+  sprite?: PropDef | null; // and his drawing of it, once he's done one
 }
 
 export async function loadPlacements(): Promise<Placement[]> {
@@ -113,7 +115,7 @@ export async function loadPlacements(): Promise<Placement[]> {
   }
 }
 
-const COLUMNS = "id, filing, x, y, prop, label, label_ok";
+const COLUMNS = "id, filing, x, y, prop, label, label_ok, sprite";
 
 export async function place(filing: number, x: number, y: number, prop: string, label?: string): Promise<Placement | string> {
   const { data, error } = await supabase.from("placements").insert({ filing, x, y, prop, label }).select(COLUMNS).single();

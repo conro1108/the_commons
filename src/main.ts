@@ -1,5 +1,5 @@
 import { BRUSHES, EMPTY, GROUND, paintGround } from "./content/ground.ts";
-import { PALETTE, propCanvas, propSize } from "./content/props.ts";
+import { look, PALETTE, propCanvas, propSize } from "./content/props.ts";
 import { BYLAWS } from "./rulebook.ts";
 import { BUILD_H, BUILD_W, MAP_H, MAP_W, MARGIN, PATH, PLOT_H, PLOT_W, ZOOM, plotAt, plotName, plotOrigin, type Plot } from "./layout.ts";
 import {
@@ -637,8 +637,8 @@ function labelItems() {
   const items = f && !zoom ? (built.get(f.id) ?? []).filter((p) => p.prop === "item") : [];
   while (box.children.length < items.length) box.append(Object.assign(document.createElement("div"), { className: "item-label" }));
   while (box.children.length > items.length) box.lastChild!.remove();
-  const { w } = propSize("item");
   items.forEach((p, i) => {
+    const { w } = propSize(look(p));
     const el = box.children[i] as HTMLElement;
     const text = p.label_ok
       ? p.label!
@@ -731,8 +731,8 @@ canvas.addEventListener("pointermove", (e) => {
   pointer = b;
   if (stroke) paintTo(brushAt(b.x, b.y));
   if (drag) {
-    const { w, h } = propSize(drag.p.prop);
-    Object.assign(drag, propAt(drag.p.prop, b.x - drag.dx + w / 2, b.y - drag.dy + h / 2));
+    const { w, h } = propSize(look(drag.p));
+    Object.assign(drag, propAt(look(drag.p), b.x - drag.dx + w / 2, b.y - drag.dy + h / 2));
   }
 });
 

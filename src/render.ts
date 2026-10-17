@@ -1,6 +1,6 @@
 import { K } from "./content/canon/props.ts";
 import { EMPTY, paintGround } from "./content/ground.ts";
-import { propCanvas, propHas, propSize } from "./content/props.ts";
+import { look, propCanvas, propHas, propSize } from "./content/props.ts";
 import { BUILD_H, BUILD_W, COLS, MAP_H, MAP_W, MARGIN, PLOT_H, PLOT_W, ROWS, ZOOM, plotName, plotOrigin, type Plot } from "./layout.ts";
 import type { Filing, Placement } from "./net.ts";
 import { drawAir, drawCritters, drawUnder } from "./life.ts";
@@ -159,7 +159,7 @@ function noticeBoard(ctx: CanvasRenderingContext2D) {
 
 /** Back to front: lower edges in front, then oldest first. */
 const drawOrder = (ps: Placement[]) =>
-  [...ps].sort((a, b) => a.y * ZOOM + propSize(a.prop).h - (b.y * ZOOM + propSize(b.prop).h) || a.id - b.id);
+  [...ps].sort((a, b) => a.y * ZOOM + propSize(look(a)).h - (b.y * ZOOM + propSize(look(b)).h) || a.id - b.id);
 
 /** When each placement landed, for the drop-in; only ones placed while we watched. */
 const landed = new Map<number, number>();
@@ -173,12 +173,12 @@ function drawBuilt(ctx: CanvasRenderingContext2D, ps: Placement[], now?: number)
     const x = p.x * ZOOM;
     const y = p.y * ZOOM;
     if (age < 120) {
-      prop(ctx, p.prop, x, y + DROP[Math.floor((age / 120) * DROP.length)]);
+      prop(ctx, look(p), x, y + DROP[Math.floor((age / 120) * DROP.length)]);
     } else {
-      prop(ctx, p.prop, x, y);
+      prop(ctx, look(p), x, y);
       if (age < 260) {
         // A puff of dust either side of where it landed.
-        const { w, h } = propSize(p.prop);
+        const { w, h } = propSize(look(p));
         ctx.fillStyle = "#f6f1dc";
         ctx.fillRect(x - 2, y + h - 1, 1, 1);
         ctx.fillRect(x + w + 1, y + h - 1, 1, 1);
@@ -201,7 +201,7 @@ export function placementAt(ps: Placement[], bx: number, by: number): Placement 
   const order = drawOrder(ps).reverse();
   for (const [dx, dy] of [[0, 0], [-1, 0], [1, 0], [0, -1], [0, 1]]) {
     for (const p of order) {
-      if (propHas(p.prop, Math.floor(bx - p.x * ZOOM) + dx, Math.floor(by - p.y * ZOOM) + dy)) return p;
+      if (propHas(look(p), Math.floor(bx - p.x * ZOOM) + dx, Math.floor(by - p.y * ZOOM) + dy)) return p;
     }
   }
   return null;
@@ -548,8 +548,8 @@ export function drawFocus(ctx: CanvasRenderingContext2D, scene: FocusScene, now:
   drawBuilt(ctx, scene.built, now);
   if (scene.hover) {
     const { p, colour } = scene.hover;
-    ctx.drawImage(halo(p.prop, colour), p.x * ZOOM - 1, p.y * ZOOM - 1);
-    prop(ctx, p.prop, p.x * ZOOM, p.y * ZOOM);
+    ctx.drawImage(halo(look(p), colour), p.x * ZOOM - 1, p.y * ZOOM - 1);
+    prop(ctx, look(p), p.x * ZOOM, p.y * ZOOM);
   }
   if (scene.ghost) {
     ctx.globalAlpha = 0.6;

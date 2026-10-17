@@ -94,6 +94,8 @@ create table the_commons.placements (
   label     text check (label is null or (prop = 'item' and length(btrim(label)) between 1 and 24)),
   label_ok  boolean,
   label_check jsonb, -- the decision model's raw answer
+  sprite    jsonb, -- Gary's drawing of it, {rows, palette}; reused for the same name
+  sprite_drafts jsonb, -- every attempt at the drawing
   placed_at timestamptz not null default now(),
   unique (filing, x, y)
 );
