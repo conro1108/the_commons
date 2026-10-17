@@ -127,7 +127,7 @@ function renderMine() {
     const fresh = thunk === latest.id;
     const shown = sealed ? `<p class="stamp pending">In the post</p>` : ruling(latest).replace('class="stamp', `class="stamp${fresh ? " thunk" : ""}`);
     filing = `<h2>Your latest filing</h2><p>Filing ${pad(latest.id)}, Plot ${plotName({ x: latest.plot_x, y: latest.plot_y })}: <q>${esc(latest.intent)}</q></p>
-       ${shown}${latest.status === "pending" ? `<p class="meta">Rulings usually take about a minute.</p>` : ""}
+       ${shown}
        ${sealed ? `<p class="meta">Gary's reply is on its way.</p>` : ""}`;
   }
   thunk = null;
