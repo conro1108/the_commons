@@ -3,7 +3,7 @@ import { look, PALETTE, propCanvas, propSize } from "./content/props.ts";
 import { BYLAWS } from "./rulebook.ts";
 import { BUILD_H, BUILD_W, MAP_H, MAP_W, MARGIN, PATH, PLOT_H, PLOT_W, ZOOM, plotAt, plotName, plotOrigin, type Plot } from "./layout.ts";
 import {
-  HELD, fileClaim, handlesFor, loadFilings, loadPlacements, move, paint, place, rehandle, rename, signIn, supabase, unplace,
+  HELD, fileClaim, handlesFor, loadFilings, loadPlacements, move, paint, place, rehandle, rename, signIn, summonGary, supabase, unplace,
   type Filing, type Placement,
 } from "./net.ts";
 import type { RealtimeChannel } from "@supabase/supabase-js";
@@ -827,6 +827,7 @@ function enterableAt(e: MouseEvent) {
 canvas.addEventListener("dblclick", (e) => {
   if (zoom) return;
   if (!focus) {
+    if (onGary(toArt(e, mapView))) return void summon();
     const f = enterableAt(e);
     if (f) walkInto(f);
   } else if (!toBuild(e)) {
@@ -883,10 +884,16 @@ const onBoard = (p: { x: number; y: number }) =>
 
 /** Gary says something, for a few seconds. */
 let said: { line: string; until: number } | null = null;
-function speak() {
+function speak(line?: string) {
   const lines = GARY_LINES.filter((l) => l !== said?.line);
-  said = { line: lines[Math.floor(Math.random() * lines.length)], until: performance.now() + 4500 };
+  said = { line: line ?? lines[Math.floor(Math.random() * lines.length)], until: performance.now() + 4500 };
   $("bubble").textContent = said.line;
+}
+
+/** Double-clicked, Gary comes round your outstanding conditions now. */
+async function summon() {
+  const n = await summonGary();
+  speak(n === null ? "Not now. The kettle." : n ? "Right. I'll come round now." : "Nothing outstanding that I haven't already seen.");
 }
 
 canvas.addEventListener("click", (e) => {

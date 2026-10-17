@@ -229,22 +229,25 @@ revoke execute on function the_commons.drain_gary() from public, anon, authentic
 
 -- Gary's rounds: an outstanding condition on a plot that's been built on and
 -- then left alone for a minute and a half gets a visit. Once per change; if a
--- visit fails, the next bit of building sends him again.
-create function the_commons.send_inspector() returns void
+-- visit fails, the next bit of building sends him again. Asked by a filer, he
+-- goes round just theirs, straight away. Returns how many plots he's off to.
+create function the_commons.send_inspector(asked_by uuid) returns int
 language plpgsql security definer set search_path = '' as $$
 declare
   f record;
   secret text;
+  n int := 0;
 begin
   select decrypted_secret into secret from vault.decrypted_secrets where name = 'the_commons_gary';
-  if secret is null then return; end if;
+  if secret is null then return 0; end if;
   for f in
     update the_commons.filings set inspect_sent = now()
     where status = 'conditional' and met_at is null
-      and built_at < now() - interval '90 seconds'
+      and (filer = asked_by or asked_by is null and built_at < now() - interval '90 seconds')
       and built_at > coalesce(inspect_sent, '-infinity')
     returning id
   loop
+    n := n + 1;
     perform net.http_post(
       url := 'https://the-commons-eosin.vercel.app/api/gary',
       body := jsonb_build_object('inspect', f.id),
@@ -252,12 +255,21 @@ begin
                                     'Authorization', 'Bearer ' || secret),
       timeout_milliseconds := 30000);
   end loop;
+  return n;
 end $$;
-revoke execute on function the_commons.send_inspector() from public, anon, authenticated;
+revoke execute on function the_commons.send_inspector(uuid) from public, anon, authenticated;
+
+-- Double-click Gary and he comes round your plots now.
+create function the_commons.summon_gary() returns int
+language sql security definer set search_path = '' as $$
+  select the_commons.send_inspector(auth.uid())
+$$;
+revoke execute on function the_commons.summon_gary() from public, anon;
+grant execute on function the_commons.summon_gary() to authenticated;
 
 select cron.unschedule(jobname) from cron.job where jobname like 'the_commons_%';
 select cron.schedule('the_commons_gary', '5 seconds', 'select the_commons.drain_gary()');
-select cron.schedule('the_commons_inspector', '30 seconds', 'select the_commons.send_inspector()');
+select cron.schedule('the_commons_inspector', '30 seconds', 'select the_commons.send_inspector(null)');
 -- The committee meets at 4am and has never once said no.
 select cron.schedule('the_commons_committee', '0 4 * * *', $$
   update the_commons.filings

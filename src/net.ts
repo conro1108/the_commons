@@ -124,6 +124,12 @@ export async function place(filing: number, x: number, y: number, prop: string, 
   return said(error);
 }
 
+/** Send Gary round your plots now. How many he's gone to, or null if he couldn't be reached. */
+export async function summonGary(): Promise<number | null> {
+  const { data, error } = await supabase.rpc("summon_gary");
+  return error ? null : data;
+}
+
 export async function unplace(id: number): Promise<boolean> {
   const { error } = await supabase.from("placements").delete().eq("id", id);
   return !error;
