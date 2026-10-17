@@ -5,13 +5,16 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
-    "db:push": "node db/push.mjs db/schema.sql"
+    "db:push": "node db/push.mjs db/schema.sql",
+    "test": "node --test test/*.test.ts"
   },
   "devDependencies": {
+    "@types/node": "^24.19.2",
     "typescript": "^7.0.2",
     "vite": "^8.3.4"
   },
   "dependencies": {
-    "@supabase/supabase-js": "^2.118.0"
+    "@supabase/supabase-js": "^2.118.0",
+    "ai": "^7.0.143"
   }
 }
