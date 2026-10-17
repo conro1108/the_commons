@@ -146,9 +146,9 @@ later `petitions`/`signatures`. Users are `auth.users` ids; names come from
 - Avatar: hatch a form, or import a Meadow export like the_farm does?
 - One commons for everyone, or several (a "parish" per N players)?
 - How big is a plot, and does the map grow as people arrive?
-- Persistent accounts (Google sign-in). Clerk is tempting, but its users never
-  land in `auth.users` (Supabase third-party auth gives a Clerk string id), which
-  breaks the toybox rule that users are `uuid references auth.users` and cuts
-  them off from `app.profiles`. Supabase Auth's own Google provider plus
-  `linkIdentity()` upgrades an anonymous user in place — same uuid, same plot.
-  Decide before people have plots worth keeping.
+- **Identity: persistent accounts via Google** (and maybe GitHub), so a plot
+  survives a cleared browser. Plan: Supabase Auth's Google provider +
+  `linkIdentity()`, which upgrades the anonymous user in place — same uuid,
+  same plot, same `app.profiles` row. Not Clerk or similar: those users never
+  land in `auth.users`, breaking the toybox rule. Needs a Google OAuth client
+  and the provider enabled on the shared project (benefits every sibling).
