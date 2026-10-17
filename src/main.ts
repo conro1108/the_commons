@@ -67,9 +67,13 @@ const esc = (s: string) => s.replace(/[&<>"]/g, (c) => `&${{ "&": "amp", "<": "l
 const who = (id: string) => (id === me ? "you" : (handles.get(id) ?? "a resident"));
 const clamp = (v: number, lo: number, hi: number) => Math.min(Math.max(v, lo), Math.max(lo, hi));
 
+/** Who holds what, as far as we know: a ruling still in the post reads as pending until its letter opens. */
 function heldPlots() {
   const held = new Map<string, Filing>();
-  for (const f of filings.values()) if (HELD.includes(f.status)) held.set(plotKey({ x: f.plot_x, y: f.plot_y }), f);
+  for (const f of filings.values()) {
+    if (unread.has(f.id)) held.set(plotKey({ x: f.plot_x, y: f.plot_y }), { ...f, status: "pending" });
+    else if (HELD.includes(f.status)) held.set(plotKey({ x: f.plot_x, y: f.plot_y }), f);
+  }
   return held;
 }
 
