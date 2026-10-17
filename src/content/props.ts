@@ -321,11 +321,27 @@ const COMMONS: Record<string, PropDef> = {
     ],
     palette: { k: K, r: "#7a7f99", w: "#c9a06a", b: "#a97048", d: "#7a5230", h: "#e8c56a", a: "#a8e4ef", f: "#f7ecd8" },
   },
+  notice: {
+    // a filing pinned to a stake, awaiting Gary; Gary's, not the palette's
+    rows: [
+      "...r...",
+      "kkkkkkk",
+      "kpppppk",
+      "kplllpk",
+      "kpppppk",
+      "kpllppk",
+      "kpppppk",
+      "kkkkkkk",
+      "...b...",
+      "...b...",
+    ],
+    palette: { k: K, p: "#fffdf3", l: "#9a8f9e", r: "#e06a7c", b: "#7a5230" },
+  },
 };
 
 const PROPS: Record<string, PropDef> = Object.assign(Object.create(null), CANON, COMMONS);
 
-/** The build palette, in groups. Gary keeps the note. */
+/** The build palette, in groups. Gary keeps the notice. */
 export const PALETTE: { group: string; props: string[] }[] = [
   { group: "Growing", props: ["flowers", "tuft", "sunflower", "garden", "hedge", "tree"] },
   { group: "Sitting", props: ["bench", "log", "picnic", "campfire", "rock", "pond"] },

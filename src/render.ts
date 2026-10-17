@@ -273,18 +273,18 @@ function drawPlot(ctx: CanvasRenderingContext2D, f: Filing, built: Placement[] |
 function drawPlotBody(ctx: CanvasRenderingContext2D, f: Filing, built: Placement[] | undefined, mine: boolean) {
   const { left, top } = plotOrigin({ x: f.plot_x, y: f.plot_y });
   if (f.status === "pending") {
-    // Stakes at the corners and a note on the in-tray: claimed, not yet granted.
+    // Stakes at the corners and the filing pinned up: claimed, not yet granted.
     ctx.fillStyle = FENCE;
     for (const [sx, sy] of [[1, 1], [PLOT_W - 2, 1], [1, PLOT_H - 3], [PLOT_W - 2, PLOT_H - 3]]) {
       ctx.fillRect(left + sx, top + sy, 1, 2);
     }
-    prop(ctx, "note", left + PLOT_W / 2 - 4, top + PLOT_H / 2 - 4);
+    prop(ctx, "notice", left + PLOT_W / 2 - 4, top + PLOT_H / 2 - 5);
     return;
   }
   const colour = mine ? INK : FENCE;
   if (f.status === "committee") {
     fence(ctx, left, top, PLOT_W, PLOT_H, colour, 4);
-    prop(ctx, "note", left + PLOT_W / 2 - 4, top + PLOT_H / 2 - 4);
+    prop(ctx, "notice", left + PLOT_W / 2 - 4, top + PLOT_H / 2 - 5);
     return;
   }
   const empty = !built?.length && !f.ground;
