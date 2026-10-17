@@ -73,7 +73,7 @@ revoke execute on function the_commons.enqueue_filing() from public, anon, authe
 create trigger filings_enqueue after insert on the_commons.filings
   for each row execute function the_commons.enqueue_filing();
 
--- Every minute: hand each queued filing to /api/gary. A message stays in the
+-- Every five seconds: hand each queued filing to /api/gary. A message stays in the
 -- queue (invisible for two minutes, then retried) until its filing is no longer
 -- pending. After five tries it backs off to hourly; the filing stays pending —
 -- and so unpublished — until Gary has actually read it. One he still can't read
@@ -111,7 +111,7 @@ end $$;
 revoke execute on function the_commons.drain_gary() from public, anon, authenticated;
 
 select cron.unschedule(jobname) from cron.job where jobname like 'the_commons_%';
-select cron.schedule('the_commons_gary', '* * * * *', 'select the_commons.drain_gary()');
+select cron.schedule('the_commons_gary', '5 seconds', 'select the_commons.drain_gary()');
 -- The committee meets at 4am and has never once said no.
 select cron.schedule('the_commons_committee', '0 4 * * *', $$
   update the_commons.filings

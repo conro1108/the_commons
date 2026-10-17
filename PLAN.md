@@ -20,7 +20,7 @@ tool for**, and no job is done twice. See the infra map.
 
 1. **File a claim.** Pick an empty plot, write one line of intent ("a bench,
    for looking at the pond with"). It goes into Gary's in-tray and comes back
-   a minute or so later — the delay is the joke, and it's also the queue.
+   a few seconds later — the delay is the joke, and it's also the queue.
    Gary returns a decision from a fixed set — *approved*, *approved with
    conditions*, *referred to committee*, *denied* — plus the permit's prose, maybe a
    condition from an enum ("must face north", "must include a small flag"),
@@ -85,7 +85,7 @@ No fail states: spread is never damage, a dispute is never a loss.
 | **Supabase Postgres + RLS** | All state. Clients write directly only where RLS can judge it alone (props on your own plot, a filing row in `pending`). |
 | **Supabase Auth** | Anonymous sign-in; link GitHub/Google later to keep your plot. |
 | **Supabase Realtime** | Postgres Changes for the map and stamps; **Broadcast** for avatars walking around (never persisted); **Presence** for who's on the commons, which also feeds path wear. |
-| **pg_cron** | The world tick (every few minutes) and draining Gary's queue (every minute). Vercel Hobby crons are daily-only, so anything frequent lives here. |
+| **pg_cron** | The world tick (every few minutes) and draining Gary's queue (every five seconds). Vercel Hobby crons are daily-only, so anything frequent lives here. |
 | **Supabase Queues (pgmq)** | Gary's in-tray. A filing insert enqueues; retries and backlog for free. |
 | **pg_net + Vault** | The database calls out to Vercel: the drain job POSTs queued filings to `/api/gary`, with a shared secret held in Vault. |
 | **Supabase Edge Functions** | The world tick when its step logic outgrows SQL (pathfinding for Pesto, spread rules) — TypeScript, invoked by pg_cron. |
