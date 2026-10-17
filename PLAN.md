@@ -139,7 +139,12 @@ later `petitions`/`signatures`. Users are `auth.users` ids; names come from
 
 - The schema rebuild wipes the commons — and its cron jobs and queue, which
   live in the schema too. Fine while prototyping; once people live here, the
-  commons is the one toy whose data isn't disposable.
+  commons is the one toy whose data isn't disposable. **Needed soon, before
+  real players:** CI rebuilds on any `db/**` push, so even a one-line cron
+  tweak wipes every filing. Plan: split into `db/tables.sql` (`create table if
+  not exists`, never auto-run; changes are hand-run `alter table`s folded back
+  in) and `db/logic.sql` (functions, triggers, RLS, cron, queue — rerunnable,
+  pushed by CI).
 - pg_cron jobs, pgmq queues, and Vault secrets are database-wide, not
   per-schema — name them `the_commons_*` so they don't collide with siblings,
   and have `schema.sql` unschedule its own jobs before rescheduling.
