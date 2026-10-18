@@ -480,7 +480,7 @@ export async function draw(label: string): Promise<{ sprite: Sprite | null; draf
       providerOptions: THINKING,
       system: DRAWER,
       prompt: JSON.stringify(last ? { draw: label, rejected: last.text, rejected_because: last.problems } : { draw: label }),
-      maxOutputTokens: 8000, // reasoning counts against it
+      maxOutputTokens: 16000, // reasoning counts against it; at 8000 it sometimes thought itself out of an answer
     });
     const { sprite, problems } = spriteProblems(text);
     drafts.push({ text, problems });
