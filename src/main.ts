@@ -342,6 +342,12 @@ function renderBuildInfo() {
       ? `<p class="hint">Building on a granted plot needs no further paperwork. Gary finds this difficult.</p>`
       : `<p class="meta">${count ? `${count} thing${count === 1 ? "" : "s"} built.` : "Nothing built yet."}</p>`}`;
   $("tool-hint").textContent = HINTS[tool.split(":")[0]];
+  if (f.filer === me) renderTools(f);
+  fitFocus(); // the info's height moves the plot on an upright screen
+}
+
+/** Flip the toolbar's classes; it only exists on your own plot. */
+function renderTools(f: Filing) {
   const wants = new Set(f.wants && !f.met_at ? [f.wants] : []);
   for (const b of $("palette").querySelectorAll<HTMLButtonElement>("[data-tool]")) {
     b.classList.toggle("on", b.dataset.tool === tool);
@@ -353,7 +359,6 @@ function renderBuildInfo() {
     $("tabs").querySelector(`[data-tab="${g.dataset.group}"]`)?.classList.toggle("wanted", !!g.querySelector(".wanted"));
   }
   for (const b of $("tabs").querySelectorAll<HTMLButtonElement>("[data-tab]")) b.classList.toggle("on", b.dataset.tab === openGroup);
-  fitFocus(); // the info's height moves the plot on an upright screen
 }
 
 const icons = new Map<string, string>();
@@ -492,14 +497,20 @@ function fitMap(): View {
   return s === whole.s ? whole : { s, ox: 0, oy: 0 };
 }
 
-/** Centre the map on us along any side it overflows, stopping at its edges. */
+/**
+ * Centre the map on us along any side it overflows, stopping at its edges.
+ * When the tag sits at the bottom (a phone held upright), centre the map in
+ * the room above it, if the map fits there, so the tag isn't over the board.
+ */
 function follow() {
   const self = walkers.get(me);
   const { s } = mapView;
   const axis = (room: number, art: number, at = art / 2) =>
     room >= art * s ? Math.floor((room - art * s) / 2) : Math.round(clamp(room / 2 - at * s, room - art * s, 0));
+  const tag = $("tag");
+  const above = tag.offsetTop * 2 > canvas.height / dpr ? (tag.offsetTop - 8) * dpr : canvas.height;
   mapView.ox = axis(canvas.width, MAP_W, self?.x);
-  mapView.oy = axis(canvas.height, MAP_H, self?.y);
+  mapView.oy = axis(above >= MAP_H * s ? above : canvas.height, MAP_H, self?.y);
 }
 
 /** Up close, clear of the toolbar when there is one. */
