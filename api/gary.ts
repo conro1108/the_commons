@@ -12,7 +12,7 @@ import { experimental_decide as decide, generateText } from "ai";
 
 const JUDGE = "perplexity/pplx-decider-v1.2";
 const SCRIBE = "openai/gpt-5-mini";
-const NO_THINKING = { openai: { reasoningEffort: "minimal" } }; // short prose; thinking only adds cost and wait
+const LIGHT_THINKING = { openai: { reasoningEffort: "low" } }; // short prose, but a moment's thought keeps it on the facts
 const THINKING = { openai: { reasoningEffort: "medium" } }; // drawing is spatial; worth the wait
 
 export const BYLAWS = [
@@ -224,10 +224,10 @@ export async function rule(
     const last = drafts.at(-1);
     const { text } = await generateText({
       model: SCRIBE,
-      providerOptions: NO_THINKING,
+      providerOptions: LIGHT_THINKING,
       system: refused ? RATTLED : VOICE,
       prompt: JSON.stringify(last ? { ...input, rejected_draft: last.text, rejected_because: last.problems } : input),
-      maxOutputTokens: 600,
+      maxOutputTokens: 4000, // reasoning counts against it
     });
     const draft = trim(text, refused ? 6 : 2);
     let checks: Partial<Record<Check, number>> = {};
@@ -278,10 +278,10 @@ export async function writeCondition(filing: { id: number; intent: string }, sto
     const last = tries.at(-1);
     const { text } = await generateText({
       model: SCRIBE,
-      providerOptions: NO_THINKING,
+      providerOptions: LIGHT_THINKING,
       system: CONDITIONER,
       prompt: JSON.stringify(last ? { ...input, rejected: last.text, rejected_because: last.problems } : input),
-      maxOutputTokens: 300,
+      maxOutputTokens: 4000, // reasoning counts against it
     });
     const condition = trim(text, 1);
     if (!/^must\b/i.test(condition) || problemsWith(condition, {}).length) {
@@ -356,10 +356,10 @@ export async function inspect(filing: { id: number; intent: string; condition: s
     const last = drafts.at(-1);
     const { text } = await generateText({
       model: SCRIBE,
-      providerOptions: NO_THINKING,
+      providerOptions: LIGHT_THINKING,
       system: INSPECTOR,
       prompt: JSON.stringify(last ? { ...state, met, rejected: last.text, rejected_because: last.problems } : { ...state, met }),
-      maxOutputTokens: 400,
+      maxOutputTokens: 4000, // reasoning counts against it
     });
     const draft = trim(text, 2);
     let problems = problemsWith(draft, {});
