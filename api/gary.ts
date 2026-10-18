@@ -3,7 +3,7 @@
 // key, so nobody forges a permit. A written-in item's name comes as
 // { item: id }, to be read before anyone else sees it, then drawn. It also POSTs { inspect: id } when a plot
 // with an outstanding condition has been built on (send_inspector()), and
-// Gary goes round to see whether the condition's been met. A decision model rules from enums; GLM only
+// Gary goes round to see whether the condition's been met. A decision model rules from enums; the scribe only
 // writes the prose, and the decision model checks it before it goes out. The write is conditional on the filing still being
 // pending, so a retried request never overwrites a stored ruling.
 
@@ -11,9 +11,9 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { experimental_decide as decide, generateText } from "ai";
 
 const JUDGE = "typesafe-ai/jev";
-const SCRIBE = "zai/glm-5.3-flash";
-const LIGHT_THINKING = "low"; // short prose, but a moment's thought keeps it on the facts
-const THINKING = "high"; // drawing is spatial; worth the wait (GLM has no medium)
+const SCRIBE = "anthropic/claude-haiku-5.5";
+const LIGHT_THINKING = "medium"; // short prose, but some thought keeps it on the facts
+const THINKING = "medium"; // drawing is spatial; worth the wait
 
 export const BYLAWS = [
   "Structures shall be modest: nothing taller than a reasonably tall goose.",
