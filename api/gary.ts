@@ -10,10 +10,10 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { experimental_decide as decide, generateText } from "ai";
 
-const JUDGE = "perplexity/pplx-decider-v1.2";
-const SCRIBE = "openai/gpt-5-mini";
-const LIGHT_THINKING = { openai: { reasoningEffort: "low" } }; // short prose, but a moment's thought keeps it on the facts
-const THINKING = { openai: { reasoningEffort: "medium" } }; // drawing is spatial; worth the wait
+const JUDGE = "typesafe-ai/jev";
+const SCRIBE = "zai/glm-5.3-flash";
+const LIGHT_THINKING = "low"; // short prose, but a moment's thought keeps it on the facts
+const THINKING = "high"; // drawing is spatial; worth the wait (GLM has no medium)
 
 export const BYLAWS = [
   "Structures shall be modest: nothing taller than a reasonably tall goose.",
@@ -224,7 +224,7 @@ export async function rule(
     const last = drafts.at(-1);
     const { text } = await generateText({
       model: SCRIBE,
-      providerOptions: LIGHT_THINKING,
+      reasoning: LIGHT_THINKING,
       system: refused ? RATTLED : VOICE,
       prompt: JSON.stringify(last ? { ...input, rejected_draft: last.text, rejected_because: last.problems } : input),
       maxOutputTokens: 4000, // reasoning counts against it
@@ -278,7 +278,7 @@ export async function writeCondition(filing: { id: number; intent: string }, sto
     const last = tries.at(-1);
     const { text } = await generateText({
       model: SCRIBE,
-      providerOptions: LIGHT_THINKING,
+      reasoning: LIGHT_THINKING,
       system: CONDITIONER,
       prompt: JSON.stringify(last ? { ...input, rejected: last.text, rejected_because: last.problems } : input),
       maxOutputTokens: 4000, // reasoning counts against it
@@ -356,7 +356,7 @@ export async function inspect(filing: { id: number; intent: string; condition: s
     const last = drafts.at(-1);
     const { text } = await generateText({
       model: SCRIBE,
-      providerOptions: LIGHT_THINKING,
+      reasoning: LIGHT_THINKING,
       system: INSPECTOR,
       prompt: JSON.stringify(last ? { ...state, met, rejected: last.text, rejected_because: last.problems } : { ...state, met }),
       maxOutputTokens: 4000, // reasoning counts against it
@@ -482,7 +482,7 @@ export async function draw(label: string): Promise<{ sprite: Sprite | null; draf
     const last = drafts.at(-1);
     const { text } = await generateText({
       model: SCRIBE,
-      providerOptions: THINKING,
+      reasoning: THINKING,
       system: DRAWER,
       prompt: JSON.stringify(last ? { draw: label, rejected: last.text, rejected_because: last.problems } : { draw: label }),
       maxOutputTokens: 16000, // reasoning counts against it; at 8000 it sometimes thought itself out of an answer
