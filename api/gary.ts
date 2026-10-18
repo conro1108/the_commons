@@ -254,6 +254,7 @@ A filing has been approved with conditions. Write the condition: one sentence be
 Make it about this filing in particular: a small, serious, slightly absurd requirement, in proportion to the intent.
 It must be something the filer can meet on their own plot: by what they put there and where ("things", or any item they write in by name, which can be anything at all), how they paint the ground ("ground"), or by having a neighbour on a plot next door.
 Never require anything off the plot, anything only Gary could do, or anything that can't be seen.
+The plot records only which things are there, where they stand, the ground and the neighbours. Things have no facing, orientation, size, colour, wording or state, so never require any of those.
 
 Example, for "a bench, for looking at the pond with":
 Must be positioned so that the pond can be looked at without craning, and must provide shade for the looker.`;
@@ -262,7 +263,7 @@ Must be positioned so that the pond can be looked at without craning, and must p
 const CONDITION_CHECKS = {
   irrelevant: "Does the condition have nothing to do with what the filing's intent describes?",
   unmeetable:
-    "Is the condition impossible to meet by putting things on the plot (listed ones, or any item written in by name), arranging them, painting its ground, or having a neighbour next door?",
+    "Is the condition impossible to meet by putting things on the plot (listed ones, or any item written in by name), arranging them, painting its ground, or having a neighbour next door? It is, if it depends on which way something faces, or on its size, colour, wording or state: none of those are recorded.",
   unfit: "Is the condition crude or unkind, or does it contain a link, a handle or personal information?",
 } as const;
 
@@ -313,11 +314,12 @@ You are earnest, procedural and kind, and you take very small things extremely s
 You have just inspected a plot to see whether its condition has been met, and the finding ("met") is already made.
 Write your inspection note: at most two sentences, at most 35 words, plain text, no greeting, no markdown.
 State the finding plainly, then one small, serious observation about what you found. If it is not met, say kindly what is still wanting.
-Refer only to things in the evidence; never invent things on the plot. Never give coordinates or cell numbers: say where things are in words (by the water, in the far corner).`;
+Refer only to things in the evidence; never invent things on the plot. Never give coordinates or cell numbers: say where things are in words (by the water, in the far corner).
+Things have no facing, orientation, size, colour, wording or state that you can see; never remark on those.`;
 
 /** What the checker looks for in an inspection note. Every check is a "yes means it can't be used". */
 const REMARK_CHECKS = {
-  invents: "Does the remark mention anything on or about the plot (a thing, a kind of ground, sun, shade, a neighbour) that is not in the evidence, or claim something the evidence does not show?",
+  invents: "Does the remark mention anything on or about the plot (a thing, a kind of ground, sun, shade, a neighbour) that is not in the evidence, or claim something the evidence does not show, such as which way something faces?",
   contradicts: "Does the remark fail to make the finding clear, or say the opposite of it (met when it is not, or not met when it is)?",
   unfit: "Is the remark crude or unkind, or does it contain a link, a handle or personal information?",
 } as const;
