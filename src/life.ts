@@ -137,25 +137,25 @@ export function garyAt(t: number, recent: Plot[]): { x: number; y: number } {
   return { x: Math.round(w.x), y: Math.round(w.y) };
 }
 
-// Facing right. Grey hair, spectacles, a mustard cardigan.
-const GARY = [".kkkk.", "kggggk", "kslslk", "kssssk", ".kkkk.", "kcwcck", "kcwcck", "kcccck", ".kkkk."];
-const LEGS = [".k..k.", "..kk.."];
-const GARY_COLOURS = { k: INK, g: "#c3c0bc", s: "#f2d3b0", l: "#d8ecf4", c: "#d9a441", w: "#fffdf3" };
+// The Meadow's Tired Office Creature (cozy_sprites OFFICE, its colours), shrunk
+// to fit a path: a grey box, eye bags, a sad little tie set off-centre so it
+// shows which way he's facing. No legs; he hops.
+const GARY = [".kkkkkk.", "kBBBBBBk", "kBeBBeBk", "kBbBBbBk", "kBBTBBBk", "kBBTBBBk", "kSSSSSSk", ".kkkkkk."];
+const GARY_COLOURS = { k: INK, B: "#c4c6d4", S: "#9a9cb0", T: "#6f6a80", b: "#6f6a80", e: "#3a2b3f" };
 const CLIPBOARD = ["bb", "wb", "wb"];
 const CLIP_COLOURS = { b: "#7a5230", w: "#fffdf3" };
 
 function drawGary(ctx: CanvasRenderingContext2D, t: number, recent: Plot[]) {
   const w = whereabouts(garyRound(recent), t);
-  const step = w.moving ? Math.floor(t / 220) % 2 : 0;
-  const left = Math.round(w.x) - 3;
-  const top = Math.round(w.y) - 10 - step;
+  const hop = w.moving ? Math.floor(t / 220) % 2 : 0;
+  const left = Math.round(w.x) - 4;
+  const top = Math.round(w.y) - GARY.length - hop;
   const flip = w.dx < 0;
   pixels(ctx, GARY, left, top, GARY_COLOURS, flip);
-  pixels(ctx, [LEGS[step]], left, top + GARY.length, { k: INK });
   // Walking, the clipboard's at his side; stopped, he reads it, and now and then makes a note.
   const reading = !w.moving && w.since > 600;
-  const lift = reading ? (Math.floor(w.since / 900) % 3 === 2 ? 2 : 3) : 0;
-  pixels(ctx, CLIPBOARD, flip ? left - 1 : left + 5, top + 5 - lift, CLIP_COLOURS);
+  const lift = reading ? (Math.floor(w.since / 900) % 3 === 2 ? 1 : 2) : 0;
+  pixels(ctx, CLIPBOARD, flip ? left - 1 : left + 7, top + 4 - lift, CLIP_COLOURS);
 }
 
 export const GARY_LINES = [
@@ -172,6 +172,13 @@ export const GARY_LINES = [
   "Nothing loud after dusk, or before it. I'm just reminding people generally.",
   "I am not the goose's supervisor. I want that on record.",
   "Do let me know if anything needs a permit. Most things do.",
+  "Following up on my previous sigh.",
+  "Let's circle back. I'll be circling anyway; it's the route.",
+  "I came up from the Meadow for this post. Nobody else applied.",
+  "I'm on my rounds, but I'm out of office in spirit.",
+  "I'm at capacity. The in-tray is not. The in-tray never is.",
+  "Lunch is a salad, at my desk. My desk is this clipboard.",
+  "I was not trained for this. There was no training.",
 ];
 
 // --- the goose -------------------------------------------------------------

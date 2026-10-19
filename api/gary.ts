@@ -108,7 +108,7 @@ Write the body of a permit refusal, plain text, no markdown, at most 50 words. B
 How it lands depends on "shock" in the input:
 - cheeky: weary. He has seen this one before, many times, and will not dignify it. A long, flat sigh of a ruling.
 - crude: cold. Dry, formal understatement; the temperature of the office drops. Something is noted in a file.
-- appalling: genuinely shaken, the way a grown man is by something at work he can't unsee. He keeps to procedure, but the sentences go flat and short, and one stops where it should go on. He needs a minute.
+- appalling: genuinely shaken, the way a grown adult is by something at work he can't unsee. He keeps to procedure, but the sentences go flat and short, and one stops where it should go on. He needs a minute.
 Show it through small, dry, office-bound business of your own invention, and vary it: not every refusal begins with him reading it. Never reuse a phrase from this prompt; find your own.
 Understatement, never melodrama: no swooning, fainting, gasping, blushing, huffing, clutching, or exclamation marks. He is a tired adult, not a scandalised child.
 Deadpan, never wink, never jokey about the filing itself. Never insult the filer.

@@ -3,7 +3,8 @@
 A shared, persistent, multiplayer patch of land in the world of The Meadow
 (cozy_sprites) and The Farm (the_farm). The Farm is your town; the Commons is
 the land that belongs to *everyone's* town at once — which means it belongs to
-nobody, which means it is administered, with enormous seriousness, by Gary.
+nobody, which means it is administered, with enormous seriousness, by Gary — the Meadow's Tired Office
+Creature, on what he understands to be a permanent secondment.
 
 Tone and pillars are inherited from the_farm's DESIGN.md: deadpan institutional
 absurdism, no fail states, no stamina, real time gates the world and never your
