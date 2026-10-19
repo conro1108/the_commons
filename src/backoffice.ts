@@ -3,7 +3,6 @@
 // local-only fakes for testing how things arrive. Loaded only when opened.
 
 import type { Filing, Status } from "./net.ts";
-import type { Plot } from "./layout.ts";
 
 export interface DevHooks {
   me: string;
@@ -12,11 +11,11 @@ export interface DevHooks {
   papers: () => void;
   speak: (line?: string) => void;
   selected: () => number | null; // the filing on the selected plot
-  freePlot: () => Plot | null;
+  freePlot: () => number | null; // the selected plot if it's free, else any free one
 }
 
-// Mirrors CONDITIONS in api/gary.ts.
-const STOCK = ["north", "flag", "plaque", "tuesdays", "dignified", "neighbour", "goose", "smaller"];
+// Mirrors CONDITIONS in api/gary.ts; "local" is the plot's own ground's.
+const STOCK = ["local", "north", "flag", "plaque", "tuesdays", "dignified", "neighbour", "goose", "smaller"];
 const STATUSES: Status[] = ["approved", "conditional", "committee", "denied", "refused", "lost"];
 const KEPT = "the_commons.dev.runs";
 
@@ -75,6 +74,8 @@ export function backoffice(hooks: DevHooks) {
   const id = panel.querySelector<HTMLInputElement>("[name=id]")!;
   const sel = hooks.selected();
   if (!panel.hidden && sel !== null && !id.value) id.value = String(sel);
+  const plot = panel.querySelector<HTMLInputElement>("[name=plot]")!;
+  if (!panel.hidden && !plot.value) plot.value = String(hooks.freePlot() ?? 1);
 }
 
 function mount(hooks: DevHooks): HTMLElement {
@@ -109,6 +110,7 @@ function mount(hooks: DevHooks): HTMLElement {
   panel.innerHTML = `<button class="close" aria-label="Close">×</button>
     <h2>Back office</h2>
     <label>Filing <input type="number" name="id" placeholder="9999"></label><button data-do="filing">Look up</button>
+    <label>Plot <input type="number" name="plot" placeholder="1"></label>
     <textarea name="intent" rows="2" maxlength="120" placeholder="an intent, or the name of a thing to draw"></textarea>
     <h2>Dry run <span class="meta">nothing is written; current prompts</span></h2>
     <button data-do="rule">Rule</button><button data-do="committee">Committee</button><button data-do="draw">Draw</button><br>
@@ -127,6 +129,7 @@ function mount(hooks: DevHooks): HTMLElement {
   const field = <T extends HTMLElement = HTMLInputElement>(name: string) => panel.querySelector<T>(`[name=${name}]`)!;
   const id = () => (field("id").value ? Number(field("id").value) : null);
   const intent = () => field<HTMLTextAreaElement>("intent").value.trim();
+  const plotId = () => Number(field("plot").value) || 1;
 
   let runs: Run[] = JSON.parse(localStorage.getItem(KEPT) ?? "[]");
   let n = runs.reduce((m, r) => Math.max(m, r.n), 0);
@@ -172,12 +175,12 @@ function mount(hooks: DevHooks): HTMLElement {
     const fid = wanted && !hooks.filings.has(wanted) ? wanted : ++fakes;
     const now = new Date().toISOString();
     const base: Filing = {
-      id: fid, filer: hooks.me, plot_x: plot.x, plot_y: plot.y, intent: intent() || "a bench, for looking at the pond with",
+      id: fid, filer: hooks.me, plot, intent: intent() || "a bench, for looking at the pond with",
       status: from, condition: null, wants: null, bylaw: null, permit: null, minutes: null, filed_at: now, stamped_at: null,
       built_at: null, inspected_at: null, remark: null, met_at: null, ground: null,
     };
     await hooks.arrive(base);
-    await hooks.arrive({ ...base, stamped_at: now, ...stamped, id: fid, filer: hooks.me, plot_x: plot.x, plot_y: plot.y });
+    await hooks.arrive({ ...base, stamped_at: now, ...stamped, id: fid, filer: hooks.me, plot });
   }
 
   function preview(r: Run) {
@@ -193,11 +196,11 @@ function mount(hooks: DevHooks): HTMLElement {
 
   const DO: Record<string, () => unknown> = {
     filing: () => id() && call("filing", "filing", { id: id() }),
-    rule: () => call("rule", "rule", { id: id() ?? 9999, intent: intent() }),
-    committee: () => call("committee", "committee", { id: id() ?? 9999, intent: intent() }),
+    rule: () => call("rule", "rule", { id: id() ?? 9999, plot: plotId(), intent: intent() }),
+    committee: () => call("committee", "committee", { id: id() ?? 9999, plot: plotId(), intent: intent() }),
     draw: () => call("draw", "draw", { label: intent() }),
     condition: () => call("condition", "condition", {
-      id: id() ?? 9999, intent: intent(), stock: field<HTMLSelectElement>("stock").value, writeIn: field("writeIn").checked,
+      id: id() ?? 9999, plot: plotId(), intent: intent(), stock: field<HTMLSelectElement>("stock").value, writeIn: field("writeIn").checked,
     }),
     inspect: () => id() && call("inspect", "inspect", { id: id(), condition: field("condition").value.trim() || undefined }),
     audit: () => id() && call("audit", "audit", { id: id() }),

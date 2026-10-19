@@ -5,7 +5,7 @@
 import * as gary from "./gary.js";
 
 type Body = Parameters<typeof gary.desk>[1] & {
-  what: string; intent?: string; label?: string; stock?: gary.Condition; writeIn?: boolean; condition?: string;
+  what: string; plot?: number; intent?: string; label?: string; stock?: gary.Condition; writeIn?: boolean; condition?: string;
 };
 
 export async function POST(req: Request): Promise<Response> {
@@ -21,13 +21,14 @@ export async function POST(req: Request): Promise<Response> {
 
 async function run(db: gary.Db, { what, ...b }: Body): Promise<unknown> {
   const filing = { id: b.id ?? 9999, intent: b.intent ?? "" };
+  const plot = gary.plotOf(b.plot ?? 1);
   switch (what) {
     case "rule":
-      return gary.rule(filing, await gary.precedentFor(db, filing.id));
+      return gary.rule(filing, plot, await gary.precedentFor(db, filing.id, plot));
     case "condition":
-      return gary.writeCondition(filing, b.stock ?? "flag", undefined, b.writeIn);
+      return gary.writeCondition(filing, b.stock ?? "local", { plot, writeIn: b.writeIn });
     case "committee":
-      return gary.sit(filing);
+      return gary.sit(filing, plot);
     case "draw":
       return gary.draw(b.label ?? "");
     case "inspect": {

@@ -6,6 +6,7 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "db:push": "node db/push.mjs db/schema.sql",
+    "world": "node scripts/world.ts && node scripts/plots-sql.ts",
     "test": "node --test test/*.test.ts"
   },
   "devDependencies": {

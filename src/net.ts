@@ -23,13 +23,12 @@ export type Status = "pending" | "approved" | "conditional" | "committee" | "den
 export interface Filing {
   id: number;
   filer: string;
-  plot_x: number;
-  plot_y: number;
+  plot: number; // a PlotDef id (src/world)
   intent: string;
   status: Status;
   condition: string | null;
   wants: string | null;
-  bylaw: number | null;
+  bylaw: number | null; // 1-7 for BYLAWS; 0 for the covenant of the plot's region
   permit: string | null;
   minutes: { outcome: string; finding: string | null; members: { seat: string; vote: string | null; speech: string | null }[] } | null;
   filed_at: string;
@@ -131,8 +130,8 @@ export async function saveProfile(id: string, name: string, avatar: Avatar): Pro
 }
 
 /** File a claim; returns a clerk's explanation if the in-tray says no. */
-export async function fileClaim(x: number, y: number, intent: string): Promise<string | null> {
-  const { error } = await supabase.from("filings").insert({ plot_x: x, plot_y: y, intent });
+export async function fileClaim(plot: number, intent: string): Promise<string | null> {
+  const { error } = await supabase.from("filings").insert({ plot, intent });
   if (!error) return null;
   if (error.message.includes("filings_plot_held")) return "Another filing for this plot is already in Gary's in-tray.";
   if (error.code === "23514") return "Filings must be between 3 and 120 characters.";

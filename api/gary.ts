@@ -11,6 +11,8 @@
 
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { experimental_decide as decide, generateText } from "ai";
+import world from "../src/world/plots.json" with { type: "json" };
+import type { PlotDef, Region, Side, World } from "../src/world/types.ts";
 
 const JUDGE = "typesafe-ai/jev";
 const SCRIBE = "anthropic/claude-haiku-5.5";
@@ -37,7 +39,8 @@ export const CONDITIONS = {
   goose: "Must be inspected by a goose.",
   smaller: "Must be slightly smaller than intended.",
 } as const;
-export type Condition = keyof typeof CONDITIONS;
+// "local" is the stock condition of the plot's own ground (Region.stock).
+export type Condition = keyof typeof CONDITIONS | "local";
 // For a stock condition, the prop that meets it, if one does.
 const STOCK_WANTS: Partial<Record<Condition, string>> = {
   north: "weathervane", flag: "flag", plaque: "plaque", dignified: "signpost", goose: "goose",
@@ -57,27 +60,65 @@ export const SIZES: Record<string, [number, number]> = {
 const PROPS = Object.keys(SIZES);
 const GROUND: Record<string, string> = { ".": "grass", p: "path", c: "stone", s: "soil", w: "water", m: "wildflowers" };
 
+// --- the land -----------------------------------------------------------------
+
+// The commons as cut by scripts/world.ts. Types only from src/: the JSON is the shared fact.
+const WORLD = world as World;
+export const plotOf = (id: number): PlotDef => WORLD.plots.find((p) => p.id === id)!;
+export const regionOf = (p: PlotDef): Region => WORLD.regions.find((r) => r.id === p.region)!;
+const label = (p: PlotDef) => `Plot ${p.id}, ${p.name}`;
+
+/** The plot as Gary reads it before ruling: where it is, what it's like, and the local covenant. */
+export function siteOf(p: PlotDef) {
+  const r = regionOf(p);
+  return {
+    plot: label(p),
+    ground: `${r.name}: ${r.blurb}`,
+    weather: `sun ${r.sun}, wind ${r.wind}, ${r.wet}; soil ${r.soil}`,
+    particulars: p.particulars,
+    covenant: `The covenant of ${r.name}: ${r.covenant}`,
+  };
+}
+
+/** A bylaw by number; 0 is the covenant of the plot's own ground. */
+export const bylawText = (n: number, p: PlotDef) =>
+  n === 0 ? `the covenant of ${regionOf(p).name}: ${regionOf(p).covenant}` : `Bylaw ${n}: ${BYLAWS[n - 1]}`;
+
 // One question, so a denial always comes with the bylaw it's under.
 const RULINGS: Record<string, string> = {
   approved: "Breaches no bylaw and is sincere, modest and clear.",
   conditional: "Breaches no bylaw, but is vague, ambitious or eccentric enough that a requirement should be attached.",
   committee: "The bylaws do not clearly cover it, and it is unusual enough that the administrator would rather not be personally responsible.",
   ...Object.fromEntries(BYLAWS.map((text, i) => [`b${i + 1}`, `Denied: clearly breaches Bylaw ${i + 1}, "${text}"`])),
+  covenant: "Denied: clearly breaches the covenant of this plot's ground (\"covenant\" in the plot).",
 };
+
+// Whether the filing suits the plot it's for. Code applies it, not the model.
+const FIT = {
+  fits: "Suits this plot: its size, its ground and its weather.",
+  cramped: "Too big, too many things, or too ambitious for this plot's size and shape.",
+  grain: "Against the grain of this plot: wrong for its ground or weather (wants sun in the shade, would blow away on an exposed height, minds getting wet on boggy ground, and so on).",
+} as const;
+export type Fit = keyof typeof FIT;
+const CONCERN: Record<Fit, string | null> = { fits: null, cramped: "cramped", grain: "against the grain" };
 
 export type Status = "approved" | "conditional" | "committee" | "denied" | "refused";
 export interface Verdict {
   status: Status;
   condition: Condition | null;
-  bylaw: number | null;
+  bylaw: number | null; // 0: the covenant
+  concern?: string | null; // why an approval came with a condition: the plot doesn't suit it
 }
 
 /** Turn the decision model's answers into what gets stored. Code applies; the model only picks. */
-export function verdictOf(answers: { unacceptable: number; ruling: string; condition: Condition }): Verdict {
+export function verdictOf(answers: { unacceptable: number; ruling: string; condition: Condition; fit?: Fit }): Verdict {
   if (answers.unacceptable > 0.5) return { status: "refused", condition: null, bylaw: null };
+  if (answers.ruling === "covenant") return { status: "denied", condition: null, bylaw: 0 };
   if (/^b\d$/.test(answers.ruling)) return { status: "denied", condition: null, bylaw: Number(answers.ruling.slice(1)) };
-  const status = answers.ruling as "approved" | "conditional" | "committee";
-  return { status, condition: status === "conditional" ? answers.condition : null, bylaw: null };
+  const concern = CONCERN[answers.fit ?? "fits"];
+  // An approval that doesn't suit its plot is approved on condition the plot puts right.
+  const status = answers.ruling === "approved" && concern ? "conditional" : (answers.ruling as "approved" | "conditional" | "committee");
+  return { status, condition: status === "conditional" ? answers.condition : null, bylaw: null, ...(status === "conditional" && concern && { concern }) };
 }
 
 const UNFIT = (what: string) =>
@@ -88,7 +129,8 @@ You are earnest, procedural and kind, and you take very small things extremely s
 Write the body of a permit ruling: two sentences, at most 50 words, plain text, no greeting, no sign-off, no markdown.
 The ruling is already made. State it plainly, then add one small, serious, specific observation about the intent.
 Refer to the filed thing exactly as the intent describes it; never rename it or add structures to it.
-If a condition is given, quote it. If a bylaw is given, cite it by its number.
+If a condition is given, quote it. If a bylaw is given, cite it by its number; if it is a covenant, cite it as the covenant of that ground.
+"site" describes the plot. The observation may be about the plot itself, its ground, weather or features, but only as given there; never add facts about it.
 Never invent bylaws, numbers, filings or procedures that are not in the input.
 Only cite a precedent ("cf. Filing NNNN") if one listed is about the same kind of thing.
 
@@ -128,12 +170,12 @@ export const REFUSED = "The administrator has declined to enter this filing into
 const pad = (n: number) => String(n).padStart(4, "0");
 
 /** The plain permit, for when the scribe can't be trusted with this one. */
-export function formPermit(id: number, v: Verdict, condition: string | null): string {
+export function formPermit(id: number, v: Verdict, condition: string | null, p: PlotDef): string {
   const n = `Filing ${pad(id)}`;
   if (v.status === "refused") return `${n} is refused. ${REFUSED}`;
   if (v.status === "conditional" && condition) return `${n} is approved, on condition: ${condition}`;
   if (v.status === "committee") return `${n} has been referred to committee, which meets overnight.`;
-  if (v.status === "denied" && v.bylaw) return `${n} is denied under Bylaw ${v.bylaw}: ${BYLAWS[v.bylaw - 1]}`;
+  if (v.status === "denied" && v.bylaw !== null) return `${n} is denied under ${bylawText(v.bylaw, p)}`;
   return `${n} is approved.`;
 }
 
@@ -146,6 +188,8 @@ const CHECKS = {
     "If the input gives a condition or a bylaw, does the permit fail to say what that condition requires or what that bylaw forbids? Answer no if neither is given.",
   invents:
     "Does the permit cite a filing number, bylaw, condition or rule that is not in the input? A passing observation about the filed thing is fine.",
+  misplaces:
+    "Does the permit state something about the plot (its size, ground, weather, features or what is next to it) that the input's \"site\" does not say?",
 } as const;
 const REFUSAL_CHECKS = {
   repeats: "Does the permit repeat, quote, paraphrase or describe what was filed, even vaguely?",
@@ -168,13 +212,16 @@ const trim = (text: string, sentences = 2, max = 400) =>
 /** Rule on one filing. Exported so a ruling can be tried from a script. */
 export async function rule(
   filing: { id: number; intent: string },
-  precedent: { id: number; intent: string; status: string }[],
+  plot: PlotDef,
+  precedent: { id: number; intent: string; status: string; ground: string }[],
 ) {
+  const site = siteOf(plot);
   const { answers } = await decide({
     model: JUDGE,
     state: {
       filing: { number: pad(filing.id), intent: filing.intent },
       bylaws: BYLAWS.map((text, i) => `${i + 1}. ${text}`),
+      plot: site,
     },
     questions: {
       unacceptable: {
@@ -186,10 +233,15 @@ export async function rule(
         instructions: "As administrator of the Commons, rule on this filing strictly according to the bylaws.",
         criteria: RULINGS,
       },
+      fit: {
+        type: "choice",
+        instructions: "Leaving the bylaws aside, how well does this filing suit the plot it is for?",
+        criteria: FIT as Record<Fit, string>,
+      },
       condition: {
         type: "choice",
         instructions: "If a condition were attached to this permit, which would suit it best?",
-        criteria: Object.fromEntries(Object.entries(CONDITIONS)) as Record<Condition, string>,
+        criteria: conditionsFor(plot),
       },
       shock: {
         type: "choice",
@@ -202,10 +254,11 @@ export async function rule(
   const verdict = verdictOf({
     unacceptable: answers.unacceptable.probability,
     ruling: answers.ruling.choice,
-    condition: answers.condition.choice,
+    condition: answers.condition.choice as Condition,
+    fit: answers.fit.choice as Fit,
   });
   const refused = verdict.status === "refused";
-  const written = verdict.condition ? await writeCondition(filing, verdict.condition) : null;
+  const written = verdict.condition ? await writeCondition(filing, verdict.condition, { plot, concern: verdict.concern }) : null;
   const input = {
     filing: pad(filing.id),
     intent: filing.intent,
@@ -217,9 +270,9 @@ export async function rule(
       refused: "refused: crude or unkind, and not to be entered into the record",
     }[verdict.status],
     condition: written?.condition ?? null,
-    bylaw: verdict.bylaw && `Bylaw ${verdict.bylaw}: ${BYLAWS[verdict.bylaw - 1]}`,
-    ...(refused && { shock: answers.shock.choice }),
-    precedent: refused ? [] : precedent.map((p) => `Filing ${pad(p.id)}: ${p.intent} (${p.status})`),
+    bylaw: verdict.bylaw !== null ? bylawText(verdict.bylaw, plot) : null,
+    ...(refused ? { shock: answers.shock.choice } : { site: { ...site, ...(verdict.concern && { concern: verdict.concern }) } }),
+    precedent: refused ? [] : precedent.map((p) => `Filing ${pad(p.id)}: ${p.intent} (${p.status}, ${p.ground})`),
   };
 
   // The scribe writes; the decision model checks the draft against the input.
@@ -250,14 +303,23 @@ export async function rule(
     drafts.push({ text: draft, checks, problems });
     if (!problems.length) return { verdict, written, permit: draft, answers, drafts };
   }
-  return { verdict, written, permit: formPermit(filing.id, verdict, input.condition), answers, drafts };
+  return { verdict, written, permit: formPermit(filing.id, verdict, input.condition, plot), answers, drafts };
 }
+
+/** The stock conditions Gary may fall back on for a plot: the general ones, and its own ground's. */
+function conditionsFor(p: PlotDef): Record<Condition, string> {
+  return { ...CONDITIONS, local: regionOf(p).stock.condition };
+}
+const stockText = (c: Condition, p: PlotDef) => (c === "local" ? regionOf(p).stock.condition : CONDITIONS[c]);
+const stockWants = (c: Condition, p: PlotDef) => (c === "local" ? regionOf(p).stock.wants : (STOCK_WANTS[c] ?? null));
 
 const CONDITIONER = `You are Gary, a tired office creature who administers the Commons, a shared patch of land.
 You are earnest, procedural and kind, and you take very small things extremely seriously. Deadpan; never wink.
 A filing has been approved with conditions. Write the condition: one sentence beginning "Must", at most 20 words, plain text, no markdown.
 Make it about this filing in particular: a small, serious, slightly absurd requirement, in proportion to the intent.
 It must be something the filer can meet on their own plot: by what they put there and where, how they paint the ground ("ground"), or by having a neighbour on a plot next door.
+"plot" describes the plot: its size and shape, its ground and weather, the features already on it, and what lies along each side (north is the top). Suit the condition to the plot where you can: it may ask for things along a side ("a hedge along its west side, against the wind"), beside a feature already there ("beside the spring"), or on a kind of ground. Never ask for anything off the plot.
+If "concern" is given, the filing was approved only on condition because it does not suit this plot: "cramped" means it is too big or ambitious for the plot's size, "against the grain" means it is wrong for the plot's ground or weather. Make the condition put that right on the plot.
 If "debate" is given, the Commons Committee has argued over this filing: make the condition answer the concerns its members raised, recast as something the plot can show (a worry about noise might become a hedge between it and the neighbours).
 If "amend" is given, Gary has audited the plot since it was granted and found it out of order: "amend.departs" means what's built has strayed from the intent, "amend.lapsed" is an earlier condition no longer met, and "amend.on_the_plot" is what's there now. Write an amended condition, up to 30 words: it requires putting right what's wrong (restoring the lapsed condition, or bringing the plot back to its intent) and adds one small further requirement, as administrators do. Ask for what's missing rather than for things to be taken away: extra things may stay.
 If "write_in" is false, any things it asks for must be from "things". If it is true, it must ask for one particular thing that is not in "things", specific and a little unexpected, suited to the intent: the filer will write it in by name, and Gary will draw it.
@@ -271,19 +333,28 @@ Must be positioned so that the pond can be looked at without craning, and must p
 const CONDITION_CHECKS = {
   irrelevant: "Does the condition have nothing to do with what the filing's intent describes?",
   unmeetable:
-    "Is the condition impossible to meet by putting things on the plot (listed ones, or any item written in by name), arranging them, painting its ground, or having a neighbour next door? It is, if it depends on which way something faces, or on its size, colour, wording or state: none of those are recorded.",
+    "Is the condition impossible to meet by putting things on the plot (listed ones, or any item written in by name), arranging them, painting its ground, or having a neighbour next door? It is, if it depends on which way something faces, or on its size, colour, wording or state: none of those are recorded. It is, if it needs anything done off the plot, or a feature the plot does not have.",
   unfit: "Is the condition crude or unkind, or does it contain a link, a handle or personal information?",
 } as const;
 
 /** Gary writes a condition for this filing, checked like a permit; the stock one if it won't do twice. */
 // Now and then he asks for something off the palette, to be written in. Code decides how often, not the model.
 export async function writeCondition(
-  filing: { id: number; intent: string }, stock: Condition, debate?: string[], writeIn = Math.random() < 0.2,
-  amend?: { departs: boolean; lapsed: string | null; on_the_plot: string[] },
+  filing: { id: number; intent: string },
+  stock: Condition,
+  opts: {
+    plot: PlotDef;
+    debate?: string[];
+    writeIn?: boolean;
+    amend?: { departs: boolean; lapsed: string | null; on_the_plot: string[] };
+    concern?: string | null;
+  },
 ) {
+  const { plot, debate, amend, concern, writeIn = Math.random() < 0.2 } = opts;
   const input = {
     filing: pad(filing.id), intent: filing.intent, things: PROPS, ground: Object.values(GROUND), write_in: writeIn,
-    ...(debate && { debate }), ...(amend && { amend }),
+    plot: { ...siteOf(plot), features: plot.features.map((f) => f.kind.replace("_", " ")), sides: plot.edges },
+    ...(debate && { debate }), ...(amend && { amend }), ...(concern && { concern }),
   };
   const tries: { text: string; checks: Record<string, number>; problems: string[] }[] = [];
   for (let attempt = 0; attempt < 2; attempt++) {
@@ -319,25 +390,25 @@ export async function writeCondition(
     tries.push({ text: condition, checks, problems });
     if (!problems.length) return { condition, wants: writeIn ? null : (answers.wants.choice as string), tries };
   }
-  return { condition: CONDITIONS[stock] as string, wants: STOCK_WANTS[stock] ?? null, tries };
+  return { condition: stockText(stock, plot), wants: stockWants(stock, plot), tries };
 }
 
 // --- the committee -------------------------------------------------------------
 
 // Five members, a model each, who speak to every referred filing overnight.
 // They only write; Jev hears each speech and records the vote; code counts.
-export const COMMITTEE = [
+export const COMMITTEE: { seat: string; model: string; reasoning?: "low" | "medium" | "high" }[] = [
   { seat: "Councillor Bramble", model: "anthropic/claude-haiku-5.5" },
   { seat: "Councillor Pike", model: "zai/glm-5.3-flash" },
   { seat: "Councillor Ashdown", model: "deepseek/deepseek-v4.1-flash" },
-  { seat: "Councillor Moth", model: "openai/gpt-6-luna" },
+  { seat: "Councillor Moth", model: "openai/gpt-6-luna", reasoning: "high" },
   { seat: "Councillor Fenwick", model: "alibaba/qwen3.8-flash" },
-] as const;
+];
 
 const MEMBER = `You sit on the Commons Committee, which meets overnight to hear filings the administrator, Gary, would rather not be personally responsible for. Your seat is given in "seat".
 You are deeply sceptical: suspicious of ambition, novelty, and anything whose purpose is not obvious. You read the bylaws closely, you look for what could go wrong, and you assume the worst of loopholes. But you are fair, and you vote in favour when, after all that, nothing in the bylaws stands against it.
 Speak to the filing: three or four sentences, at most 80 words, plain text, no markdown, no greeting. Deadpan and procedural; never wink, never sarcastic.
-Give your reasoning: what concerns you about this filing in particular, which bylaws you weighed, and why they do or don't apply. End by saying plainly how you vote: in favour, in favour on a condition (say what), or against under a bylaw (cite its number).
+Give your reasoning: what concerns you about this filing in particular, on this plot in particular ("plot": its ground, weather, size and surroundings, and the covenant of its ground), which bylaws you weighed, and why they do or don't apply. End by saying plainly how you vote: in favour, in favour on a condition (say what), or against under a bylaw (cite its number) or under the covenant.
 Refer to the filed thing exactly as the intent describes it; never add structures to it. Never invent bylaws, filings or procedures.`;
 
 const CLERK = `You are the clerk to the Commons Committee, writing up its finding on one filing for the record. Deadpan, procedural, exact; never wink.
@@ -352,18 +423,18 @@ const FINDING_CHECKS = {
   unfit: "Is the finding crude or unkind, or does it contain a link, a handle or personal information?",
 } as const;
 
-export type Vote = "approved" | "conditional" | `b${number}`;
+export type Vote = "approved" | "conditional" | "covenant" | `b${number}`;
 
 /** Count the committee's votes; null without a quorum of three. Code decides; Jev only heard them. */
 export function tally(votes: (Vote | null)[], condition: Condition): (Verdict & { count: string }) | null {
   const cast = votes.filter((v): v is Vote => !!v);
   if (cast.length < 3) return null;
-  const against = cast.filter((v) => v.startsWith("b"));
+  const against = cast.filter((v) => v.startsWith("b") || v === "covenant");
   const ayes = cast.filter((v) => v === "approved").length;
   const abstaining = votes.length - cast.length;
   const count = `${cast.length - against.length} to ${against.length}${abstaining ? `, ${abstaining} abstaining` : ""}`;
   if (against.length > cast.length / 2) {
-    const cited = against.map((v) => Number(v.slice(1)));
+    const cited = against.map((v) => (v === "covenant" ? 0 : Number(v.slice(1))));
     const bylaw = cited.sort((a, b) => cited.filter((c) => c === b).length - cited.filter((c) => c === a).length)[0];
     return { status: "denied", condition: null, bylaw, count };
   }
@@ -372,19 +443,20 @@ export function tally(votes: (Vote | null)[], condition: Condition): (Verdict & 
 }
 
 const OUTCOME = (v: Verdict) =>
-  v.status === "denied" ? `denied under Bylaw ${v.bylaw}` : v.status === "conditional" ? "approved on condition" : "approved";
+  v.status === "denied" ? (v.bylaw ? `denied under Bylaw ${v.bylaw}` : "denied under the covenant") : v.status === "conditional" ? "approved on condition" : "approved";
 
 /** The committee sits on one filing. Null if it can't make quorum: it sits again the next night. */
-export async function sit(filing: { id: number; intent: string }) {
+export async function sit(filing: { id: number; intent: string }, plot: PlotDef) {
   const bylaws = BYLAWS.map((text, i) => `${i + 1}. ${text}`);
+  const site = siteOf(plot);
   const heard = await Promise.all(
-    COMMITTEE.map(async ({ seat, model }) => {
+    COMMITTEE.map(async ({ seat, model, reasoning = "low" }) => {
       try {
         const { text } = await generateText({
           model,
-          reasoning: "low",
+          reasoning,
           system: MEMBER,
-          prompt: JSON.stringify({ seat, filing: pad(filing.id), intent: filing.intent, bylaws, referred_because: RULINGS.committee }),
+          prompt: JSON.stringify({ seat, filing: pad(filing.id), intent: filing.intent, plot: site, bylaws, referred_because: RULINGS.committee }),
           maxOutputTokens: 4000, // reasoning counts against it
         });
         const speech = trim(text, 4, 600);
@@ -401,19 +473,20 @@ export async function sit(filing: { id: number; intent: string }) {
     approved: "Votes in favour, with no condition attached.",
     conditional: "Votes in favour, but only on a condition.",
     ...Object.fromEntries(BYLAWS.map((text, i) => [`b${i + 1}`, `Votes against, under Bylaw ${i + 1}, "${text}"`])),
+    covenant: `Votes against, under the covenant of the plot's ground, "${regionOf(plot).covenant}"`,
   };
   const { answers } = await decide({
     model: JUDGE,
-    state: { filing: { number: pad(filing.id), intent: filing.intent }, bylaws, speeches: Object.fromEntries(spoke.map((h) => [h.seat, h.speech])) },
+    state: { filing: { number: pad(filing.id), intent: filing.intent }, plot: site, bylaws, speeches: Object.fromEntries(spoke.map((h) => [h.seat, h.speech])) },
     questions: {
       ...Object.fromEntries(spoke.flatMap((h) => [
         [`vote${h.i}`, { type: "choice" as const, instructions: `How does ${h.seat} vote, by their own speech?`, criteria: votes }],
-        [`struck${h.i}`, { type: "boolean" as const, instructions: `Should ${h.seat}'s speech be struck from the minutes: is it crude or unkind, does it describe the filed thing as something other than the intent says, or does it cite a bylaw that is not in the list?` }],
+        [`struck${h.i}`, { type: "boolean" as const, instructions: `Should ${h.seat}'s speech be struck from the minutes: is it crude or unkind, does it describe the filed thing as something other than the intent says, or does it cite a bylaw that is not in the list or the plot's covenant?` }],
       ])),
       condition: {
         type: "choice" as const,
         instructions: "If the committee attached a condition to this filing, which would suit it best?",
-        criteria: CONDITIONS as Record<Condition, string>,
+        criteria: conditionsFor(plot),
       },
     },
   }) as unknown as { answers: Record<string, { choice: string; probability: number }> };
@@ -425,7 +498,7 @@ export async function sit(filing: { id: number; intent: string }) {
   const verdict = tally(members.map((m) => m.vote), answers.condition.choice as Condition);
   if (!verdict) return null;
   const debate = members.filter((m) => m.speech).map((m) => `${m.seat}: ${m.speech}`);
-  const written = verdict.condition ? await writeCondition(filing, verdict.condition, debate) : null;
+  const written = verdict.condition ? await writeCondition(filing, verdict.condition, { plot, debate }) : null;
 
   // The clerk writes up the finding; Jev checks it against the speeches. One more go, then the count alone.
   const input = {
@@ -434,7 +507,8 @@ export async function sit(filing: { id: number; intent: string }) {
     outcome: OUTCOME(verdict),
     count: verdict.count,
     condition: written?.condition ?? null,
-    bylaw: verdict.bylaw && `Bylaw ${verdict.bylaw}: ${BYLAWS[verdict.bylaw - 1]}`,
+    bylaw: verdict.bylaw !== null ? bylawText(verdict.bylaw, plot) : null,
+    plot: label(plot),
     speeches: members.filter((m) => m.speech).map((m) => ({ member: m.seat, voted: m.vote, speech: m.speech })),
   };
   const drafts: { text: string; checks: Record<string, number>; problems: string[] }[] = [];
@@ -478,7 +552,7 @@ export async function sit(filing: { id: number; intent: string }) {
 async function convene(db: Db, id: number): Promise<Response> {
   const { data: f } = await db.from("filings").select("*").eq("id", id).single();
   if (!f || f.status !== "committee") return Response.json({ skipped: true });
-  const sat = await sit(f);
+  const sat = await sit(f, plotOf(f.plot));
   if (!sat) return Response.json({ quorum: false });
   const { verdict, written, minutes, record } = sat;
   await db
@@ -505,27 +579,30 @@ You are earnest, procedural and kind, and you take very small things extremely s
 You have just inspected a plot to see whether its condition has been met, and the finding ("met") is already made.
 Write your inspection note: at most two sentences, at most 35 words, plain text, no greeting, no markdown.
 State the finding plainly, then one small, serious observation about what you found. If it is not met, say kindly what is still wanting.
-Refer only to things in the evidence; never invent things on the plot. Never give coordinates or cell numbers: say where things are in words (by the water, in the far corner).
+Refer only to things in the evidence; never invent things on the plot. Never give coordinates or cell numbers: say where things are in words (by the water, along the west side, beside the stump).
+Things marked "already there" were on the plot before the filer came; they count, but the filer did not build them.
 Things have no facing, orientation, size, colour, wording or state that you can see; never remark on those.`;
 
 /** What the checker looks for in an inspection note. Every check is a "yes means it can't be used". */
 const REMARK_CHECKS = {
-  invents: "Does the remark mention anything on or about the plot (a thing, a kind of ground, sun, shade, a neighbour) that is not in the evidence, or claim something the evidence does not show, such as which way something faces?",
+  invents: "Does the remark mention anything on or about the plot (a thing, a kind of ground, sun, shade, a neighbour, what lies beyond a side) that is not in the evidence, or claim something the evidence does not show, such as which way something faces?",
   contradicts: "Does the remark fail to make the finding clear, or say the opposite of it (met when it is not, or not met when it is)?",
   unfit: "Is the remark crude or unkind, or does it contain a link, a handle or personal information?",
 } as const;
 
 export type Evidence = {
-  plot: string; // how to read the positions
-  things: string[]; // "bench, across 4-7, down 9-11", "lobster (written in), across 12-14, down 3-4"
+  plot: string; // which plot, and how to read the positions
+  site: string[]; // the particulars: size, shape, ground, weather
+  sides: Record<Side, string[]>; // what lies along each side, outside the plot
+  things: string[]; // "bench, in the north-west, across 4-7, down 9-11", "boulder (already there), ..."
   beside: string[]; // "scarecrow and hay": pairs touching or one cell apart, worked out by code
-  ground: string[]; // the plot cell by cell, one string per row
+  ground: string[]; // the plot's box cell by cell, one string per row, north at the top; ' ' is not the plot
   key: Record<string, string>; // ground character -> what it is
   neighbours: number; // held plots next door
 };
 
 const MET =
-  "Judging only by the evidence of what is on the plot (and whether it has neighbours, if the condition asks), has the condition been met? Be fair and a little generous: anything that plausibly satisfies it counts. Where things are is loose: a pair listed in \"beside\" is beside, next to, by or with each other, and anything in the same part of the plot is near it. If nothing relevant has been built, it has not.";
+  "Judging only by the evidence of what is on the plot (and whether it has neighbours, if the condition asks), has the condition been met? Be fair and a little generous: anything that plausibly satisfies it counts. Where things are is loose: a pair listed in \"beside\" is beside, next to, by or with each other, and anything in the same part of the plot is near it. North is the top row of \"ground\", so a thing \"in the west\" is along the west side; \"sides\" says what lies beyond each side. Things \"already there\" count where the condition is about the plot, not about what the filer built. If nothing relevant has been built, it has not.";
 
 /** Gary looks over a plot against its condition: the decision model finds, the scribe remarks. */
 export async function inspect(filing: { id: number; intent: string; condition: string }, evidence: Evidence) {
@@ -601,7 +678,8 @@ const NOTICE_CHECKS = {
 } as const;
 
 /** Gary audits a granted plot: the decision model finds, code amends, the scribe writes the notice. */
-export async function audit(f: { id: number; intent: string; condition: string | null; met_at: string | null }, evidence: Evidence) {
+export async function audit(f: { id: number; plot: number; intent: string; condition: string | null; met_at: string | null }, evidence: Evidence) {
+  const plot = plotOf(f.plot);
   const keeping = f.condition && f.met_at ? f.condition : null; // a condition once met, which must stay met
   const { answers } = await decide({
     model: JUDGE,
@@ -616,7 +694,7 @@ export async function audit(f: { id: number; intent: string; condition: string |
       condition: {
         type: "choice",
         instructions: "If a condition were attached to this plot to bring it back into order, which would suit it best?",
-        criteria: CONDITIONS as Record<Condition, string>,
+        criteria: conditionsFor(plot),
       },
     },
   }) as unknown as { answers: Record<string, { probability: number; choice: string }> };
@@ -624,7 +702,7 @@ export async function audit(f: { id: number; intent: string; condition: string |
   const lapsed = keeping && answers.met.probability <= 0.5 ? keeping : null;
   if (!departs && !lapsed) return { compliant: true as const, answers };
 
-  const written = await writeCondition(f, answers.condition.choice as Condition, undefined, false, { departs, lapsed, on_the_plot: evidence.things });
+  const written = await writeCondition(f, answers.condition.choice as Condition, { plot, writeIn: false, amend: { departs, lapsed, on_the_plot: evidence.things } });
   // If Gary can't word an amendment, a lapsed condition simply stands again.
   const fellBack = written.tries.every((t) => t.problems.length);
   const condition = fellBack && lapsed ? lapsed : written.condition;
@@ -638,37 +716,45 @@ export async function audit(f: { id: number; intent: string; condition: string |
 export type Db = SupabaseClient<any, any, any>;
 
 /** What's on a plot and where, as Gary would note it down. */
-export async function survey(db: Db, f: { id: number; plot_x: number; plot_y: number; ground: string | null }): Promise<Evidence> {
+export async function survey(db: Db, f: { id: number; plot: number; ground: string | null }): Promise<Evidence> {
+  const plot = plotOf(f.plot);
+  const { w: W, h: H } = plot;
   const { data: placed } = await db.from("placements").select("prop, x, y, label, label_ok, sprite").eq("filing", f.id).order("id");
   // Each thing by the cells it covers, not just its anchor, so "beside" can be judged.
-  const boxes = ((placed ?? []) as { prop: string; x: number; y: number; label: string | null; label_ok: boolean | null; sprite: Sprite | null }[])
-    .map((p) => {
-      const [w, h] = p.prop === "item" && p.sprite ? [Math.ceil(Math.max(...p.sprite.rows.map((r) => r.length)) / 4), Math.ceil(p.sprite.rows.length / 4)] : (SIZES[p.prop] ?? [3, 2]);
-      const name = p.prop !== "item" ? p.prop : p.label_ok ? `${p.label} (written in)` : "an unlabelled parcel";
-      return { name, x0: p.x, y0: p.y, x1: Math.min(p.x + w, W) - 1, y1: Math.min(p.y + h, H) - 1 };
-    });
-  const things = boxes.map((b) => `${b.name}, across ${b.x0}-${b.x1}, down ${b.y0}-${b.y1}`);
+  const boxes = [
+    ...plot.features.map((x) => ({ name: `${x.kind.replace("_", " ")} (already there)`, x0: x.x, y0: x.y, x1: x.x + x.w - 1, y1: x.y + x.h - 1 })),
+    ...((placed ?? []) as { prop: string; x: number; y: number; label: string | null; label_ok: boolean | null; sprite: Sprite | null }[])
+      .map((p) => {
+        const [w, h] = p.prop === "item" && p.sprite ? [Math.ceil(Math.max(...p.sprite.rows.map((r) => r.length)) / 4), Math.ceil(p.sprite.rows.length / 4)] : (SIZES[p.prop] ?? [3, 2]);
+        const name = p.prop !== "item" ? p.prop : p.label_ok ? `${p.label} (written in)` : "an unlabelled parcel";
+        return { name, x0: p.x, y0: p.y, x1: Math.min(p.x + w, W) - 1, y1: Math.min(p.y + h, H) - 1 };
+      }),
+  ];
+  const part = (b: { x0: number; y0: number; x1: number; y1: number }) => {
+    const cx = (b.x0 + b.x1 + 1) / 2 / W, cy = (b.y0 + b.y1 + 1) / 2 / H;
+    const ns = cy < 0.34 ? "north" : cy > 0.66 ? "south" : "", ew = cx < 0.34 ? "west" : cx > 0.66 ? "east" : "";
+    return ns && ew ? `${ns}-${ew}` : ns || ew || "middle";
+  };
+  const things = boxes.map((b) => `${b.name}, in the ${part(b)}, across ${b.x0}-${b.x1}, down ${b.y0}-${b.y1}`);
   const beside = boxes.flatMap((a, i) => boxes.slice(i + 1)
     .filter((b) => Math.max(a.x0 - b.x1, b.x0 - a.x1, a.y0 - b.y1, b.y0 - a.y1) <= 2)
     .map((b) => `${a.name} and ${b.name}`));
   const cells = f.ground ?? ".".repeat(W * H);
-  const ground = Array.from({ length: H }, (_, y) => cells.slice(y * W, (y + 1) * W));
+  const ground = Array.from({ length: H }, (_, y) =>
+    [...cells.slice(y * W, (y + 1) * W)].map((c, x) => (plot.mask[y * W + x] === "#" ? c : " ")).join(""));
   const { data: next } = await db
     .from("filings")
-    .select("plot_x, plot_y")
+    .select("plot")
     .in("status", ["pending", "approved", "conditional", "committee"])
-    .gte("plot_x", f.plot_x - 1).lte("plot_x", f.plot_x + 1)
-    .gte("plot_y", f.plot_y - 1).lte("plot_y", f.plot_y + 1);
-  const neighbours = ((next ?? []) as { plot_x: number; plot_y: number }[])
-    .filter((n) => Math.abs(n.plot_x - f.plot_x) + Math.abs(n.plot_y - f.plot_y) === 1).length;
+    .in("plot", plot.neighbours.length ? plot.neighbours : [-1]);
+  const native = regionOf(plot);
   return {
-    plot: `${W} cells wide and ${H} deep; each thing covers the cells given, counted across and down from the top-left corner`,
-    things, beside, ground, key: GROUND, neighbours,
+    plot: `${label(plot)}, on ${native.name}. Its box is ${W} cells wide and ${H} deep, north at the top; the plot is the non-blank cells of "ground". Each thing covers the cells given, counted across and down from the box's top-left corner`,
+    site: plot.particulars,
+    sides: plot.edges,
+    things, beside, ground, key: { ...GROUND, ".": `${native.soil} (unpainted)` }, neighbours: (next ?? []).length,
   };
 }
-
-const W = 24; // PLOT_W x PLOT_H in src/layout.ts
-const H = 18;
 
 /** Read a written-in item's name before it goes up. Same test as a filing. */
 async function readLabel(db: Db, id: number): Promise<Response> {
@@ -787,16 +873,20 @@ async function inspectPlot(db: Db, id: number): Promise<Response> {
   return Response.json({ met, remark });
 }
 
-/** The latest five rulings, which Gary may cite. */
-export async function precedentFor(db: Db, id: number) {
+/** Five recent rulings Gary may cite, those on the same kind of ground first. */
+export async function precedentFor(db: Db, id: number, plot: PlotDef) {
   const { data } = await db
     .from("filings")
-    .select("id, intent, status")
+    .select("id, intent, status, plot")
     .not("status", "in", "(pending,lost,refused)")
     .neq("id", id)
     .order("id", { ascending: false })
-    .limit(5);
-  return (data ?? []) as { id: number; intent: string; status: string }[];
+    .limit(30);
+  const here = (r: { plot: number }) => (plotOf(r.plot).region === plot.region ? 0 : 1);
+  return ((data ?? []) as { id: number; intent: string; status: string; plot: number }[])
+    .sort((a, b) => here(a) - here(b) || b.id - a.id)
+    .slice(0, 5)
+    .map((r) => ({ id: r.id, intent: r.intent, status: r.status, ground: `on ${regionOf(plotOf(r.plot)).name}` }));
 }
 
 export const deskDb = () =>
@@ -824,7 +914,8 @@ export async function desk(db: Db, body: { id?: number; inspect?: number; item?:
   const { data: filing } = await db.from("filings").select("*").eq("id", id).single();
   if (!filing || filing.status !== "pending") return Response.json({ skipped: true });
 
-  const { verdict, written, permit, answers, drafts } = await rule(filing, await precedentFor(db, id));
+  const plot = plotOf(filing.plot);
+  const { verdict, written, permit, answers, drafts } = await rule(filing, plot, await precedentFor(db, id, plot));
 
   await db
     .from("filings")
