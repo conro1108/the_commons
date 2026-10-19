@@ -14,6 +14,7 @@ import type { Plugin } from "vite";
 import type * as Gary from "../api/gary.ts";
 
 const LOOPBACK = ["127.0.0.1", "::1", "::ffff:127.0.0.1"];
+const LOCALHOST = /^(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/;
 
 export function backoffice(): Plugin {
   return {
@@ -29,8 +30,14 @@ export function backoffice(): Plugin {
           res.setHeader("content-type", "application/json");
           res.end(JSON.stringify(body));
         };
-        // Only this machine, and only as JSON, so no other site can make a simple POST here.
-        if (!LOOPBACK.includes(req.socket.remoteAddress ?? "") || req.method !== "POST" || !req.headers["content-type"]?.startsWith("application/json")) {
+        // Only this machine, by its own name, from its own pages, as JSON. Vite's host
+        // check and CORS default cover most of this already; this holds if either is loosened.
+        const origin = req.headers.origin;
+        if (
+          !LOOPBACK.includes(req.socket.remoteAddress ?? "") || !LOCALHOST.test(req.headers.host ?? "") ||
+          (origin && new URL(origin).host !== req.headers.host) ||
+          req.method !== "POST" || !req.headers["content-type"]?.startsWith("application/json")
+        ) {
           return send(403, { error: "back office is local only" });
         }
         const t = performance.now();

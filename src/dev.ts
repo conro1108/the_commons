@@ -125,7 +125,13 @@ export function mountDev(hooks: DevHooks) {
 
   let runs: Run[] = JSON.parse(localStorage.getItem(KEPT) ?? "[]");
   let n = runs.reduce((m, r) => Math.max(m, r.n), 0);
-  const keep = () => localStorage.setItem(KEPT, JSON.stringify(runs.slice(0, 12)));
+  const keep = () => {
+    try {
+      localStorage.setItem(KEPT, JSON.stringify(runs.slice(0, 12)));
+    } catch {
+      localStorage.removeItem(KEPT); // draws are big; past the quota, forget rather than hang
+    }
+  };
 
   function render() {
     panel.querySelector(".runs")!.innerHTML = runs.map((r) => `<div class="run" data-n="${r.n}">
