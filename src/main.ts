@@ -906,7 +906,7 @@ function walkInto(f: Filing) {
 /** Whether a map point is on Gary, give or take a pixel. */
 function onGary(p: { x: number; y: number }) {
   const g = garyAt(Date.now(), recent());
-  return Math.abs(p.x - g.x) <= 4 && p.y >= g.y - 12 && p.y <= g.y + 1;
+  return Math.abs(p.x - g.x) <= 6 && p.y >= g.y - 13 && p.y <= g.y + 1;
 }
 
 const onBoard = (p: { x: number; y: number }) =>
@@ -989,7 +989,7 @@ function overlays(now: number, t: number) {
   const gary = garyAt(t, recent());
   const bubble = $("bubble");
   bubble.hidden = !said || now > said.until;
-  if (!bubble.hidden) Object.assign(bubble.style, screen(gary.x, gary.y - 15));
+  if (!bubble.hidden) Object.assign(bubble.style, screen(gary.x, gary.y - 17));
   const tag = $("nametag");
   const over = mouse && [...walkers.values()].find((w) => Math.abs(mouse!.x - w.x) <= 3 && mouse!.y >= w.y - 8 && mouse!.y <= w.y + 1);
   const name = over ? who(over.id) : mouse && onGary(mouse) ? "Gary" : mouse && onBoard(mouse) ? "the notice board" : null;
@@ -997,7 +997,7 @@ function overlays(now: number, t: number) {
   if (name) {
     tag.textContent = name;
     const at = over ?? (name === "Gary" ? gary : { x: BOARD.x + BOARD.w / 2, y: BOARD.y + 1 });
-    Object.assign(tag.style, screen(at.x, at.y - (over ? 9 : name === "Gary" ? 13 : 2)));
+    Object.assign(tag.style, screen(at.x, at.y - (over ? 9 : name === "Gary" ? 15 : 2)));
   }
   canvas.style.cursor = name && !over ? "pointer" : hover ? "pointer" : "";
 }

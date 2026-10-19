@@ -137,10 +137,22 @@ export function garyAt(t: number, recent: Plot[]): { x: number; y: number } {
   return { x: Math.round(w.x), y: Math.round(w.y) };
 }
 
-// The Meadow's Tired Office Creature (cozy_sprites OFFICE, its colours), shrunk
-// to fit a path: a grey box, eye bags, a sad little tie set off-centre so it
-// shows which way he's facing. No legs; he hops.
-const GARY = [".kkkkkk.", "kBBBBBBk", "kBeBBeBk", "kBbBBbBk", "kBBTBBBk", "kBBTBBBk", "kSSSSSSk", ".kkkkkk."];
+// The Meadow's Tired Office Creature: cozy_sprites OFFICE at its native size,
+// neutral face and eye bags composited in, cropped to the box. No legs; he hops.
+const GARY = [
+  ".kkkkkkkkk.",
+  "kBBBBBBBBBk",
+  "kBBBBBBBBBk",
+  "kBeeBBBBeek",
+  "kBeeBBBBeek",
+  "kBbbBBBBbbk",
+  "kBBTBBBBBBk",
+  "kBBTBeeBBBk",
+  "kBBBBBBBBBk",
+  "kSBBBBBBBSk",
+  "kSSSSSSSSSk",
+  ".kkkkkkkkk.",
+];
 const GARY_COLOURS = { k: INK, B: "#c4c6d4", S: "#9a9cb0", T: "#6f6a80", b: "#6f6a80", e: "#3a2b3f" };
 const CLIPBOARD = ["bb", "wb", "wb"];
 const CLIP_COLOURS = { b: "#7a5230", w: "#fffdf3" };
@@ -148,14 +160,14 @@ const CLIP_COLOURS = { b: "#7a5230", w: "#fffdf3" };
 function drawGary(ctx: CanvasRenderingContext2D, t: number, recent: Plot[]) {
   const w = whereabouts(garyRound(recent), t);
   const hop = w.moving ? Math.floor(t / 220) % 2 : 0;
-  const left = Math.round(w.x) - 4;
+  const left = Math.round(w.x) - 5;
   const top = Math.round(w.y) - GARY.length - hop;
   const flip = w.dx < 0;
   pixels(ctx, GARY, left, top, GARY_COLOURS, flip);
   // Walking, the clipboard's at his side; stopped, he reads it, and now and then makes a note.
   const reading = !w.moving && w.since > 600;
   const lift = reading ? (Math.floor(w.since / 900) % 3 === 2 ? 1 : 2) : 0;
-  pixels(ctx, CLIPBOARD, flip ? left - 1 : left + 7, top + 4 - lift, CLIP_COLOURS);
+  pixels(ctx, CLIPBOARD, flip ? left - 1 : left + 10, top + 6 - lift, CLIP_COLOURS);
 }
 
 export const GARY_LINES = [
