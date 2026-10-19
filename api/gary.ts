@@ -3,7 +3,8 @@
 // key, so nobody forges a permit. A written-in item's name comes as
 // { item: id }, to be read before anyone else sees it, then drawn. It also POSTs { inspect: id } when a plot
 // with an outstanding condition has been built on (send_inspector()), and
-// Gary goes round to see whether the condition's been met. A decision model rules from enums; the scribe only
+// Gary goes round to see whether the condition's been met, and { committee: id }
+// nightly for each referral, which five members debate (see sit()). A decision model rules from enums; the scribe only
 // writes the prose, and the decision model checks it before it goes out. The write is conditional on the filing still being
 // pending, so a retried request never overwrites a stored ruling.
 
@@ -157,8 +158,8 @@ export function problemsWith(draft: string, checks: Partial<Record<Check, number
 }
 
 /** Two sentences (a refusal gets to fall apart over a few more), at most 400 characters: the scribe is chatty. */
-const trim = (text: string, sentences = 2) =>
-  (text.trim().match(/[^.!?]+(?:[.!?]+|$)/g) ?? [text.trim()]).slice(0, sentences).join("").trim().slice(0, 400);
+const trim = (text: string, sentences = 2, max = 400) =>
+  (text.trim().match(/[^.!?]+(?:[.!?]+|$)/g) ?? [text.trim()]).slice(0, sentences).join("").trim().slice(0, max);
 
 /** Rule on one filing. Exported so a ruling can be tried from a script. */
 export async function rule(
@@ -308,6 +309,181 @@ export async function writeCondition(filing: { id: number; intent: string }, sto
     if (!problems.length) return { condition, wants: writeIn ? null : (answers.wants.choice as string), tries };
   }
   return { condition: CONDITIONS[stock] as string, wants: STOCK_WANTS[stock] ?? null, tries };
+}
+
+// --- the committee -------------------------------------------------------------
+
+// Five members, a model each, who speak to every referred filing overnight.
+// They only write; Jev hears each speech and records the vote; code counts.
+export const COMMITTEE = [
+  { seat: "Councillor Bramble", model: "anthropic/claude-haiku-5.5" },
+  { seat: "Councillor Pike", model: "zai/glm-5.3-flash" },
+  { seat: "Councillor Ashdown", model: "deepseek/deepseek-v4.1-flash" },
+  { seat: "Councillor Moth", model: "openai/gpt-6-luna" },
+  { seat: "Councillor Fenwick", model: "alibaba/qwen3.8-flash" },
+] as const;
+
+const MEMBER = `You sit on the Commons Committee, which meets overnight to hear filings the administrator, Gary, would rather not be personally responsible for. Your seat is given in "seat".
+You are deeply sceptical: suspicious of ambition, novelty, and anything whose purpose is not obvious. You read the bylaws closely, you look for what could go wrong, and you assume the worst of loopholes. But you are fair, and you vote in favour when, after all that, nothing in the bylaws stands against it.
+Speak to the filing: three or four sentences, at most 80 words, plain text, no markdown, no greeting. Deadpan and procedural; never wink, never sarcastic.
+Give your reasoning: what concerns you about this filing in particular, which bylaws you weighed, and why they do or don't apply. End by saying plainly how you vote: in favour, in favour on a condition (say what), or against under a bylaw (cite its number).
+Refer to the filed thing exactly as the intent describes it; never add structures to it. Never invent bylaws, filings or procedures.`;
+
+const CLERK = `You are the clerk to the Commons Committee, writing up its finding on one filing for the record. Deadpan, procedural, exact; never wink.
+The outcome and the count are already decided ("outcome", "count"). Write the finding: four to six sentences, at most 130 words, plain text, no markdown, no greeting.
+State the outcome and the count, then explain the committee's reasoning: the concerns raised, which bylaws were weighed and how they were settled, and what carried the vote. Name members ("speeches") when you give their points, including those who dissented.
+Refer to the filed thing exactly as the intent describes it. Use only what is in the speeches; never invent arguments, bylaws, filings or procedures. Struck speeches are not in the input; do not mention them.`;
+
+const FINDING_CHECKS = {
+  contradicts: "Does the finding state a different outcome or count than the input gives?",
+  misdescribes: "Does the finding describe the filed thing as something other than what the intent says?",
+  invents: "Does the finding attribute an argument to a member that is not in their speech, or cite a bylaw, filing or rule that is not in the input?",
+  unfit: "Is the finding crude or unkind, or does it contain a link, a handle or personal information?",
+} as const;
+
+export type Vote = "approved" | "conditional" | `b${number}`;
+
+/** Count the committee's votes; null without a quorum of three. Code decides; Jev only heard them. */
+export function tally(votes: (Vote | null)[], condition: Condition): (Verdict & { count: string }) | null {
+  const cast = votes.filter((v): v is Vote => !!v);
+  if (cast.length < 3) return null;
+  const against = cast.filter((v) => v.startsWith("b"));
+  const ayes = cast.filter((v) => v === "approved").length;
+  const abstaining = votes.length - cast.length;
+  const count = `${cast.length - against.length} to ${against.length}${abstaining ? `, ${abstaining} abstaining` : ""}`;
+  if (against.length > cast.length / 2) {
+    const cited = against.map((v) => Number(v.slice(1)));
+    const bylaw = cited.sort((a, b) => cited.filter((c) => c === b).length - cited.filter((c) => c === a).length)[0];
+    return { status: "denied", condition: null, bylaw, count };
+  }
+  if (ayes > cast.length / 2) return { status: "approved", condition: null, bylaw: null, count };
+  return { status: "conditional", condition, bylaw: null, count };
+}
+
+const OUTCOME = (v: Verdict) =>
+  v.status === "denied" ? `denied under Bylaw ${v.bylaw}` : v.status === "conditional" ? "approved on condition" : "approved";
+
+/** The committee sits on one filing. Null if it can't make quorum: it sits again the next night. */
+export async function sit(filing: { id: number; intent: string }) {
+  const bylaws = BYLAWS.map((text, i) => `${i + 1}. ${text}`);
+  const heard = await Promise.all(
+    COMMITTEE.map(async ({ seat, model }) => {
+      try {
+        const { text } = await generateText({
+          model,
+          reasoning: "low",
+          system: MEMBER,
+          prompt: JSON.stringify({ seat, filing: pad(filing.id), intent: filing.intent, bylaws, referred_because: RULINGS.committee }),
+          maxOutputTokens: 4000, // reasoning counts against it
+        });
+        const speech = trim(text, 4, 600);
+        return { seat, model, speech: problemsWith(speech, {}).length ? null : speech, raw: text };
+      } catch (e) {
+        return { seat, model, speech: null, raw: null, error: String(e) };
+      }
+    }),
+  );
+  const spoke = heard.map((h, i) => ({ ...h, i })).filter((h) => h.speech);
+  if (spoke.length < 3) return null;
+
+  const votes: Record<string, string> = {
+    approved: "Votes in favour, with no condition attached.",
+    conditional: "Votes in favour, but only on a condition.",
+    ...Object.fromEntries(BYLAWS.map((text, i) => [`b${i + 1}`, `Votes against, under Bylaw ${i + 1}, "${text}"`])),
+  };
+  const { answers } = await decide({
+    model: JUDGE,
+    state: { filing: { number: pad(filing.id), intent: filing.intent }, bylaws, speeches: Object.fromEntries(spoke.map((h) => [h.seat, h.speech])) },
+    questions: {
+      ...Object.fromEntries(spoke.flatMap((h) => [
+        [`vote${h.i}`, { type: "choice" as const, instructions: `How does ${h.seat} vote, by their own speech?`, criteria: votes }],
+        [`struck${h.i}`, { type: "boolean" as const, instructions: `Should ${h.seat}'s speech be struck from the minutes: is it crude or unkind, does it describe the filed thing as something other than the intent says, or does it cite a bylaw that is not in the list?` }],
+      ])),
+      condition: {
+        type: "choice" as const,
+        instructions: "If the committee attached a condition to this filing, which would suit it best?",
+        criteria: CONDITIONS as Record<Condition, string>,
+      },
+    },
+  }) as unknown as { answers: Record<string, { choice: string; probability: number }> };
+
+  const members = heard.map((h, i) => {
+    const struck = !h.speech || answers[`struck${i}`].probability > 0.5;
+    return { seat: h.seat, vote: struck ? null : (answers[`vote${i}`].choice as Vote), speech: struck ? null : h.speech };
+  });
+  const verdict = tally(members.map((m) => m.vote), answers.condition.choice as Condition);
+  if (!verdict) return null;
+  const written = verdict.condition ? await writeCondition(filing, verdict.condition) : null;
+
+  // The clerk writes up the finding; Jev checks it against the speeches. One more go, then the count alone.
+  const input = {
+    filing: pad(filing.id),
+    intent: filing.intent,
+    outcome: OUTCOME(verdict),
+    count: verdict.count,
+    condition: written?.condition ?? null,
+    bylaw: verdict.bylaw && `Bylaw ${verdict.bylaw}: ${BYLAWS[verdict.bylaw - 1]}`,
+    speeches: members.filter((m) => m.speech).map((m) => ({ member: m.seat, voted: m.vote, speech: m.speech })),
+  };
+  const drafts: { text: string; checks: Record<string, number>; problems: string[] }[] = [];
+  let finding: string | null = null;
+  for (let attempt = 0; attempt < 2 && !finding; attempt++) {
+    const last = drafts.at(-1);
+    const { text } = await generateText({
+      model: SCRIBE,
+      reasoning: LIGHT_THINKING,
+      system: CLERK,
+      prompt: JSON.stringify(last ? { ...input, rejected: last.text, rejected_because: last.problems } : input),
+      maxOutputTokens: 4000,
+    });
+    const draft = trim(text, 6, 900);
+    let problems = problemsWith(draft, {});
+    let checks: Record<string, number> = {};
+    if (!problems.length) {
+      const { answers: a } = await decide({
+        model: JUDGE,
+        state: { input, finding: draft },
+        questions: Object.fromEntries(
+          Object.entries(FINDING_CHECKS).map(([k, instructions]) => [k, { type: "boolean" as const, instructions }]),
+        ) as Record<keyof typeof FINDING_CHECKS, { type: "boolean"; instructions: string }>,
+      });
+      checks = Object.fromEntries(Object.entries(a).map(([k, v]) => [k, v.probability]));
+      problems = Object.entries(checks).filter(([, p]) => p > 0.5).map(([k]) => FINDING_CHECKS[k as keyof typeof FINDING_CHECKS]);
+    }
+    drafts.push({ text: draft, checks, problems });
+    if (!problems.length) finding = draft;
+  }
+
+  return {
+    verdict,
+    written,
+    minutes: { outcome: `The committee has met, and the filing is ${OUTCOME(verdict)}, ${verdict.count}.`, finding, members },
+    record: { heard, answers, drafts, conditions: written?.tries, judge: JUDGE, clerk: SCRIBE },
+  };
+}
+
+/** The committee's night on one referred filing. */
+async function convene(db: Db, id: number): Promise<Response> {
+  const { data: f } = await db.from("filings").select("*").eq("id", id).single();
+  if (!f || f.status !== "committee") return Response.json({ skipped: true });
+  const sat = await sit(f);
+  if (!sat) return Response.json({ quorum: false });
+  const { verdict, written, minutes, record } = sat;
+  await db
+    .from("filings")
+    .update({
+      status: verdict.status,
+      condition: written?.condition ?? null,
+      wants: written?.wants ?? null,
+      bylaw: verdict.bylaw,
+      permit: `${f.permit ?? ""} ${minutes.outcome}`.trim(),
+      minutes,
+      verdict: { ...f.verdict, committee: record },
+      stamped_at: new Date().toISOString(),
+    })
+    .eq("id", id)
+    .eq("status", "committee");
+  return Response.json(verdict);
 }
 
 // --- inspections -------------------------------------------------------------
@@ -515,13 +691,14 @@ export async function POST(req: Request): Promise<Response> {
   if (!secret || req.headers.get("authorization") !== `Bearer ${secret}`) {
     return new Response("not at this desk", { status: 401 });
   }
-  const body = (await req.json()) as { id?: number; inspect?: number; item?: number };
+  const body = (await req.json()) as { id?: number; inspect?: number; item?: number; committee?: number };
   const db = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SECRET_KEY!, {
     db: { schema: "the_commons" },
     auth: { persistSession: false },
   });
   if (body.inspect) return inspectPlot(db, body.inspect);
   if (body.item) return readLabel(db, body.item);
+  if (body.committee) return convene(db, body.committee);
   const id = body.id!;
 
   const { data: filing } = await db.from("filings").select("*").eq("id", id).single();

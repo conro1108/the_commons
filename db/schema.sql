@@ -34,6 +34,7 @@ create table the_commons.filings (
   bylaw      smallint,
   permit     text,
   verdict    jsonb, -- Jev's raw answers and the models used; stored, never regenerated
+  minutes    jsonb, -- a referral's night in committee: {outcome, finding, members: [{seat, vote, speech}]}
   -- The holder's ground painting: one char per build cell, row-major, '.' for
   -- grass (src/content/ground.ts). Null until painted.
   ground     text check (length(ground) = 432 and ground ~ '^[.a-z]*$'),
@@ -270,10 +271,14 @@ grant execute on function the_commons.summon_gary() to authenticated;
 select cron.unschedule(jobname) from cron.job where jobname like 'the_commons_%';
 select cron.schedule('the_commons_gary', '5 seconds', 'select the_commons.drain_gary()');
 select cron.schedule('the_commons_inspector', '30 seconds', 'select the_commons.send_inspector(null)');
--- The committee meets at 4am and has never once said no.
+-- The committee meets at 4am: each referral is sent to /api/gary to be
+-- debated. One that can't make quorum stays referred until the next night.
 select cron.schedule('the_commons_committee', '0 4 * * *', $$
-  update the_commons.filings
-    set status = 'approved', stamped_at = now(),
-        permit = coalesce(permit || ' ', '') || 'The committee has met, and approves.'
-    where status = 'committee'
+  select net.http_post(
+    url := 'https://the-commons-eosin.vercel.app/api/gary',
+    body := jsonb_build_object('committee', f.id),
+    headers := jsonb_build_object('Content-Type', 'application/json',
+      'Authorization', 'Bearer ' || (select decrypted_secret from vault.decrypted_secrets where name = 'the_commons_gary')),
+    timeout_milliseconds := 30000)
+  from the_commons.filings f where f.status = 'committee'
 $$);

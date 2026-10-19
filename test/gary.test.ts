@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { problemsWith, verdictOf } from "../api/gary.ts";
+import { problemsWith, tally, verdictOf } from "../api/gary.ts";
 
 test("unacceptable filings are refused, whatever the ruling", () => {
   assert.deepEqual(verdictOf({ unacceptable: 0.9, ruling: "approved", condition: "flag" }), {
@@ -19,4 +19,11 @@ test("a draft goes out only if it has no link and the checker flags nothing", ()
   assert.equal(problemsWith("Filing 0001 is approved. See www.example.com.", {}).length, 1);
   assert.equal(problemsWith("Filing 0001 is approved.", { misdescribes: 0.2, invents: 0.1 }).length, 0);
   assert.equal(problemsWith("Filing 0001 is approved for a gazebo.", { misdescribes: 0.9 }).length, 1);
+});
+
+test("the committee needs a quorum; a majority against denies under the most-cited bylaw; a split carries on condition", () => {
+  assert.equal(tally(["approved", "b2", null, null, null], "flag"), null);
+  assert.deepEqual(tally(["b3", "b1", "b3", "approved", null], "flag"), { status: "denied", condition: null, bylaw: 3, count: "1 to 3, 1 abstaining" });
+  assert.equal(tally(["approved", "approved", "approved", "b2", "conditional"], "flag")?.status, "approved");
+  assert.equal(tally(["approved", "approved", "conditional", "b2", "b4"], "flag")?.condition, "flag");
 });

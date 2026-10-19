@@ -30,6 +30,7 @@ export interface Filing {
   wants: string | null;
   bylaw: number | null;
   permit: string | null;
+  minutes: { outcome: string; finding: string | null; members: { seat: string; vote: string | null; speech: string | null }[] } | null;
   filed_at: string;
   stamped_at: string | null;
   built_at: string | null;

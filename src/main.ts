@@ -99,7 +99,19 @@ function ruling(f: Filing, fresh = false) {
   const bylaw = f.status === "denied" && f.bylaw ? BYLAWS[f.bylaw - 1] : null;
   return `<p class="stamp ${f.status}${fresh ? " thunk" : ""}">${STAMP[f.status]}${bylaw ? ` (Bylaw ${f.bylaw})` : ""}</p>
     ${bylaw ? `<p class="meta"><b>Bylaw ${f.bylaw}.</b> ${bylaw}</p>` : ""}
-    ${f.permit ? `<p class="permit">${esc(f.permit)}</p>` : ""}`;
+    ${f.permit ? `<p class="permit">${esc(f.permit)}</p>` : ""}
+    ${minutesHtml(f)}`;
+}
+
+const VOTED = (v: string | null) =>
+  !v ? "remarks struck from the record" : v === "approved" ? "in favour" : v === "conditional" ? "in favour, on a condition" : `against, under Bylaw ${v.slice(1)}`;
+
+/** A referral's night in committee: the clerk's finding, then each member in turn. */
+function minutesHtml(f: Filing) {
+  const m = f.minutes;
+  if (!m) return "";
+  return `<div class="condition"><p><b>Minutes of the committee.</b> ${esc(m.finding ?? m.outcome)}</p>
+    ${m.members.map((x) => `<p class="meta"><b>${esc(x.seat)}</b>, ${VOTED(x.vote)}.${x.speech ? ` <q>${esc(x.speech)}</q>` : ""}</p>`).join("")}</div>`;
 }
 
 const when = (iso: string) => new Date(iso).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
@@ -1086,7 +1098,7 @@ async function start() {
       const f = row as Filing;
       // Gary's ruling on one of ours: it comes by post.
       const was = filings.get(f.id);
-      if (f.filer === me && was?.status === "pending" && f.status !== "pending") {
+      if (f.filer === me && (was?.status === "pending" || was?.status === "committee") && f.status !== was.status) {
         unread.add(f.id);
         letters.push({ plot: { x: f.plot_x, y: f.plot_y }, out: false, status: f.status, filing: f.id });
       }
