@@ -114,9 +114,9 @@ function mount(hooks: DevHooks): HTMLElement {
     <button data-do="rule">Rule</button><button data-do="committee">Committee</button><button data-do="draw">Draw</button><br>
     <label><select name="stock">${STOCK.map((c) => `<option>${c}</option>`).join("")}</select></label>
     <label><input type="checkbox" name="writeIn"> write-in</label><button data-do="condition">Write condition</button><br>
-    <label><input name="condition" placeholder="condition (else the filing's)"></label><button data-do="inspect">Inspect</button>
+    <label><input name="condition" placeholder="condition (else the filing's)"></label><button data-do="inspect">Inspect</button><button data-do="audit">Audit</button>
     <h2>The live in-tray <span class="meta">writes to the shared commons</span></h2>
-    <div class="live"><button data-desk="id">Rule now</button><button data-desk="committee">Convene now</button><button data-desk="inspect">Inspect now</button></div>
+    <div class="live"><button data-desk="id">Rule now</button><button data-desk="committee">Convene now</button><button data-desk="inspect">Inspect now</button><button data-desk="audit">Audit now</button></div>
     <h2>Only here <span class="meta">gone on reload</span></h2>
     <label><select name="status">${STATUSES.map((s) => `<option>${s}</option>`).join("")}</select></label><button data-do="fake">A letter arrives</button>
     <button data-do="papers">Form R-1</button><button data-do="speak">Gary speaks</button>
@@ -200,6 +200,7 @@ function mount(hooks: DevHooks): HTMLElement {
       id: id() ?? 9999, intent: intent(), stock: field<HTMLSelectElement>("stock").value, writeIn: field("writeIn").checked,
     }),
     inspect: () => id() && call("inspect", "inspect", { id: id(), condition: field("condition").value.trim() || undefined }),
+    audit: () => id() && call("audit", "audit", { id: id() }),
     fake: () => {
       const status = field<HTMLSelectElement>("status").value as Status;
       return letter("pending", { status, permit: `A ${status} letter, from the back office.`, bylaw: status === "denied" ? 1 : null });

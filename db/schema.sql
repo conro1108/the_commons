@@ -45,7 +45,8 @@ create table the_commons.filings (
   inspect_sent timestamptz, -- when Gary was last sent round
   inspected_at timestamptz,
   remark       text,
-  met_at       timestamptz
+  met_at       timestamptz,
+  audited_at   timestamptz -- when Gary last came back to audit it (send_auditor)
 );
 create unique index filings_plot_held on the_commons.filings (plot_x, plot_y)
   where status in ('pending', 'approved', 'conditional', 'committee');
@@ -133,13 +134,15 @@ revoke execute on function the_commons.placement_built() from public, anon, auth
 create trigger placements_built after insert or update or delete on the_commons.placements
   for each row execute function the_commons.placement_built();
 
--- Inspections: every time Gary has come round about a condition. Written only
+-- Inspections: every time Gary has come round about a condition, or to audit
+-- a granted plot against its permit. Written only
 -- by /api/gary; the latest is copied onto the filing for the map.
 create table the_commons.inspections (
   id       bigint generated always as identity primary key,
   filing   bigint not null references the_commons.filings on delete cascade,
   at       timestamptz not null default now(),
-  met      boolean not null,
+  kind     text not null default 'condition' check (kind in ('condition', 'audit')),
+  met      boolean not null, -- for an audit: in order
   remark   text not null,
   evidence jsonb not null, -- what he saw: props, ground, neighbours
   answers  jsonb not null  -- the decision model's raw answers
@@ -260,6 +263,41 @@ begin
 end $$;
 revoke execute on function the_commons.send_inspector(uuid) from public, anon, authenticated;
 
+-- Gary's audit: once a day he comes back to granted plots that have been built
+-- on since he last came (and left alone an hour), to see they're still what was
+-- filed for and any condition met is still met. Five a day, the latest built
+-- first; he doesn't get round to everyone. Returns how many he's off to.
+create function the_commons.send_auditor() returns int
+language plpgsql security definer set search_path = '' as $$
+declare
+  f record;
+  secret text;
+  n int := 0;
+begin
+  select decrypted_secret into secret from vault.decrypted_secrets where name = 'the_commons_gary';
+  if secret is null then return 0; end if;
+  for f in
+    update the_commons.filings set audited_at = now()
+    where id in (
+      select id from the_commons.filings
+      where (status = 'approved' or status = 'conditional' and met_at is not null)
+        and built_at < now() - interval '1 hour'
+        and built_at > coalesce(audited_at, '-infinity')
+      order by built_at desc limit 5)
+    returning id
+  loop
+    n := n + 1;
+    perform net.http_post(
+      url := 'https://the-commons-eosin.vercel.app/api/gary',
+      body := jsonb_build_object('audit', f.id),
+      headers := jsonb_build_object('Content-Type', 'application/json',
+                                    'Authorization', 'Bearer ' || secret),
+      timeout_milliseconds := 30000);
+  end loop;
+  return n;
+end $$;
+revoke execute on function the_commons.send_auditor() from public, anon, authenticated;
+
 -- Double-click Gary and he comes round your plots now.
 create function the_commons.summon_gary() returns int
 language sql security definer set search_path = '' as $$
@@ -271,6 +309,7 @@ grant execute on function the_commons.summon_gary() to authenticated;
 select cron.unschedule(jobname) from cron.job where jobname like 'the_commons_%';
 select cron.schedule('the_commons_gary', '5 seconds', 'select the_commons.drain_gary()');
 select cron.schedule('the_commons_inspector', '30 seconds', 'select the_commons.send_inspector(null)');
+select cron.schedule('the_commons_auditor', '0 15 * * *', 'select the_commons.send_auditor()');
 -- The committee meets at 4am: each referral is sent to /api/gary to be
 -- debated. One that can't make quorum stays referred until the next night.
 select cron.schedule('the_commons_committee', '0 4 * * *', $$

@@ -38,6 +38,12 @@ async function run(db: gary.Db, { what, ...b }: Body): Promise<unknown> {
       if (!condition) throw new Error(`Filing ${b.id} has no condition; give one to try.`);
       return { evidence, ...(await gary.inspect({ ...f, condition }, evidence)) };
     }
+    case "audit": {
+      const { data: f, error } = await db.from("filings").select("*").eq("id", b.id).single();
+      if (error) throw error;
+      const evidence = await gary.survey(db, f);
+      return { evidence, ...(await gary.audit(f, evidence)) };
+    }
     case "filing": {
       const [f, inspections] = await Promise.all([
         db.from("filings").select("*").eq("id", b.id).single(),

@@ -4,7 +4,8 @@
 // { item: id }, to be read before anyone else sees it, then drawn. It also POSTs { inspect: id } when a plot
 // with an outstanding condition has been built on (send_inspector()), and
 // Gary goes round to see whether the condition's been met, and { committee: id }
-// nightly for each referral, which five members debate (see sit()). A decision model rules from enums; the scribe only
+// nightly for each referral, which five members debate (see sit()), and { audit: id } on his
+// daily round of plots built on since he last came (send_auditor(), audit()). A decision model rules from enums; the scribe only
 // writes the prose, and the decision model checks it before it goes out. The write is conditional on the filing still being
 // pending, so a retried request never overwrites a stored ruling.
 
@@ -162,7 +163,7 @@ export function problemsWith(draft: string, checks: Partial<Record<Check, number
 
 /** Two sentences (a refusal gets to fall apart over a few more), at most 400 characters: the scribe is chatty. */
 const trim = (text: string, sentences = 2, max = 400) =>
-  (text.trim().match(/[^.!?]+(?:[.!?]+|$)/g) ?? [text.trim()]).slice(0, sentences).join("").trim().slice(0, max);
+  (text.trim().match(/[^.!?]+(?:[.!?]+["'”’)]*|$)/g) ?? [text.trim()]).slice(0, sentences).join("").trim().slice(0, max);
 
 /** Rule on one filing. Exported so a ruling can be tried from a script. */
 export async function rule(
@@ -258,6 +259,7 @@ A filing has been approved with conditions. Write the condition: one sentence be
 Make it about this filing in particular: a small, serious, slightly absurd requirement, in proportion to the intent.
 It must be something the filer can meet on their own plot: by what they put there and where, how they paint the ground ("ground"), or by having a neighbour on a plot next door.
 If "debate" is given, the Commons Committee has argued over this filing: make the condition answer the concerns its members raised, recast as something the plot can show (a worry about noise might become a hedge between it and the neighbours).
+If "amend" is given, Gary has audited the plot since it was granted and found it out of order: "amend.departs" means what's built has strayed from the intent, "amend.lapsed" is an earlier condition no longer met, and "amend.on_the_plot" is what's there now. Write an amended condition, up to 30 words: it requires putting right what's wrong (restoring the lapsed condition, or bringing the plot back to its intent) and adds one small further requirement, as administrators do. Ask for what's missing rather than for things to be taken away: extra things may stay.
 If "write_in" is false, any things it asks for must be from "things". If it is true, it must ask for one particular thing that is not in "things", specific and a little unexpected, suited to the intent: the filer will write it in by name, and Gary will draw it.
 Never require anything off the plot, anything only Gary could do, or anything that can't be seen.
 The plot records only which things are there, where they stand, the ground and the neighbours. Things have no facing, orientation, size, colour, wording or state, so never require any of those.
@@ -277,8 +279,12 @@ const CONDITION_CHECKS = {
 // Now and then he asks for something off the palette, to be written in. Code decides how often, not the model.
 export async function writeCondition(
   filing: { id: number; intent: string }, stock: Condition, debate?: string[], writeIn = Math.random() < 0.2,
+  amend?: { departs: boolean; lapsed: string | null; on_the_plot: string[] },
 ) {
-  const input = { filing: pad(filing.id), intent: filing.intent, things: PROPS, ground: Object.values(GROUND), write_in: writeIn, ...(debate && { debate }) };
+  const input = {
+    filing: pad(filing.id), intent: filing.intent, things: PROPS, ground: Object.values(GROUND), write_in: writeIn,
+    ...(debate && { debate }), ...(amend && { amend }),
+  };
   const tries: { text: string; checks: Record<string, number>; problems: string[] }[] = [];
   for (let attempt = 0; attempt < 2; attempt++) {
     const last = tries.at(-1);
@@ -289,7 +295,7 @@ export async function writeCondition(
       prompt: JSON.stringify(last ? { ...input, rejected: last.text, rejected_because: last.problems } : input),
       maxOutputTokens: 4000, // reasoning counts against it
     });
-    const condition = trim(text, 1);
+    const condition = trim(text, 1, amend ? 250 : 400);
     if (!/^must\b/i.test(condition) || problemsWith(condition, {}).length) {
       tries.push({ text: condition, checks: {}, problems: ['it must be one sentence beginning "Must", with no links'] });
       continue;
@@ -518,6 +524,9 @@ export type Evidence = {
   neighbours: number; // held plots next door
 };
 
+const MET =
+  "Judging only by the evidence of what is on the plot (and whether it has neighbours, if the condition asks), has the condition been met? Be fair and a little generous: anything that plausibly satisfies it counts. Where things are is loose: a pair listed in \"beside\" is beside, next to, by or with each other, and anything in the same part of the plot is near it. If nothing relevant has been built, it has not.";
+
 /** Gary looks over a plot against its condition: the decision model finds, the scribe remarks. */
 export async function inspect(filing: { id: number; intent: string; condition: string }, evidence: Evidence) {
   const state = { filing: pad(filing.id), intent: filing.intent, condition: filing.condition, evidence };
@@ -527,45 +536,103 @@ export async function inspect(filing: { id: number; intent: string; condition: s
     questions: {
       met: {
         type: "boolean",
-        instructions:
-          "Judging only by the evidence of what is on the plot (and whether it has neighbours, if the condition asks), has the condition been met? Be fair and a little generous: anything that plausibly satisfies it counts. Where things are is loose: a pair listed in \"beside\" is beside, next to, by or with each other, and anything in the same part of the plot is near it. If nothing relevant has been built, it has not.",
+        instructions: MET,
       },
     },
   });
   const met = answers.met.probability > 0.5;
-  // The scribe writes; the decision model checks it saw only what's there. One more go, then the plain form.
+  const { text, drafts } = await note(INSPECTOR, { ...state, met }, REMARK_CHECKS);
+  const remark = text ?? (met
+    ? "Inspected. The condition is met, and the administrator is satisfied."
+    : "Inspected. The condition remains outstanding. The administrator will come round again.");
+  return { met, remark, answers: { ...answers, drafts } };
+}
+
+/** Gary's note of a visit: the scribe writes, the decision model checks it saw only what's there. One more go, then null. */
+async function note(system: string, input: object, checks: Record<string, string>) {
   const drafts: { text: string; checks: Record<string, number>; problems: string[] }[] = [];
   for (let attempt = 0; attempt < 2; attempt++) {
     const last = drafts.at(-1);
     const { text } = await generateText({
       model: SCRIBE,
       reasoning: LIGHT_THINKING,
-      system: INSPECTOR,
-      prompt: JSON.stringify(last ? { ...state, met, rejected: last.text, rejected_because: last.problems } : { ...state, met }),
+      system,
+      prompt: JSON.stringify(last ? { ...input, rejected: last.text, rejected_because: last.problems } : input),
       maxOutputTokens: 4000, // reasoning counts against it
     });
     const draft = trim(text, 2);
     let problems = problemsWith(draft, {});
     if (/\d\s*[,x×–-]\s*\d|\b(row|column|cell|tile|across|down)\s+\d/i.test(draft)) problems = ["it gave coordinates or cell numbers"];
-    let checks: Record<string, number> = {};
+    let scores: Record<string, number> = {};
     if (!problems.length) {
       const { answers: a } = await decide({
         model: JUDGE,
-        state: { ...state, met, remark: draft },
-        questions: Object.fromEntries(
-          Object.entries(REMARK_CHECKS).map(([k, instructions]) => [k, { type: "boolean" as const, instructions }]),
-        ) as Record<keyof typeof REMARK_CHECKS, { type: "boolean"; instructions: string }>,
+        state: { ...input, remark: draft },
+        questions: Object.fromEntries(Object.entries(checks).map(([k, instructions]) => [k, { type: "boolean" as const, instructions }])),
       });
-      checks = Object.fromEntries(Object.entries(a).map(([k, v]) => [k, v.probability]));
-      problems = Object.entries(checks).filter(([, p]) => p > 0.5).map(([k]) => REMARK_CHECKS[k as keyof typeof REMARK_CHECKS]);
+      scores = Object.fromEntries(Object.entries(a).map(([k, v]) => [k, (v as { probability: number }).probability]));
+      problems = Object.entries(scores).filter(([, p]) => p > 0.5).map(([k]) => checks[k]);
     }
-    drafts.push({ text: draft, checks, problems });
-    if (!problems.length) return { met, remark: draft, answers: { ...answers, drafts } };
+    drafts.push({ text: draft, checks: scores, problems });
+    if (!problems.length) return { text: draft, drafts };
   }
-  const remark = met
-    ? "Inspected. The condition is met, and the administrator is satisfied."
-    : "Inspected. The condition remains outstanding. The administrator will come round again.";
-  return { met, remark, answers: { ...answers, drafts } };
+  return { text: null, drafts };
+}
+
+// --- audits --------------------------------------------------------------------
+
+// Now and then Gary comes back to a granted plot that's been built on, to see
+// it's still what was filed for and any condition it met is still met. Out of
+// order isn't a loss, only more paperwork: an amended condition, outstanding
+// until he's been round and seen it put right.
+
+const AUDITOR = `You are Gary, a tired office creature who administers the Commons, a shared patch of land.
+You are earnest, procedural and kind, and you take very small things extremely seriously. Deadpan; never wink, never sarcastic.
+You have come back to audit a plot granted a permit, and found it out of order; the findings are already made.
+Write the notice: at most two sentences, at most 45 words, plain text, no greeting, no markdown.
+Say plainly what is out of order ("departs": what's built has strayed from the intent; "lapsed": the earlier condition that is no longer met), then that the permit is amended, quoting the new condition ("condition").
+Regretful and procedural, never cross: an administrator doing his job, who would rather not have had to.
+Refer only to things in the evidence; never invent things on the plot. Never give coordinates or cell numbers: say where things are in words.`;
+
+const NOTICE_CHECKS = {
+  invents: REMARK_CHECKS.invents,
+  unclear: "Does the notice fail to say what is out of order, or fail to give the amended condition?",
+  unfit: REMARK_CHECKS.unfit,
+} as const;
+
+/** Gary audits a granted plot: the decision model finds, code amends, the scribe writes the notice. */
+export async function audit(f: { id: number; intent: string; condition: string | null; met_at: string | null }, evidence: Evidence) {
+  const keeping = f.condition && f.met_at ? f.condition : null; // a condition once met, which must stay met
+  const { answers } = await decide({
+    model: JUDGE,
+    state: { filing: pad(f.id), intent: f.intent, ...(keeping && { condition: keeping }), evidence },
+    questions: {
+      departs: {
+        type: "boolean",
+        instructions:
+          "Has the plot plainly strayed from its intent: does what's built contradict what was filed for, leave out the very thing filed for, or make the plot into something else entirely? Be fair and a little generous: extra things alongside are fine, and so is a modest or unfinished version. If nothing has been built, it has not strayed.",
+      },
+      ...(keeping && { met: { type: "boolean" as const, instructions: MET } }),
+      condition: {
+        type: "choice",
+        instructions: "If a condition were attached to this plot to bring it back into order, which would suit it best?",
+        criteria: CONDITIONS as Record<Condition, string>,
+      },
+    },
+  }) as unknown as { answers: Record<string, { probability: number; choice: string }> };
+  const departs = answers.departs.probability > 0.5;
+  const lapsed = keeping && answers.met.probability <= 0.5 ? keeping : null;
+  if (!departs && !lapsed) return { compliant: true as const, answers };
+
+  const written = await writeCondition(f, answers.condition.choice as Condition, undefined, false, { departs, lapsed, on_the_plot: evidence.things });
+  // If Gary can't word an amendment, a lapsed condition simply stands again.
+  const fellBack = written.tries.every((t) => t.problems.length);
+  const condition = fellBack && lapsed ? lapsed : written.condition;
+  const wants = fellBack && lapsed ? null : written.wants;
+  const findings = { departs, lapsed, condition };
+  const { text, drafts } = await note(AUDITOR, { filing: pad(f.id), intent: f.intent, evidence, ...findings }, NOTICE_CHECKS);
+  const remark = text ?? `Audited. ${lapsed ? "An earlier condition is no longer met" : "The plot has strayed from its permit"}, and the permit is amended: ${condition}`;
+  return { compliant: false as const, condition, wants, remark, answers: { ...answers, conditions: written.tries, drafts } };
 }
 
 export type Db = SupabaseClient<any, any, any>;
@@ -686,6 +753,24 @@ export async function draw(label: string): Promise<{ sprite: Sprite | null; draf
   return { sprite: null, drafts };
 }
 
+/** Audit one granted plot. Sent by send_auditor() once it's been built on since he last came. */
+async function auditPlot(db: Db, id: number): Promise<Response> {
+  const { data: f } = await db.from("filings").select("*").eq("id", id).single();
+  if (!f || !(f.status === "approved" || (f.status === "conditional" && f.met_at))) return Response.json({ skipped: true });
+  const evidence = await survey(db, f);
+  const result = await audit(f, evidence);
+  const at = new Date().toISOString();
+  const remark = result.compliant ? "Audited. In order." : result.remark;
+  await db.from("inspections").insert({ filing: id, kind: "audit", at, met: result.compliant, remark, evidence, answers: result.answers });
+  if (result.compliant) return Response.json({ compliant: true });
+  await db
+    .from("filings")
+    .update({ status: "conditional", condition: result.condition, wants: result.wants, met_at: null, remark, inspected_at: at })
+    .eq("id", id)
+    .in("status", ["approved", "conditional"]);
+  return Response.json({ compliant: false, condition: result.condition, remark });
+}
+
 /** Go round to one plot. The same evidence never gets a second look. */
 async function inspectPlot(db: Db, id: number): Promise<Response> {
   const { data: f } = await db.from("filings").select("*").eq("id", id).single();
@@ -729,8 +814,9 @@ export async function POST(req: Request): Promise<Response> {
 }
 
 /** Whatever's landed in the in-tray. Also run from the dev back office (dev/backoffice.ts). */
-export async function desk(db: Db, body: { id?: number; inspect?: number; item?: number; committee?: number }): Promise<Response> {
+export async function desk(db: Db, body: { id?: number; inspect?: number; item?: number; committee?: number; audit?: number }): Promise<Response> {
   if (body.inspect) return inspectPlot(db, body.inspect);
+  if (body.audit) return auditPlot(db, body.audit);
   if (body.item) return readLabel(db, body.item);
   if (body.committee) return convene(db, body.committee);
   const id = body.id!;
