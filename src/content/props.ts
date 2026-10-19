@@ -3,6 +3,7 @@
 // is a client change only — but never rename or drop one that's been placed.
 
 import { CANON, K, type PropDef } from "./canon/props.ts";
+import { ZOOM } from "../layout.ts";
 
 const COMMONS: Record<string, PropDef> = {
   item: {
@@ -393,6 +394,12 @@ export function propCanvas(name: string): HTMLCanvasElement {
   );
   cache.set(name, c);
   return c;
+}
+
+/** The build cells a prop covers, wide and deep, from its top-left anchor. No canvas, so tests can ask. */
+export function footprint(name: string): [number, number] {
+  const def = PROPS[name] ?? PROPS.item;
+  return [Math.ceil(Math.max(1, ...def.rows.map((r) => r.length)) / ZOOM), Math.ceil(def.rows.length / ZOOM)];
 }
 
 export function propSize(name: string): { w: number; h: number } {

@@ -42,16 +42,18 @@ const STOCK_WANTS: Partial<Record<Condition, string>> = {
   north: "weathervane", flag: "flag", plaque: "plaque", dignified: "signpost", goose: "goose",
 };
 
-// What can be built, mirroring PALETTE in src/content/props.ts and GROUND in
-// src/content/ground.ts (client code, so not imported here).
-const PROPS = [
-  "flowers", "tuft", "sunflower", "garden", "hedge", "tree",
-  "bench", "log", "picnic", "campfire", "rock", "pond",
-  "flag", "plaque", "signpost", "noticeboard", "weathervane", "sundial", "postbox", "lamppost", "bin",
-  "goose", "duck", "gnome", "scarecrow", "beehive", "birdbath",
-  "fence", "shed", "well", "hay", "barn", "headstone",
-  "bunting", "lanterns",
-];
+// What can be built, and the cells each covers from its top-left anchor,
+// mirroring PALETTE and footprint() in src/content/props.ts and GROUND in
+// src/content/ground.ts (client code, so not imported here; a test keeps them in step).
+export const SIZES: Record<string, [number, number]> = {
+  flowers: [3, 2], tuft: [2, 1], sunflower: [2, 4], garden: [5, 2], hedge: [3, 2], tree: [4, 4],
+  bench: [4, 3], log: [4, 1], picnic: [5, 2], campfire: [3, 3], rock: [3, 2], pond: [6, 2],
+  flag: [1, 2], plaque: [2, 3], signpost: [3, 3], noticeboard: [4, 4], weathervane: [2, 4], sundial: [3, 2], postbox: [2, 4], lamppost: [2, 4], bin: [2, 2],
+  goose: [3, 3], duck: [3, 2], gnome: [2, 3], scarecrow: [3, 4], beehive: [3, 3], birdbath: [3, 3],
+  fence: [3, 2], shed: [5, 4], well: [4, 4], hay: [3, 2], barn: [6, 3], headstone: [4, 3],
+  bunting: [3, 2], lanterns: [3, 2],
+};
+const PROPS = Object.keys(SIZES);
 const GROUND: Record<string, string> = { ".": "grass", p: "path", c: "stone", s: "soil", w: "water", m: "wildflowers" };
 
 // One question, so a denial always comes with the bylaw it's under.
@@ -509,7 +511,8 @@ const REMARK_CHECKS = {
 
 export type Evidence = {
   plot: string; // how to read the positions
-  things: string[]; // "bench at 4,9", "lobster (written in) at 12,3"
+  things: string[]; // "bench, across 4-7, down 9-11", "lobster (written in), across 12-14, down 3-4"
+  beside: string[]; // "scarecrow and hay": pairs touching or one cell apart, worked out by code
   ground: string[]; // the plot cell by cell, one string per row
   key: Record<string, string>; // ground character -> what it is
   neighbours: number; // held plots next door
@@ -525,7 +528,7 @@ export async function inspect(filing: { id: number; intent: string; condition: s
       met: {
         type: "boolean",
         instructions:
-          "Judging only by the evidence of what is on the plot (and whether it has neighbours, if the condition asks), has the condition been met? Be fair and a little generous: anything that plausibly satisfies it counts. If nothing relevant has been built, it has not.",
+          "Judging only by the evidence of what is on the plot (and whether it has neighbours, if the condition asks), has the condition been met? Be fair and a little generous: anything that plausibly satisfies it counts. Where things are is loose: a pair listed in \"beside\" is beside, next to, by or with each other, and anything in the same part of the plot is near it. If nothing relevant has been built, it has not.",
       },
     },
   });
@@ -543,7 +546,7 @@ export async function inspect(filing: { id: number; intent: string; condition: s
     });
     const draft = trim(text, 2);
     let problems = problemsWith(draft, {});
-    if (/\d\s*[,x×]\s*\d|\b(row|column|cell|tile)\s+\d/i.test(draft)) problems = ["it gave coordinates or cell numbers"];
+    if (/\d\s*[,x×–-]\s*\d|\b(row|column|cell|tile|across|down)\s+\d/i.test(draft)) problems = ["it gave coordinates or cell numbers"];
     let checks: Record<string, number> = {};
     if (!problems.length) {
       const { answers: a } = await decide({
@@ -569,9 +572,18 @@ export type Db = SupabaseClient<any, any, any>;
 
 /** What's on a plot and where, as Gary would note it down. */
 export async function survey(db: Db, f: { id: number; plot_x: number; plot_y: number; ground: string | null }): Promise<Evidence> {
-  const { data: placed } = await db.from("placements").select("prop, x, y, label, label_ok").eq("filing", f.id).order("id");
-  const things = ((placed ?? []) as { prop: string; x: number; y: number; label: string | null; label_ok: boolean | null }[])
-    .map((p) => `${p.prop !== "item" ? p.prop : p.label_ok ? `${p.label} (written in)` : "an unlabelled parcel"} at ${p.x},${p.y}`);
+  const { data: placed } = await db.from("placements").select("prop, x, y, label, label_ok, sprite").eq("filing", f.id).order("id");
+  // Each thing by the cells it covers, not just its anchor, so "beside" can be judged.
+  const boxes = ((placed ?? []) as { prop: string; x: number; y: number; label: string | null; label_ok: boolean | null; sprite: Sprite | null }[])
+    .map((p) => {
+      const [w, h] = p.prop === "item" && p.sprite ? [Math.ceil(Math.max(...p.sprite.rows.map((r) => r.length)) / 4), Math.ceil(p.sprite.rows.length / 4)] : (SIZES[p.prop] ?? [3, 2]);
+      const name = p.prop !== "item" ? p.prop : p.label_ok ? `${p.label} (written in)` : "an unlabelled parcel";
+      return { name, x0: p.x, y0: p.y, x1: Math.min(p.x + w, W) - 1, y1: Math.min(p.y + h, H) - 1 };
+    });
+  const things = boxes.map((b) => `${b.name}, across ${b.x0}-${b.x1}, down ${b.y0}-${b.y1}`);
+  const beside = boxes.flatMap((a, i) => boxes.slice(i + 1)
+    .filter((b) => Math.max(a.x0 - b.x1, b.x0 - a.x1, a.y0 - b.y1, b.y0 - a.y1) <= 2)
+    .map((b) => `${a.name} and ${b.name}`));
   const cells = f.ground ?? ".".repeat(W * H);
   const ground = Array.from({ length: H }, (_, y) => cells.slice(y * W, (y + 1) * W));
   const { data: next } = await db
@@ -583,8 +595,8 @@ export async function survey(db: Db, f: { id: number; plot_x: number; plot_y: nu
   const neighbours = ((next ?? []) as { plot_x: number; plot_y: number }[])
     .filter((n) => Math.abs(n.plot_x - f.plot_x) + Math.abs(n.plot_y - f.plot_y) === 1).length;
   return {
-    plot: `${W} cells wide and ${H} deep; positions are x,y from the top-left corner, of each thing's top-left`,
-    things, ground, key: GROUND, neighbours,
+    plot: `${W} cells wide and ${H} deep; each thing covers the cells given, counted across and down from the top-left corner`,
+    things, beside, ground, key: GROUND, neighbours,
   };
 }
 

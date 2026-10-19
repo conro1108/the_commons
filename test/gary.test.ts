@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { problemsWith, tally, verdictOf } from "../api/gary.ts";
+import { SIZES, problemsWith, tally, verdictOf } from "../api/gary.ts";
+import { PALETTE, footprint } from "../src/content/props.ts";
 
 test("unacceptable filings are refused, whatever the ruling", () => {
   assert.deepEqual(verdictOf({ unacceptable: 0.9, ruling: "approved", condition: "flag" }), {
@@ -26,4 +27,9 @@ test("the committee needs a quorum; a majority against denies under the most-cit
   assert.deepEqual(tally(["b3", "b1", "b3", "approved", null], "flag"), { status: "denied", condition: null, bylaw: 3, count: "1 to 3, 1 abstaining" });
   assert.equal(tally(["approved", "approved", "approved", "b2", "conditional"], "flag")?.status, "approved");
   assert.equal(tally(["approved", "approved", "conditional", "b2", "b4"], "flag")?.condition, "flag");
+});
+
+test("Gary knows every prop on the palette, at the size it's drawn", () => {
+  const drawn = Object.fromEntries(PALETTE.flatMap((g) => g.props).map((p) => [p, footprint(p)]));
+  assert.deepEqual(SIZES, drawn);
 });
