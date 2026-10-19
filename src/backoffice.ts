@@ -1,7 +1,6 @@
-// The back office: a dev-only panel, toggled with ` (backtick). Dry runs of
-// Gary's pipeline against the current prompts (dev/backoffice.ts runs them),
-// the live in-tray on demand, and local-only fakes for testing how things
-// arrive. Imported only under import.meta.env.DEV, so never shipped.
+// The back office, behind a 5s hold on the notice board: dry runs of Gary's
+// pipeline (api/backoffice.ts runs them), the live in-tray on demand, and
+// local-only fakes for testing how things arrive. Loaded only when opened.
 
 import type { Filing, Status } from "./net.ts";
 import type { Plot } from "./layout.ts";
@@ -67,7 +66,18 @@ function sprite(rows: string[], palette: Record<string, string>) {
   return `<img class="sprite" src="${c.toDataURL()}" width="${c.width * 6}" height="${c.height * 6}">`;
 }
 
-export function mountDev(hooks: DevHooks) {
+let panel: HTMLElement | null = null;
+
+/** Open the back office, or close it if it's open. */
+export function backoffice(hooks: DevHooks) {
+  if (!panel) panel = mount(hooks);
+  panel.hidden = !panel.hidden;
+  const id = panel.querySelector<HTMLInputElement>("[name=id]")!;
+  const sel = hooks.selected();
+  if (!panel.hidden && sel !== null && !id.value) id.value = String(sel);
+}
+
+function mount(hooks: DevHooks): HTMLElement {
   const style = document.createElement("style");
   style.textContent = `
     #dev { position: fixed; top: 8px; right: 8px; bottom: 8px; width: min(460px, 96vw); overflow-y: auto; z-index: 50; font-size: 12px; }
@@ -89,7 +99,7 @@ export function mountDev(hooks: DevHooks) {
     #dev .odds i { display: inline-block; height: 6px; background: #b07a1e; margin-right: 4px; }
     #dev .dim { color: #b8a8c0; }
     #dev .sprite { image-rendering: pixelated; background: #8ec572; padding: 6px; }
-    #devtoggle { position: fixed; right: 8px; bottom: 8px; z-index: 49; margin: 0; padding: 0 6px; font-size: 11px; opacity: .6; }`;
+`;
   document.head.append(style);
 
   const panel = document.createElement("div");
@@ -97,7 +107,7 @@ export function mountDev(hooks: DevHooks) {
   panel.className = "paper";
   panel.hidden = true;
   panel.innerHTML = `<button class="close" aria-label="Close">×</button>
-    <h2>Back office <span class="meta">(dev · \` to toggle)</span></h2>
+    <h2>Back office</h2>
     <label>Filing <input type="number" name="id" placeholder="9999"></label><button data-do="filing">Look up</button>
     <textarea name="intent" rows="2" maxlength="120" placeholder="an intent, or the name of a thing to draw"></textarea>
     <h2>Dry run <span class="meta">nothing is written; current prompts</span></h2>
@@ -113,11 +123,6 @@ export function mountDev(hooks: DevHooks) {
     <h2>Runs <button data-do="clear">clear</button></h2>
     <div class="runs"></div>`;
   document.body.append(panel);
-
-  const toggle = document.createElement("button");
-  toggle.id = "devtoggle";
-  toggle.textContent = "dev";
-  document.body.append(toggle);
 
   const field = <T extends HTMLElement = HTMLInputElement>(name: string) => panel.querySelector<T>(`[name=${name}]`)!;
   const id = () => (field("id").value ? Number(field("id").value) : null);
@@ -147,7 +152,7 @@ export function mountDev(hooks: DevHooks) {
     runs.unshift(run);
     render();
     try {
-      const res = await fetch(`/dev/${path}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(input) });
+      const res = await fetch("/api/backoffice", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ what: path, ...input }) });
       const body = await res.json();
       Object.assign(run, body.error ? { error: body.error, ms: body.ms } : { result: body.result, ms: body.ms });
       if (kind === "filing" && run.result) field<HTMLTextAreaElement>("intent").value = run.result.intent;
@@ -214,22 +219,11 @@ export function mountDev(hooks: DevHooks) {
     if (b.classList.contains("close")) panel.hidden = true;
     else if (b.dataset.do) void DO[b.dataset.do]();
     else if (b.dataset.preview) void preview(runs.find((r) => r.n === Number(b.dataset.preview))!);
-    else if (b.dataset.desk && id() && confirm(`${b.textContent}: Filing ${id()}, on the live commons, with your local prompts?`)) {
+    else if (b.dataset.desk && id() && confirm(`${b.textContent}: Filing ${id()}, on the live commons?`)) {
       void call(`desk ${b.dataset.desk}`, "desk", { [b.dataset.desk]: id() });
     }
   });
 
-  const open = () => {
-    panel.hidden = !panel.hidden;
-    const sel = hooks.selected();
-    if (!panel.hidden && sel !== null && !id()) field("id").value = String(sel);
-  };
-  toggle.addEventListener("click", open);
-  window.addEventListener("keydown", (e) => {
-    if (e.key === "`" && !(e.target as HTMLElement).closest?.("input, textarea")) {
-      e.preventDefault();
-      open();
-    }
-  });
   render();
+  return panel;
 }

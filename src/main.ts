@@ -809,7 +809,7 @@ canvas.addEventListener("pointerleave", () => {
 });
 
 canvas.addEventListener("contextmenu", (e) => {
-  if (focus) e.preventDefault();
+  if (focus || onBoard(toArt(e, mapView))) e.preventDefault(); // a long press on the board is a hold, not a menu
 });
 
 window.addEventListener("keydown", (e) => {
@@ -923,8 +923,31 @@ async function summon() {
   speak(n === null ? "Not now. The kettle." : n ? "Right. I'll come round now." : "Nothing outstanding that I haven't already seen.");
 }
 
+// Hold the notice board for five seconds and the back office opens (src/backoffice.ts).
+let holding: number | undefined;
+let heldOpen = false; // the click that ends a hold that opened it isn't a click
+canvas.addEventListener("pointerdown", (e) => {
+  heldOpen = false;
+  if (focus || zoom || !onBoard(toArt(e, mapView))) return;
+  holding = window.setTimeout(async () => {
+    heldOpen = true;
+    const { backoffice } = await import("./backoffice.ts");
+    backoffice({
+      me, filings, arrive, papers, speak,
+      selected: () => (selected ? (heldPlots().get(plotKey(selected))?.id ?? null) : null),
+      freePlot: () => {
+        const held = heldPlots();
+        if (selected && !held.has(plotKey(selected))) return selected;
+        for (let y = 0; y < ROWS; y++) for (let x = 0; x < COLS; x++) if (!held.has(plotKey({ x, y }))) return { x, y };
+        return null;
+      },
+    });
+  }, 5000);
+});
+for (const ev of ["pointerup", "pointercancel", "pointerleave"]) canvas.addEventListener(ev, () => clearTimeout(holding));
+
 canvas.addEventListener("click", (e) => {
-  if (focus || zoom) return;
+  if (focus || zoom || heldOpen) return;
   heading = null;
   const p = toArt(e, mapView);
   if (onGary(p)) return speak();
@@ -1140,19 +1163,6 @@ async function start() {
   renderAll();
   requestAnimationFrame(frame);
   if (!avatarOf(me)) papers(); // first time through the gate
-  if (import.meta.env.DEV) {
-    const { mountDev } = await import("./dev.ts");
-    mountDev({
-      me, filings, arrive, papers, speak,
-      selected: () => (selected ? (heldPlots().get(plotKey(selected))?.id ?? null) : null),
-      freePlot: () => {
-        const held = heldPlots();
-        if (selected && !held.has(plotKey(selected))) return selected;
-        for (let y = 0; y < ROWS; y++) for (let x = 0; x < COLS; x++) if (!held.has(plotKey({ x, y }))) return { x, y };
-        return null;
-      },
-    });
-  }
 }
 
 resize();
