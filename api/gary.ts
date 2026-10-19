@@ -272,9 +272,10 @@ const CONDITION_CHECKS = {
 } as const;
 
 /** Gary writes a condition for this filing, checked like a permit; the stock one if it won't do twice. */
-export async function writeCondition(filing: { id: number; intent: string }, stock: Condition, debate?: string[]) {
-  // Now and then he asks for something off the palette, to be written in. Code decides how often, not the model.
-  const writeIn = Math.random() < 0.2;
+// Now and then he asks for something off the palette, to be written in. Code decides how often, not the model.
+export async function writeCondition(
+  filing: { id: number; intent: string }, stock: Condition, debate?: string[], writeIn = Math.random() < 0.2,
+) {
   const input = { filing: pad(filing.id), intent: filing.intent, things: PROPS, ground: Object.values(GROUND), write_in: writeIn, ...(debate && { debate }) };
   const tries: { text: string; checks: Record<string, number>; problems: string[] }[] = [];
   for (let attempt = 0; attempt < 2; attempt++) {
@@ -564,10 +565,10 @@ export async function inspect(filing: { id: number; intent: string; condition: s
   return { met, remark, answers: { ...answers, drafts } };
 }
 
-type Db = SupabaseClient<any, any, any>;
+export type Db = SupabaseClient<any, any, any>;
 
 /** What's on a plot and where, as Gary would note it down. */
-async function survey(db: Db, f: { id: number; plot_x: number; plot_y: number; ground: string | null }): Promise<Evidence> {
+export async function survey(db: Db, f: { id: number; plot_x: number; plot_y: number; ground: string | null }): Promise<Evidence> {
   const { data: placed } = await db.from("placements").select("prop, x, y, label, label_ok").eq("filing", f.id).order("id");
   const things = ((placed ?? []) as { prop: string; x: number; y: number; label: string | null; label_ok: boolean | null }[])
     .map((p) => `${p.prop !== "item" ? p.prop : p.label_ok ? `${p.label} (written in)` : "an unlabelled parcel"} at ${p.x},${p.y}`);
@@ -689,16 +690,34 @@ async function inspectPlot(db: Db, id: number): Promise<Response> {
   return Response.json({ met, remark });
 }
 
+/** The latest five rulings, which Gary may cite. */
+export async function precedentFor(db: Db, id: number) {
+  const { data } = await db
+    .from("filings")
+    .select("id, intent, status")
+    .not("status", "in", "(pending,lost,refused)")
+    .neq("id", id)
+    .order("id", { ascending: false })
+    .limit(5);
+  return (data ?? []) as { id: number; intent: string; status: string }[];
+}
+
+export const deskDb = () =>
+  createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SECRET_KEY!, {
+    db: { schema: "the_commons" },
+    auth: { persistSession: false },
+  });
+
 export async function POST(req: Request): Promise<Response> {
   const secret = process.env.GARY_SECRET;
   if (!secret || req.headers.get("authorization") !== `Bearer ${secret}`) {
     return new Response("not at this desk", { status: 401 });
   }
-  const body = (await req.json()) as { id?: number; inspect?: number; item?: number; committee?: number };
-  const db = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SECRET_KEY!, {
-    db: { schema: "the_commons" },
-    auth: { persistSession: false },
-  });
+  return desk(deskDb(), await req.json());
+}
+
+/** Whatever's landed in the in-tray. Also run from the dev back office (dev/backoffice.ts). */
+export async function desk(db: Db, body: { id?: number; inspect?: number; item?: number; committee?: number }): Promise<Response> {
   if (body.inspect) return inspectPlot(db, body.inspect);
   if (body.item) return readLabel(db, body.item);
   if (body.committee) return convene(db, body.committee);
@@ -707,15 +726,7 @@ export async function POST(req: Request): Promise<Response> {
   const { data: filing } = await db.from("filings").select("*").eq("id", id).single();
   if (!filing || filing.status !== "pending") return Response.json({ skipped: true });
 
-  const { data: precedent } = await db
-    .from("filings")
-    .select("id, intent, status")
-    .not("status", "in", "(pending,lost,refused)")
-    .neq("id", id)
-    .order("id", { ascending: false })
-    .limit(5);
-
-  const { verdict, written, permit, answers, drafts } = await rule(filing, precedent ?? []);
+  const { verdict, written, permit, answers, drafts } = await rule(filing, await precedentFor(db, id));
 
   await db
     .from("filings")

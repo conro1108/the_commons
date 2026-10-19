@@ -1,7 +1,7 @@
 import { BRUSHES, EMPTY, GROUND, paintGround } from "./content/ground.ts";
 import { look, PALETTE, propCanvas, propSize } from "./content/props.ts";
 import { BYLAWS } from "./rulebook.ts";
-import { BUILD_H, BUILD_W, MAP_H, MAP_W, MARGIN, PATH, PLOT_H, PLOT_W, ZOOM, plotAt, plotName, plotOrigin, type Plot } from "./layout.ts";
+import { BUILD_H, BUILD_W, COLS, ROWS, MAP_H, MAP_W, MARGIN, PATH, PLOT_H, PLOT_W, ZOOM, plotAt, plotName, plotOrigin, type Plot } from "./layout.ts";
 import {
   HELD, afterGoogle, avatarOf, fileClaim, handlesFor, keepPapers, loadFilings, loadPlacements, move, paint, pencilled, place, rehandle,
   saveProfile, signIn, summonGary, supabase, unplace,
@@ -1040,6 +1040,24 @@ function post(now: number) {
   }
 }
 
+/** A filing as the database now has it, by Realtime (or from the dev back office). */
+async function arrive(f: Filing) {
+  // Gary's ruling on one of ours: it comes by post.
+  const was = filings.get(f.id);
+  if (f.filer === me && (was?.status === "pending" || was?.status === "committee") && f.status !== was.status) {
+    unread.add(f.id);
+    letters.push({ plot: { x: f.plot_x, y: f.plot_y }, out: false, status: f.status, filing: f.id });
+  }
+  // His inspection, likewise, unless we're standing on the plot to hear it.
+  if (f.filer === me && was && f.inspected_at !== was.inspected_at && focus?.id !== f.id) {
+    unread.add(f.id);
+    letters.push({ plot: { x: f.plot_x, y: f.plot_y }, out: false, status: f.met_at ? "approved" : "committee", filing: f.id });
+  }
+  upsert(f);
+  handles = await handlesFor([f.filer]);
+  renderAll();
+}
+
 function upsert(f: Filing) {
   if (painted.has(f.id)) f.ground = painted.get(f.id)!;
   filings.set(f.id, f);
@@ -1101,23 +1119,8 @@ async function start() {
       handles = await handlesFor(Object.keys(state));
       renderTag();
     })
-    .on("postgres_changes", { event: "*", schema: "the_commons", table: "filings" }, async ({ new: row }) => {
-      if (!row || !("id" in row)) return;
-      const f = row as Filing;
-      // Gary's ruling on one of ours: it comes by post.
-      const was = filings.get(f.id);
-      if (f.filer === me && (was?.status === "pending" || was?.status === "committee") && f.status !== was.status) {
-        unread.add(f.id);
-        letters.push({ plot: { x: f.plot_x, y: f.plot_y }, out: false, status: f.status, filing: f.id });
-      }
-      // His inspection, likewise, unless we're standing on the plot to hear it.
-      if (f.filer === me && was && f.inspected_at !== was.inspected_at && focus?.id !== f.id) {
-        unread.add(f.id);
-        letters.push({ plot: { x: f.plot_x, y: f.plot_y }, out: false, status: f.met_at ? "approved" : "committee", filing: f.id });
-      }
-      upsert(f);
-      handles = await handlesFor([f.filer]);
-      renderAll();
+    .on("postgres_changes", { event: "*", schema: "the_commons", table: "filings" }, ({ new: row }) => {
+      if (row && "id" in row) void arrive(row as Filing);
     })
     .on("postgres_changes", { event: "*", schema: "the_commons", table: "placements" }, ({ eventType, new: row, old }) => {
       // Deletes carry only the id.
@@ -1137,6 +1140,19 @@ async function start() {
   renderAll();
   requestAnimationFrame(frame);
   if (!avatarOf(me)) papers(); // first time through the gate
+  if (import.meta.env.DEV) {
+    const { mountDev } = await import("./dev.ts");
+    mountDev({
+      me, filings, arrive, papers, speak,
+      selected: () => (selected ? (heldPlots().get(plotKey(selected))?.id ?? null) : null),
+      freePlot: () => {
+        const held = heldPlots();
+        if (selected && !held.has(plotKey(selected))) return selected;
+        for (let y = 0; y < ROWS; y++) for (let x = 0; x < COLS; x++) if (!held.has(plotKey({ x, y }))) return { x, y };
+        return null;
+      },
+    });
+  }
 }
 
 resize();
