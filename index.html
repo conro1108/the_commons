@@ -7,10 +7,10 @@
     <link rel="icon" href="/apple-touch-icon.png" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <meta name="apple-mobile-web-app-title" content="The Commons" />
-    <meta name="theme-color" content="#8ec572" />
+    <meta name="theme-color" content="#1b2622" />
     <style>
       * { box-sizing: border-box; }
-      body { margin: 0; height: 100vh; height: 100dvh; overflow: hidden; background: #8ec572; color: #402e3a;
+      body { margin: 0; height: 100vh; height: 100dvh; overflow: hidden; background: #1b2622; color: #402e3a;
              font: 14px/1.45 ui-monospace, monospace; }
       #field { position: relative; width: 100vw; height: 100vh; height: 100dvh; overflow: hidden; }
       canvas { display: block; image-rendering: pixelated; touch-action: none; -webkit-touch-callout: none; user-select: none; -webkit-user-select: none; }
@@ -58,6 +58,27 @@
       #card { width: 290px; transform: rotate(-.6deg); animation: pop .18s ease-out; }
       @keyframes pop { from { transform: translateY(6px) rotate(-2deg) scale(.96); opacity: 0; } }
       .condition { background: #fbf4dc; border: 1px dashed #c9b88f; padding: 4px 8px; margin: 8px 0; }
+      .where { margin-top: -4px; font-style: italic; }
+
+      /* An unclaimed plot's particulars, as a schedule to a deed. */
+      #card:has(.schedule) { width: 330px; }
+      .schedule .form-no { display: flex; justify-content: space-between; margin: 0 0 4px; font-size: 10px;
+                           text-transform: uppercase; letter-spacing: .14em; color: #7a6a8a; }
+      .schedule h2 { font-size: 15px; text-transform: none; letter-spacing: .01em; border-bottom: 3px double #402e3a;
+                     padding-bottom: 6px; margin-bottom: 8px; }
+      .deed { display: flex; gap: 12px; align-items: flex-start; }
+      .deed .shape { flex: none; image-rendering: pixelated; width: auto; height: auto; max-width: 132px; max-height: 96px;
+                     zoom: 3; border: 0; filter: drop-shadow(1px 1px 0 #402e3a) drop-shadow(-1px -1px 0 #402e3a); }
+      .deed dl { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: 1px 8px; font-size: 12px; }
+      .deed dt { color: #7a6a8a; text-transform: uppercase; font-size: 10px; letter-spacing: .08em; line-height: 18px; }
+      .deed dd { margin: 0; line-height: 18px; }
+      .blurb { font-style: italic; margin: 8px 0 4px; }
+      .particulars { margin: 4px 0; padding-left: 20px; font-size: 12px; }
+      .particulars li { margin: 2px 0; }
+      .particulars li::marker { color: #7a6a8a; font-size: 11px; }
+      .covenant { background: #fbf4dc; border-left: 3px solid #b07a1e; padding: 4px 8px; font-size: 12px; margin: 8px 0; }
+      .intent { display: block; font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: #7a6a8a; margin-top: 10px; }
+      .intent textarea { margin-top: 3px; text-transform: none; letter-spacing: normal; color: #402e3a; font-size: 14px; }
       .condition .stamp { margin: 2px 6px 2px 0; }
 
       #bubble { padding: 6px 10px; max-width: 240px; transform: translate(-50%, -100%); font-size: 13px;

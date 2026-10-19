@@ -1,10 +1,12 @@
 // Things living on the commons: Gary on his rounds, a goose, ducks on the
-// pond, butterflies, ripples and falling leaves. Everything is worked out from
+// pond, glints and ripples, butterflies, leaves off the Shaw, bees on the
+// Bank, fireflies over the Wet End at night. Everything is worked out from
 // t = Date.now(), so every resident sees Gary in the same place without a
 // server. All in map art pixels, whole-pixel fillRects only.
 
 import { K, type PropDef } from "./content/canon/props.ts";
-import { COLS, MAP_H, MAP_W, MARGIN, PATH, PLOT_H, PLOT_W, ROWS, plotOrigin, type Plot } from "./layout.ts";
+import * as C from "./content/palette.ts";
+import { LANDMARKS, MAP_W, PLOTS, plotById, route, terrainAt, type Point } from "./world/index.ts";
 
 const INK = K;
 
@@ -27,29 +29,22 @@ function pixels(ctx: CanvasRenderingContext2D, rows: string[], left: number, top
 
 // --- getting about on the paths ---------------------------------------------
 
-const colX = (i: number) => MARGIN + PATH / 2 + i * (PLOT_W + PATH);
-const rowY = (j: number) => MARGIN + PATH / 2 + j * (PLOT_H + PATH);
-
-interface Point {
-  x: number;
-  y: number;
+// Routes are worked out once per pair of stops; the same few get walked all day.
+const routes = new Map<string, Point[]>();
+function along(a: Point, b: Point): Point[] {
+  const k = `${a.x},${a.y},${b.x},${b.y}`;
+  let r = routes.get(k);
+  if (!r) routes.set(k, (r = route(a, b)));
+  return r;
 }
 
-/** Path to path, keeping to the paths: along the row, down a column, along the next row. */
-function route(a: Point, b: Point): Point[] {
-  if (a.y === b.y) return [a, b];
-  let c = colX(0);
-  for (let i = 0; i <= COLS; i++) if (Math.abs(colX(i) - (a.x + b.x) / 2) < Math.abs(c - (a.x + b.x) / 2)) c = colX(i);
-  return [a, { x: c, y: a.y }, { x: c, y: b.y }, b];
-}
-
-const length = (ps: Point[]) => ps.slice(1).reduce((n, p, i) => n + Math.abs(p.x - ps[i].x) + Math.abs(p.y - ps[i].y), 0);
+const length = (ps: Point[]) => ps.slice(1).reduce((n, p, i) => n + Math.hypot(p.x - ps[i].x, p.y - ps[i].y), 0);
 
 /** The point d along a route, and which way it's heading. */
-function along(ps: Point[], d: number): Point & { dx: number } {
+function at(ps: Point[], d: number): Point & { dx: number } {
   for (let i = 1; i < ps.length; i++) {
     const [a, b] = [ps[i - 1], ps[i]];
-    const n = Math.abs(b.x - a.x) + Math.abs(b.y - a.y);
+    const n = Math.hypot(b.x - a.x, b.y - a.y);
     if (d <= n || i === ps.length - 1) {
       const k = n ? Math.min(1, d / n) : 1;
       return { x: a.x + (b.x - a.x) * k, y: a.y + (b.y - a.y) * k, dx: Math.sign(b.x - a.x) };
@@ -59,11 +54,6 @@ function along(ps: Point[], d: number): Point & { dx: number } {
   return { ...ps[0], dx: 0 };
 }
 
-const gate = (p: Plot): Point => {
-  const { left, top } = plotOrigin(p);
-  return { x: left + PLOT_W / 2, y: top + PLOT_H + PATH / 2 };
-};
-
 interface Round {
   seed: number;
   cycle: number; // ms; each cycle starts and ends at home
@@ -71,12 +61,13 @@ interface Round {
   linger: [number, number]; // ms, at each stop
   home: Point;
   next: (h: number, h2: number) => Point;
+  wander?: boolean; // straight across the grass, not along the paths
 }
 
-interface Whereabouts extends Point {
-  dx: number; // -1, 0 or 1: which way he's walking
+export interface Whereabouts extends Point {
+  dx: number; // -1, 0 or 1: which way it's walking
   moving: boolean;
-  since: number; // ms since he last set off or stopped
+  since: number; // ms since it last set off or stopped
 }
 
 /**
@@ -87,52 +78,55 @@ interface Whereabouts extends Point {
 function whereabouts(r: Round, t: number): Whereabouts {
   const c = Math.floor(t / r.cycle);
   const end = (c + 1) * r.cycle;
-  let at = r.home;
+  const way = (a: Point, b: Point) => (r.wander ? [a, b] : along(a, b));
+  let from = r.home;
   let now = c * r.cycle;
   let facing = 1;
   for (let k = 0; ; k++) {
     const h = hash(r.seed * 7919 + c * 131 + k);
     let to = r.next(h, hash(r.seed * 104729 + c * 31 + k * 17));
-    let path = route(at, to);
+    let path = way(from, to);
     let walk = (length(path) / r.speed) * 1000;
     let stay = r.linger[0] + h * (r.linger[1] - r.linger[0]);
-    if (now + walk + stay + (length(route(to, r.home)) / r.speed) * 1000 > end) {
+    if (now + walk + stay + (length(way(to, r.home)) / r.speed) * 1000 > end || k > 40) {
       to = r.home;
-      path = route(at, to);
+      path = way(from, to);
       walk = (length(path) / r.speed) * 1000;
       stay = Infinity;
     }
     if (t < now + walk) {
-      const p = along(path, ((t - now) / 1000) * r.speed);
+      const p = at(path, ((t - now) / 1000) * r.speed);
       return { x: p.x, y: p.y, dx: p.dx || facing, moving: true, since: t - now };
     }
-    const dx = along(path, Infinity).dx;
+    const dx = at(path, Infinity).dx;
     if (dx) facing = dx;
     if (t < now + walk + stay) return { ...to, dx: facing, moving: false, since: t - now - walk };
-    at = to;
+    from = to;
     now += walk + stay;
   }
 }
 
 // --- Gary ----------------------------------------------------------------
 
-/** The office is the top right corner of the paths; he starts and ends each round there. */
-const garyRound = (recent: Plot[]): Round => ({
+const SIGHTS = [LANDMARKS.board.at, LANDMARKS.bench.at, LANDMARKS.pond.at, LANDMARKS.oak.at, LANDMARKS.cairn.at];
+
+/** His hut is on the Green; he starts and ends each round at its door. */
+const garyRound = (recent: number[]): Round => ({
   seed: 1,
-  cycle: 4 * 60_000,
+  cycle: 5 * 60_000,
   speed: 18,
   linger: [4000, 8000],
-  home: { x: colX(COLS), y: rowY(0) },
-  // Mostly the newest plots, to inspect them; otherwise somewhere on the paths.
+  home: LANDMARKS.office.at,
+  // Mostly the newest plots, to inspect them; otherwise anyone's gate, or a sight.
   next: (h, h2) =>
     recent.length && h2 < 0.55
-      ? gate(recent[Math.floor(h * Math.min(3, recent.length))])
-      : h2 < 0.8
-        ? gate({ x: Math.floor(h * COLS), y: Math.floor(hash(h * 1e6) * ROWS) })
-        : { x: colX(Math.floor(h * (COLS + 1))), y: rowY(Math.floor(hash(h * 1e6) * ROWS)) },
+      ? plotById(recent[Math.floor(h * Math.min(3, recent.length))])!.gate
+      : h2 < 0.85
+        ? PLOTS[Math.floor(h * PLOTS.length)].gate
+        : SIGHTS[Math.floor(h * SIGHTS.length)],
 });
 
-export function garyAt(t: number, recent: Plot[]): { x: number; y: number } {
+export function garyAt(t: number, recent: number[]): { x: number; y: number } {
   const w = whereabouts(garyRound(recent), t);
   return { x: Math.round(w.x), y: Math.round(w.y) };
 }
@@ -158,8 +152,7 @@ export const GARY_SPRITE: PropDef = { rows: GARY, palette: GARY_COLOURS };
 const CLIPBOARD = ["bb", "wb", "wb"];
 const CLIP_COLOURS = { b: "#7a5230", w: "#fffdf3" };
 
-function drawGary(ctx: CanvasRenderingContext2D, t: number, recent: Plot[]) {
-  const w = whereabouts(garyRound(recent), t);
+function drawGary(ctx: CanvasRenderingContext2D, t: number, w: Whereabouts) {
   const hop = w.moving ? Math.floor(t / 220) % 2 : 0;
   const left = Math.round(w.x) - 5;
   const top = Math.round(w.y) - GARY.length - hop;
@@ -196,13 +189,16 @@ export const GARY_LINES = [
 
 // --- the goose -------------------------------------------------------------
 
+// The goose keeps to the Green and the pond's edge, and doesn't hold with paths.
+const GREEN_SPOTS = [LANDMARKS.pond.at, LANDMARKS.bench.at, ...PLOTS.filter((p) => p.region === "green").map((p) => p.gate)];
 const gooseRound: Round = {
   seed: 2,
   cycle: 3 * 60_000,
   speed: 11,
   linger: [2000, 9000],
-  home: { x: colX(COLS / 2), y: rowY(ROWS) },
-  next: (h, h2) => ({ x: colX(0) + Math.round(h * (colX(COLS) - colX(0))), y: rowY(Math.floor(h2 * (ROWS + 1))) }),
+  home: LANDMARKS.pond.at,
+  next: (h) => GREEN_SPOTS[Math.floor(h * GREEN_SPOTS.length)],
+  wander: true,
 };
 
 // Facing right, beak and all. White enough to need no outline.
@@ -210,8 +206,7 @@ const GOOSE = ["...wk.", "...wwo", "...w..", "gwwww.", ".gwww."];
 const GOOSE_FEET = ["..o.o.", ".o..o."];
 const GOOSE_COLOURS = { k: INK, w: "#fbf6ea", g: "#b0b4c4", o: "#f59a3e" };
 
-function drawGoose(ctx: CanvasRenderingContext2D, t: number) {
-  const w = whereabouts(gooseRound, t);
+function drawGoose(ctx: CanvasRenderingContext2D, t: number, w: Whereabouts) {
   const step = w.moving ? Math.floor(t / 180) % 2 : 0;
   const left = Math.round(w.x) - 3;
   const top = Math.round(w.y) - 6;
@@ -221,89 +216,130 @@ function drawGoose(ctx: CanvasRenderingContext2D, t: number) {
   pixels(ctx, [GOOSE_FEET[step]], left, top + GOOSE.length, GOOSE_COLOURS, flip);
 }
 
-export function drawCritters(ctx: CanvasRenderingContext2D, t: number, recent: Plot[]) {
-  const gary = garyAt(t, recent);
+/** Gary and the goose, for sorting in with everyone else by where their feet are. */
+export function critters(ctx: CanvasRenderingContext2D, t: number, recent: number[]): { y: number; draw: () => void }[] {
+  const gary = whereabouts(garyRound(recent), t);
   const goose = whereabouts(gooseRound, t);
-  // Back to front.
-  if (goose.y < gary.y) {
-    drawGoose(ctx, t);
-    drawGary(ctx, t, recent);
-  } else {
-    drawGary(ctx, t, recent);
-    drawGoose(ctx, t);
-  }
+  return [
+    { y: gary.y, draw: () => drawGary(ctx, t, gary) },
+    { y: goose.y, draw: () => drawGoose(ctx, t, goose) },
+  ];
 }
 
-// --- the pond ----------------------------------------------------------------
+// --- the water ---------------------------------------------------------------
 
-// The pond prop is 24x8 at (MAP_W / 2 - 12, MAP_H - 12); open water inside that.
-const POND = { left: MAP_W / 2 - 12, top: MAP_H - 12 };
-const WATER = { x0: POND.left + 3, x1: POND.left + 20, y0: POND.top + 2, y1: POND.top + 6 };
-const RIPPLE = "#a8e4ef";
+const P = LANDMARKS.pond;
+const wet = (x: number, y: number) => terrainAt(x, y) === "water";
+// Open water, for glints: every few pixels of it, fixed.
+const GLINTS: Point[] = [];
+for (let y = 0; y < 240; y += 2) for (let x = 0; x < MAP_W; x += 3) if (wet(x, y) && wet(x, y - 2) && hash(x * 997 + y) < 0.3) GLINTS.push({ x, y });
 
 const DUCK = ["...g.", "bbbgo", ".bbb."];
 const DUCKLING = ["y.", "yy"];
 const DUCK_COLOURS = { g: "#3e8a5a", o: "#f59a3e", b: "#a97048", y: "#f7e07a" };
 
 export function drawUnder(ctx: CanvasRenderingContext2D, t: number) {
-  // A ring every few seconds, somewhere on the water, spreading and fading.
-  for (let i = 0; i < 2; i++) {
+  // Glints come and go where the light catches the water.
+  ctx.fillStyle = C.WATER[5];
+  GLINTS.forEach((g, i) => {
+    if (hash(i * 31 + Math.floor(t / 700 + hash(i) * 3)) > 0.86) ctx.fillRect(g.x, g.y, (i % 3) ? 1 : 2, 1);
+  });
+  // A ring every few seconds, somewhere on the pond, spreading and fading.
+  for (let i = 0; i < 3; i++) {
     const period = 3100 + i * 1300;
     const n = Math.floor(t / period);
     const age = (t % period) / 1500;
     if (age >= 1) continue;
-    const cx = WATER.x0 + 3 + Math.floor(hash(n * 3 + i) * (WATER.x1 - WATER.x0 - 6));
-    const cy = WATER.y0 + 1 + Math.floor(hash(n * 5 + i) * 3);
+    const cx = P.x + 6 + Math.floor(hash(n * 3 + i) * (P.w - 12));
+    const cy = P.y + 5 + Math.floor(hash(n * 5 + i) * (P.h - 10));
+    if (!wet(cx, cy)) continue;
     const r = 1 + Math.floor(age * 3);
     ctx.globalAlpha = 1 - age;
-    ctx.fillStyle = RIPPLE;
+    ctx.fillStyle = C.WATER[4];
     for (let a = 0; a < 16; a++) {
       const x = cx + Math.round(Math.cos((a / 16) * Math.PI * 2) * r * 2);
-      const y = cy + Math.round(Math.sin((a / 16) * Math.PI * 2) * r * 0.6);
-      if (x >= WATER.x0 && x <= WATER.x1 && y >= WATER.y0 && y <= WATER.y1) ctx.fillRect(x, y, 1, 1);
+      const y = cy + Math.round(Math.sin((a / 16) * Math.PI * 2) * r * 0.7);
+      if (wet(x, y)) ctx.fillRect(x, y, 1, 1);
     }
     ctx.globalAlpha = 1;
   }
-  // A duck paddling up and down, a duckling a little behind.
-  const u = (t % 26_000) / 26_000;
-  const back = u >= 0.5;
-  const k = back ? 2 - u * 2 : u * 2; // there and back
-  const x = Math.round(WATER.x0 + 2 + k * (WATER.x1 - WATER.x0 - 9));
-  pixels(ctx, DUCKLING, back ? x + 6 : x - 3, WATER.y0 + 2, DUCK_COLOURS, back);
-  pixels(ctx, DUCK, x, WATER.y0, DUCK_COLOURS, back);
+  // A duck paddling a slow loop of the pond, a duckling a little behind.
+  for (const [k, lag, rows] of [[0, 0, DUCK], [1, 0.012, DUCKLING]] as const) {
+    const u = ((t / 60_000) % 1) - lag;
+    const a = u * Math.PI * 2;
+    const x = Math.round(P.x + P.w / 2 + Math.cos(a) * P.w * 0.3);
+    const y = Math.round(P.y + P.h / 2 + Math.sin(a) * P.h * 0.22);
+    // A wake, then the bird; it faces the way it's going.
+    ctx.fillStyle = C.WATER[3];
+    ctx.fillRect(x - (Math.sin(a) < 0 ? -5 : 2), y + rows.length - 1, 2, 1);
+    pixels(ctx, rows, x - (k ? 1 : 2), y - rows.length + 1, DUCK_COLOURS, Math.sin(a) > 0);
+  }
 }
 
 // --- the air ---------------------------------------------------------------
 
-const WINGS = ["#f7e07a", "#f2a0b8", "#fffdf3"];
-const LEAVES = ["#7fae4a", "#c9b84a", "#d9884a"];
+const WINGS = ["#f7e07a", "#f2a0b8", "#fffdf3", "#c8e0f8"];
+const LEAVES = ["#7fae4a", "#c9b84a", "#d9884a", "#b65a3a"];
+const FLUTTER: Point[] = [{ x: 200, y: 60 }, { x: 170, y: 110 }, { x: 290, y: 190 }, { x: 250, y: 160 }];
+const HIVES: Point[] = PLOTS.filter((p) => p.region === "bank").slice(0, 3).map((p) => ({ x: p.x + p.w / 2, y: p.y + p.h / 2 }));
 
-export function drawAir(ctx: CanvasRenderingContext2D, t: number) {
-  // Butterflies, wandering slowly over the plots, wings going.
-  WINGS.forEach((colour, i) => {
-    const s = t / 1000;
-    const x = Math.round(MAP_W / 2 + Math.sin(s * 0.11 + i * 2.1) * 110 + Math.sin(s * 0.7 + i) * 8);
-    const y = Math.round(MAP_H / 2 - 6 + Math.sin(s * 0.083 + i * 4.3) * 52 + Math.sin(s * 1.3 + i * 2) * 3);
-    ctx.fillStyle = INK;
-    ctx.fillRect(x, y, 1, 1);
-    ctx.fillStyle = colour;
-    const up = Math.floor(t / 140 + i) % 2;
-    ctx.fillRect(x - 1, y - up, 1, 1);
-    ctx.fillRect(x + 1, y - up, 1, 1);
-  });
-  // The odd leaf, off the trees along the top and sides, swaying down and gone.
-  for (let i = 0; i < 6; i++) {
-    const period = 7000 + Math.floor(hash(i + 50) * 6000);
+export function drawAir(ctx: CanvasRenderingContext2D, t: number, hour: number) {
+  const s = t / 1000;
+  const day = hour > 7 && hour < 19.5;
+  // Butterflies by day, wandering over the Green and the Bank, wings going.
+  if (day)
+    WINGS.forEach((colour, i) => {
+      const c = FLUTTER[i];
+      const x = Math.round(c.x + Math.sin(s * 0.11 + i * 2.1) * 34 + Math.sin(s * 0.7 + i) * 6);
+      const y = Math.round(c.y + Math.sin(s * 0.083 + i * 4.3) * 20 + Math.sin(s * 1.3 + i * 2) * 3);
+      ctx.fillStyle = INK;
+      ctx.fillRect(x, y, 1, 1);
+      ctx.fillStyle = colour;
+      const up = Math.floor(t / 140 + i) % 2;
+      ctx.fillRect(x - 1, y - up, 1, 1);
+      ctx.fillRect(x + 1, y - up, 1, 1);
+    });
+  // Bees about the Bank, by day.
+  if (day)
+    HIVES.forEach((h, j) => {
+      for (let i = 0; i < 3; i++) {
+        const x = Math.round(h.x + Math.sin(s * (1.7 + i) + j * 5 + i) * 7 + Math.sin(s * 9 + i) * 1.2);
+        const y = Math.round(h.y + Math.cos(s * (1.3 + i * 0.4) + j) * 4 + Math.sin(s * 11 + i));
+        ctx.fillStyle = (Math.floor(t / 80) + i) % 2 ? "#f2c84a" : "#3a2b2f";
+        ctx.fillRect(x, y, 1, 1);
+      }
+    });
+  // Leaves, off the Old Oak and the Shaw's edge, swaying down and gone.
+  const oak = LANDMARKS.canopy;
+  for (let i = 0; i < 8; i++) {
+    const period = 6000 + Math.floor(hash(i + 50) * 6000);
     const n = Math.floor((t + i * 2311) / period);
     const age = ((t + i * 2311) % period) / 4200;
     if (age >= 1) continue;
-    const h = hash(n * 13 + i);
-    const top = h < 0.5;
-    const x0 = top ? Math.floor(hash(n * 7 + i) * MAP_W) : h < 0.75 ? 8 + Math.floor(hash(n + i) * 4) : MAP_W - 12 + Math.floor(hash(n + i) * 4);
-    const y0 = top ? 8 + Math.floor(hash(n * 3 + i) * 3) : 16 + Math.floor(hash(n * 11 + i) * (MAP_H - 64));
+    const fromOak = i < 4;
+    const x0 = fromOak ? oak.x + Math.floor(hash(n * 7 + i) * oak.w) : 300 + Math.floor(hash(n * 7 + i) * 60);
+    const y0 = fromOak ? oak.y + Math.floor(hash(n * 3 + i) * oak.h * 0.6) : 30 + Math.floor(hash(n * 11 + i) * 150);
     ctx.globalAlpha = age < 0.75 ? 1 : (1 - age) * 4;
     ctx.fillStyle = LEAVES[Math.floor(hash(n * 17 + i) * LEAVES.length)];
-    ctx.fillRect(x0 + Math.round(Math.sin(age * 9 + i) * 2), y0 + Math.floor(age * 16), age * 9 % 2 < 1 ? 2 : 1, 1);
+    ctx.fillRect(x0 + Math.round(Math.sin(age * 9 + i) * 2 + age * 5), y0 + Math.floor(age * 16), (age * 9) % 2 < 1 ? 2 : 1, 1);
     ctx.globalAlpha = 1;
   }
+}
+
+/** After the grade: fireflies over the Wet End at night. */
+export function drawNight(ctx: CanvasRenderingContext2D, t: number, hour: number) {
+  if (hour > 5.5 && hour < 20) return;
+  const s = t / 1000;
+  ctx.fillStyle = "#e6ff9a";
+  for (let i = 0; i < 14; i++) {
+    if (Math.sin(s * (0.9 + hash(i) * 0.8) + i * 3) < 0.2) continue;
+    const x = Math.round(20 + hash(i * 7) * 110 + Math.sin(s * 0.3 + i) * 8);
+    const y = Math.round(130 + hash(i * 13) * 90 + Math.cos(s * 0.23 + i * 2) * 5);
+    ctx.globalAlpha = 0.9;
+    ctx.fillRect(x, y, 1, 1);
+    ctx.globalAlpha = 0.25;
+    ctx.fillRect(x - 1, y, 3, 1);
+    ctx.fillRect(x, y - 1, 1, 3);
+  }
+  ctx.globalAlpha = 1;
 }

@@ -144,9 +144,12 @@ phase starts and kept current while building, so work can resume mid-phase.
    avatars and who's here, file a claim, Gary rules on it.
 2. **Build it** — in progress ([plans/phase-2.md](plans/phase-2.md)). Place
    props on your plot, free and uncapped, in a focused view of the plot.
-3. **The field changes while you're away** — the world tick: hedges spread,
+3. **Give it some life** — done ([plans/phase-3.md](plans/phase-3.md)).
+4. **Somewhere, not a grid** — in progress ([plans/phase-4.md](plans/phase-4.md)).
+   A composed map of five kinds of ground; plot site and climate feed the loop.
+5. **The field changes while you're away** — the world tick: hedges spread,
    paths wear in, the cast notices what got built.
-4. **The daily newspaper** — the nightly Gazette, with an OG front page.
+6. **The daily newspaper** — the nightly Gazette, with an OG front page.
 
 Later: petitions and the council, mail, public works, identity (see Open
 questions).

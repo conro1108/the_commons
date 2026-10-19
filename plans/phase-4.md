@@ -185,9 +185,13 @@ SURROUND                              // fill colour round the close-up
 ```
 
 ## Checklist
-- [ ] World: `scripts/world.ts`, `plots.json`, `src/world/index.ts`, dev preview, a test or two
-- [ ] Desk: schema + generated plots block, gary.ts site-aware, backoffice, tests
-- [ ] Map: terrain art, plot states, boundaries, life on routes, day/night
-- [ ] Close-up + papers: masked build view, native ground, features, particulars card, routes
+- [x] World: `scripts/world.ts` (+ `scripts/world/*`), `plots.json`, `map.json`, `src/world/index.ts`, `dev/world.html`, a test.
+      29 plots (ids 1-29), grown from authored seeds as rotated fields clipped by paths, water, terraces, wood.
+- [x] Desk: schema + generated plots block (`npm run world` regenerates both), gary.ts site-aware (fit, covenant = bylaw 0,
+      local stock condition, sides/features in evidence, same-ground precedent), backoffice by plot id, tests. Moth (Luna) on high.
+- [x] Map (`src/map/*`, `render.ts`, `life.ts`, `light.ts`): baked ground + scenery, plot states, region boundaries, Gary on
+      routes, ambient life per region, day/night grade. `dev/map.html?hour=`.
+- [x] Close-up + papers: masked build view over the real surroundings, native ground, features, particulars card, routes.
+      `dev/plot.html?plot=N`.
 - [ ] Integrated, checked in the browser (claim → ruling → build → map), pushed
 - [ ] Review (negotiate)

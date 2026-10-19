@@ -1,15 +1,20 @@
-import { BRUSHES, EMPTY, GROUND, paintGround } from "./content/ground.ts";
+import { BRUSHES, empty, groundLabel, paintGround } from "./content/ground.ts";
 import { look, PALETTE, propCanvas, propSize } from "./content/props.ts";
 import { BYLAWS } from "./rulebook.ts";
-import { BUILD_H, BUILD_W, COLS, ROWS, MAP_H, MAP_W, MARGIN, PATH, PLOT_H, PLOT_W, ZOOM, plotAt, plotName, plotOrigin, type Plot } from "./layout.ts";
+import {
+  LANDMARKS, MAP_H, MAP_W, PLOTS, REGIONS, ZOOM, plotAt, plotById, plotLabel, route, walkable, type PlotDef, type Point,
+} from "./world/index.ts";
 import {
   HELD, afterGoogle, avatarOf, fileClaim, handlesFor, keepPapers, loadFilings, loadPlacements, move, paint, pencilled, place, rehandle,
   saveProfile, signIn, summonGary, supabase, unplace,
   type Filing, type Placement,
 } from "./net.ts";
 import type { RealtimeChannel } from "@supabase/supabase-js";
-import { BOARD, DIRT, HILLS, colourOf, draw, letterPhase, plotKey, type Letter, type Walker } from "./render.ts";
-import { FOCUS_H, FOCUS_PAD, FOCUS_W, drawFocus, land, placementAt, type Cells, type FocusScene } from "./closeup.ts";
+import { VOID, colourOf, draw, letterPhase, type Letter, type Walker } from "./render.ts";
+import {
+  FOCUS_PAD, SURROUND, canPaint, canPlace, drawFocus, focusSize, land, placementAt, type Cells, type FocusScene,
+} from "./closeup.ts";
+import { BOARD_BOX } from "./map/landmarks.ts";
 import { GARY_LINES, garyAt } from "./life.ts";
 import { looksLike } from "./avatar.ts";
 import { openPapers, papersOpen } from "./papers.ts";
@@ -45,8 +50,9 @@ const built = new Map<number, Placement[]>(); // filing -> its placements; repla
 const walkers = new Map<string, Mover>();
 let handles = new Map<string, string>();
 let me = "";
-let hover: Plot | null = null;
-let selected: Plot | null = null;
+let hover: number | null = null; // plot ids
+let selected: number | null = null;
+let waypoints: Point[] = []; // the rest of the way, along the paths
 const letters: Letter[] = [];
 let heading: (() => void) | null = null; // what to do when we get where we're walking
 // Our rulings still in the post: the panel keeps them sealed until the letter lands.
@@ -73,13 +79,16 @@ const clamp = (v: number, lo: number, hi: number) => Math.min(Math.max(v, lo), M
 
 /** Who holds what, as far as we know: a ruling still in the post reads as pending until its letter opens. */
 function heldPlots() {
-  const held = new Map<string, Filing>();
+  const held = new Map<number, Filing>();
   for (const f of filings.values()) {
-    if (unread.has(f.id)) held.set(plotKey({ x: f.plot_x, y: f.plot_y }), { ...f, status: "pending" });
-    else if (HELD.includes(f.status)) held.set(plotKey({ x: f.plot_x, y: f.plot_y }), f);
+    if (unread.has(f.id)) held.set(f.plot, { ...f, status: "pending" });
+    else if (HELD.includes(f.status)) held.set(f.plot, f);
   }
   return held;
 }
+
+const plotOf = (f: Filing) => plotById(f.plot)!;
+const labelOf = (id: number) => plotLabel(plotById(id)!);
 
 const BUILT: Filing["status"][] = ["approved", "conditional"];
 
@@ -90,7 +99,7 @@ const recent = () =>
     .filter((f) => BUILT.includes(f.status) && f.stamped_at)
     .sort((a, b) => seen(b).localeCompare(seen(a)) || b.id - a.id)
     .slice(0, 5)
-    .map((f) => ({ x: f.plot_x, y: f.plot_y }));
+    .map((f) => f.plot);
 
 const mineInFocus = () => !!focus && focus.filer === me && !zoom;
 
@@ -98,9 +107,11 @@ const mineInFocus = () => !!focus && focus.filer === me && !zoom;
 
 function ruling(f: Filing, fresh = false) {
   if (unread.has(f.id)) return `<p class="stamp pending">In the post</p><p class="meta">Gary's reply is on its way.</p>`;
-  const bylaw = f.status === "denied" && f.bylaw ? BYLAWS[f.bylaw - 1] : null;
-  return `<p class="stamp ${f.status}${fresh ? " thunk" : ""}">${STAMP[f.status]}${bylaw ? ` (Bylaw ${f.bylaw})` : ""}</p>
-    ${bylaw ? `<p class="meta"><b>Bylaw ${f.bylaw}.</b> ${bylaw}</p>` : ""}
+  const denied = f.status === "denied" && f.bylaw !== null;
+  const region = REGIONS[plotOf(f).region];
+  const [cite, text] = !denied ? ["", ""] : f.bylaw ? [`Bylaw ${f.bylaw}`, BYLAWS[f.bylaw! - 1]] : [`the covenant of ${region.name}`, region.covenant];
+  return `<p class="stamp ${f.status}${fresh ? " thunk" : ""}">${STAMP[f.status]}${denied ? ` (${f.bylaw ? cite : "covenant"})` : ""}</p>
+    ${denied ? `<p class="meta"><b>${cite[0].toUpperCase()}${cite.slice(1)}.</b> ${text}</p>` : ""}
     ${f.permit ? `<p class="permit">${esc(f.permit)}</p>` : ""}
     ${minutesHtml(f)}`;
 }
@@ -120,7 +131,7 @@ const when = (iso: string) => new Date(iso).toLocaleString(undefined, { dateStyl
 
 /** The whole exchange: what was asked, when, and everything Gary said back. */
 function exchange(f: Filing, fresh = false) {
-  return `<p class="meta">Filing ${pad(f.id)}, Plot ${plotName({ x: f.plot_x, y: f.plot_y })}. Filed by ${esc(who(f.filer))}, ${when(f.filed_at)}.</p>
+  return `<p class="meta">Filing ${pad(f.id)}, ${esc(labelOf(f.plot))}. Filed by ${esc(who(f.filer))}, ${when(f.filed_at)}.</p>
     <p><q>${esc(f.intent)}</q></p>
     ${ruling(f, fresh)}
     ${conditionHtml(f)}
@@ -166,14 +177,14 @@ function renderTag() {
   const names = [...walkers.keys()].map(who).sort((a, b) => (a === "you" ? -1 : b === "you" ? 1 : a.localeCompare(b)));
   const held = [...filings.values()]
     .filter((f) => f.filer === me && (HELD.includes(f.status) || unread.has(f.id)))
-    .sort((a, b) => a.plot_y - b.plot_y || a.plot_x - b.plot_x);
+    .sort((a, b) => a.plot - b.plot);
   const mine = handles.get(me) ?? "…";
   $("tag").innerHTML = `<h1>The Commons</h1><p class="meta">Administered by Gary. Here: ${names.map(esc).join(", ")}</p>
     <p class="meta">On file as <button class="plot-link rename" title="Amend your papers">${esc(mine)}</button>
       ${kept ? "" : `<button class="plot-link keep" title="Pencilled in: kept in this browser only">pencilled in</button>`}</p>
     ${held.length
       ? `<p class="yours"><span class="swatch" style="background:${colourOf(me)}"></span>${held
-          .map((f) => `<button data-filing="${f.id}" class="plot-link ${unread.has(f.id) ? "pending" : f.status}">${plotName({ x: f.plot_x, y: f.plot_y })}</button>`)
+          .map((f) => `<button data-filing="${f.id}" class="plot-link ${unread.has(f.id) ? "pending" : f.status}" title="${esc(labelOf(f.plot))}">${f.plot}</button>`)
           .join("")}</p>`
       : `<p class="hint">${touch ? "Tap" : "Click"} a plot to read its permit, or an empty one to claim it.</p>`}`;
   for (const b of $("tag").querySelectorAll<HTMLButtonElement>("[data-filing]")) {
@@ -187,7 +198,7 @@ function visit(f: Filing) {
   if (BUILT.includes(f.status) && !unread.has(f.id)) {
     closeCard();
     enterFocus(f);
-  } else openCard({ x: f.plot_x, y: f.plot_y });
+  } else openCard(f.plot);
 }
 
 // The card: a plot's permit, a claim form, or Gary's reply to one of ours.
@@ -195,8 +206,8 @@ const card = $("card");
 let reply: number | null = null; // a filing whose reply the card is showing, rather than the plot
 let thunk: number | null = null; // a ruling just opened, to stamp as the card appears
 
-function openCard(plot: Plot, filing: number | null = null) {
-  if (selected && plotKey(selected) !== plotKey(plot)) heading = null;
+function openCard(plot: number, filing: number | null = null) {
+  if (selected !== null && selected !== plot) heading = null;
   selected = plot;
   reply = filing;
   renderCard();
@@ -217,18 +228,21 @@ function renderCard() {
   const draft = card.querySelector("textarea");
   const typed = draft?.value ?? "";
   const typing = document.activeElement === draft;
-  const f = reply !== null ? filings.get(reply) : heldPlots().get(plotKey(plot));
+  const f = reply !== null ? filings.get(reply) : heldPlots().get(plot);
+  const def = plotById(plot)!;
   const fresh = thunk !== null && thunk === f?.id;
   thunk = null;
   let body: string;
   if (f && reply !== null) {
     body = `<h2>A reply from Gary</h2>${exchange(f, fresh)}`;
   } else if (f) {
-    body = `<h2>Plot ${plotName(plot)}</h2><p>Held by ${esc(who(f.filer))}: <q>${esc(f.intent)}</q></p>
+    body = `<h2>${esc(plotLabel(def))}</h2><p class="meta where">${esc(REGIONS[def.region].name)}</p>
+      <p>Held by ${esc(who(f.filer))}: <q>${esc(f.intent)}</q></p>
       ${ruling(f, fresh)}${conditionHtml(f)}<p class="meta">Filing ${pad(f.id)}</p>`;
   } else {
-    body = `<h2>Plot ${plotName(plot)}</h2><p>Unclaimed. State your intent for this plot in one breath.</p>
-      <form><textarea rows="2" maxlength="120" placeholder="a bench, for looking at the pond with" required></textarea>
+    body = `${particulars(def)}
+      <form><label class="intent">Your intent, in one breath
+      <textarea rows="2" maxlength="120" placeholder="a bench, for looking at the pond with" required></textarea></label>
       <button>Submit to Gary</button><p class="problem"></p></form>`;
   }
   const enter = f && BUILT.includes(f.status) && !unread.has(f.id) ? `<button class="enter">Step inside</button>` : "";
@@ -253,14 +267,50 @@ function renderCard() {
       void claim(plot, form);
     });
   }
+  const shape = card.querySelector<HTMLCanvasElement>("canvas.shape");
+  if (shape) drawShape(shape, def);
   placeCard();
 }
 
-async function claim(plot: Plot, form: HTMLFormElement) {
+/** An unclaimed plot's particulars, set out like the schedule to a deed. */
+function particulars(p: PlotDef) {
+  const r = REGIONS[p.region];
+  return `<div class="schedule">
+      <p class="form-no"><span>Schedule of particulars</span><span>Unclaimed</span></p>
+      <h2>${esc(plotLabel(p))}</h2>
+      <div class="deed">
+        <canvas class="shape" width="${p.w}" height="${p.h}" title="The plot, north at the top"></canvas>
+        <dl>
+          <dt>Ground</dt><dd>${esc(r.name)}</dd>
+          <dt>Area</dt><dd>${Math.round(p.area / 10) * 10} sq. yd.</dd>
+          <dt>Sun</dt><dd>${r.sun}</dd><dt>Wind</dt><dd>${r.wind}</dd>
+          <dt>Soil</dt><dd>${esc(r.soil)}</dd>
+        </dl>
+      </div>
+      <p class="blurb">${esc(r.blurb)}</p>
+      <ol class="particulars">${p.particulars.map((x) => `<li>${esc(x)}</li>`).join("")}</ol>
+      <p class="covenant"><b>Covenant.</b> ${esc(r.covenant)}</p>
+    </div>`;
+}
+
+/** The plot's outline, drawn small: its mask in its own ground's colour, and its features. */
+function drawShape(c: HTMLCanvasElement, p: PlotDef) {
+  const ctx = c.getContext("2d")!;
+  const g = document.createElement("canvas");
+  g.width = p.w * ZOOM;
+  g.height = p.h * ZOOM;
+  paintGround(g.getContext("2d")!, empty(p), p.id, p);
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(g, 0, 0, p.w, p.h);
+  ctx.fillStyle = "#402e3a";
+  for (const f of p.features) ctx.fillRect(f.x, f.y, f.w, f.h);
+}
+
+async function claim(plot: number, form: HTMLFormElement) {
   const box = form.querySelector("textarea")!;
   const button = form.querySelector("button")!;
   button.disabled = true;
-  const problem = await fileClaim(plot.x, plot.y, box.value.trim());
+  const problem = await fileClaim(plot, box.value.trim());
   button.disabled = false;
   form.querySelector(".problem")!.textContent = problem ?? "";
   if (problem) return;
@@ -269,16 +319,16 @@ async function claim(plot: Plot, form: HTMLFormElement) {
   closeCard();
 }
 
-/** Hang the card above its plot, or below it if there's no room, kept on screen. */
+/** Hang the card beside its plot, above or below, kept on screen. */
 function placeCard() {
-  if (card.hidden || !selected) return;
-  const { left, top } = plotOrigin(selected);
+  if (card.hidden || selected === null) return;
+  const p = plotById(selected)!;
   const v = mapView;
   const w = card.offsetWidth;
   const h = card.offsetHeight;
-  const x = (v.ox + (left + PLOT_W / 2) * v.s) / dpr - w / 2;
-  let y = (v.oy + top * v.s) / dpr - h - 12;
-  if (y < 8) y = (v.oy + (top + PLOT_H) * v.s) / dpr + 12;
+  const x = (v.ox + (p.x + p.w / 2) * v.s) / dpr - w / 2;
+  let y = (v.oy + p.y * v.s) / dpr - h - 12;
+  if (y < 8) y = (v.oy + (p.y + p.h) * v.s) / dpr + 12;
   card.style.left = `${clamp(x, 8, canvas.width / dpr - w - 8)}px`;
   card.style.top = `${clamp(y, 8, canvas.height / dpr - h - 8)}px`;
 }
@@ -310,7 +360,7 @@ function renderBoard() {
   const notice = (f: Filing) => `<div class="notice" data-filing="${f.id}" style="--r:${lean(f.id)}">
       <span class="pin" style="background:${colourOf(f.filer)}"></span>
       <span class="stamp ${f.status}">${STAMP[f.status]}</span>
-      <q>${esc(f.intent)}</q><span class="meta">Plot ${plotName({ x: f.plot_x, y: f.plot_y })} — ${esc(who(f.filer))}</span></div>`;
+      <q>${esc(f.intent)}</q><span class="meta">${esc(labelOf(f.plot))} — ${esc(who(f.filer))}</span></div>`;
   const open = reading !== null ? filings.get(reading) : null;
   board.innerHTML = `<div class="cork">
       <div class="plank"><h2>Notices</h2><span>by order of the administrator <button class="close" aria-label="Close">×</button></span></div>
@@ -351,8 +401,9 @@ const HINTS: Record<string, string> = {
 function renderBuildInfo() {
   if (!focus) return;
   const f = focus;
+  const p = plotOf(f);
   const count = built.get(f.id)?.length ?? 0;
-  $("build-info").innerHTML = `<h2>Plot ${plotName({ x: f.plot_x, y: f.plot_y })}</h2>
+  $("build-info").innerHTML = `<h2>${esc(plotLabel(p))}</h2><p class="meta where">${esc(REGIONS[p.region].name)}, ${Math.round(p.area / 10) * 10} sq. yd.</p>
     <p>${f.filer === me ? "Yours" : `Held by ${esc(who(f.filer))}`}: <q>${esc(f.intent)}</q></p>
     ${conditionHtml(f)}
     ${f.filer === me
@@ -385,15 +436,15 @@ function icon(key: string, make: () => HTMLCanvasElement) {
   return icons.get(key)!;
 }
 
-/** A square of one ground, cut from a whole plot of it. */
-function swatch(ch: string) {
+/** A square of one ground, cut from a patch of it on this plot's kind of land. */
+function swatch(ch: string, p: PlotDef) {
+  const patch: PlotDef = { ...p, w: 5, h: 5, mask: "#".repeat(25), features: [] };
   const full = document.createElement("canvas");
-  full.width = BUILD_W;
-  full.height = BUILD_H;
-  paintGround(full.getContext("2d")!, ch.repeat(PLOT_W * PLOT_H), 3);
+  full.width = full.height = 5 * ZOOM;
+  paintGround(full.getContext("2d")!, ch.repeat(25), 3, patch);
   const c = document.createElement("canvas");
   c.width = c.height = 12;
-  c.getContext("2d")!.drawImage(full, -8, -8);
+  c.getContext("2d")!.drawImage(full, -4, -4);
   return c;
 }
 
@@ -402,6 +453,7 @@ function renderPalette() {
   const mine = focus?.filer === me;
   $("tools").hidden = !mine;
   if (!mine) return;
+  const p = plotOf(focus!);
   const button = (t: Tool, title: string, inner: string) =>
     `<button data-tool="${t}" title="${title}">${inner}</button>`;
   const group = (name: string, inner: string) =>
@@ -410,7 +462,7 @@ function renderPalette() {
     group("Tools", button("move", "move things", "move") + button("remove", "take down", "take down")),
     `<div id="tabs"></div>`,
     group("Ground", BRUSHES.map((ch) =>
-      button(`ground:${ch}`, GROUND[ch].label, `<img src="${icon(`ground:${ch}`, () => swatch(ch))}" width="24" alt="${GROUND[ch].label}">`),
+      button(`ground:${ch}`, groundLabel(ch, p), `<img src="${icon(`ground:${ch}:${p.region}`, () => swatch(ch, p))}" width="24" alt="${groundLabel(ch, p)}">`),
     ).join("")),
     ...PALETTE.map(({ group: name, props }) => group(name, props
       .map((p) => button(`prop:${p}`, p, `<img src="${icon(p, () => propCanvas(p))}" width="${Math.min(propSize(p).w * 2, 40)}" alt="${p}">`))
@@ -535,9 +587,12 @@ function follow() {
 function fitFocus() {
   const tools = $("tools");
   const info = $("build-info");
+  const f = focus ?? zoom?.filing;
+  if (!f) return;
   const below = focus && !tools.hidden ? (tools.offsetHeight + 16) * dpr : 0;
   const above = focus && canvas.height > canvas.width ? (info.offsetTop + info.offsetHeight + 8) * dpr : 0;
-  focusView = fit(FOCUS_W, FOCUS_H, below, above);
+  const { w, h } = focusSize(plotOf(f));
+  focusView = fit(w, h, below, above);
 }
 
 function resize() {
@@ -579,14 +634,14 @@ function drawZoom(now: number) {
   const z = zoom!;
   const t = Math.min(1, (now - z.start) / ZOOM_MS);
   const u = z.dir === 1 ? t : 1 - t;
-  const { left, top } = plotOrigin({ x: z.filing.plot_x, y: z.filing.plot_y });
+  const { x: left, y: top } = plotOf(z.filing);
   const s0 = mapView.s;
   const s1 = focusView.s * ZOOM;
   const s = Math.round(s0 * (s1 / s0) ** ease(Math.min(1, u / 0.8)));
   const k = s1 === s0 ? 1 : (s - s0) / (s1 - s0);
   const from = { x: mapView.ox + s0 * left, y: mapView.oy + s0 * top };
   const to = { x: focusView.ox + focusView.s * FOCUS_PAD, y: focusView.oy + focusView.s * FOCUS_PAD };
-  fill(HILLS);
+  fill(VOID);
   viewport({
     s,
     ox: Math.round(from.x + (to.x - from.x) * k - s * left),
@@ -596,7 +651,7 @@ function drawZoom(now: number) {
   const fade = Math.max(0, (u - 0.65) / 0.35);
   if (fade > 0) {
     ctx.globalAlpha = fade;
-    fill(DIRT);
+    fill(SURROUND);
     viewport(focusView);
     drawFocus(ctx, focusScene(z.filing), now);
     ctx.globalAlpha = 1;
@@ -610,27 +665,32 @@ function drawZoom(now: number) {
 /** A finger hides what it's placing, so a touch places a little above itself. */
 const LIFT = 48; // CSS px
 
+/** A build-space point over the plot's box, or null off it. */
 function toBuild(e: MouseEvent) {
+  if (!focus) return null;
+  const plot = plotOf(focus);
   const p = toArt(e, focusView);
   const lift = placing && (e as PointerEvent).pointerType !== "mouse" ? (LIFT * dpr) / focusView.s : 0;
   const b = { x: p.x - FOCUS_PAD, y: p.y - FOCUS_PAD - lift };
-  return b.x >= 0 && b.y >= 0 && b.x < BUILD_W && b.y < BUILD_H ? b : null;
+  return b.x >= 0 && b.y >= 0 && b.x < plot.w * ZOOM && b.y < plot.h * ZOOM ? b : null;
 }
 
-/** Where a prop would go: centred on the point, snapped to cells, kept inside the fence. */
+/** Where a prop would go: centred on the point, snapped to cells, kept inside the plot's box. */
 function propAt(prop: string, bx: number, by: number) {
+  const plot = plotOf(focus!);
   const { w, h } = propSize(prop);
   return {
-    x: clamp(Math.round((bx - w / 2) / ZOOM), 0, Math.floor((BUILD_W - w) / ZOOM)),
-    y: clamp(Math.round((by - h / 2) / ZOOM), 0, Math.floor((BUILD_H - h) / ZOOM)),
+    x: clamp(Math.round((bx - w / 2) / ZOOM), 0, Math.floor((plot.w * ZOOM - w) / ZOOM)),
+    y: clamp(Math.round((by - h / 2) / ZOOM), 0, Math.floor((plot.h * ZOOM - h) / ZOOM)),
   };
 }
 
 /** The 2x2 cells a ground brush covers, centred on the nearest cell corner. */
 function brushAt(bx: number, by: number): Cells {
+  const plot = plotOf(focus!);
   return {
-    x: clamp(Math.round(bx / ZOOM) - 1, 0, PLOT_W - 2),
-    y: clamp(Math.round(by / ZOOM) - 1, 0, PLOT_H - 2),
+    x: clamp(Math.round(bx / ZOOM) - 1, 0, plot.w - 2),
+    y: clamp(Math.round(by / ZOOM) - 1, 0, plot.h - 2),
     w: 2,
     h: 2,
   };
@@ -639,7 +699,7 @@ function brushAt(bx: number, by: number): Cells {
 function focusScene(f: Filing): FocusScene {
   const mine = f.filer === me && !zoom;
   const ps = built.get(f.id) ?? [];
-  const scene: FocusScene = { filing: f, built: ps, mine: f.filer === me, ghost: null, brush: null, hover: null };
+  const scene: FocusScene = { plot: plotOf(f), filing: f, built: ps, mine: f.filer === me, ghost: null, brush: null, hover: null };
   if (!mine || !pointer) return scene;
   const [kind, arg] = tool.split(":");
   if (drag) {
@@ -700,6 +760,7 @@ function takeDown(b: { x: number; y: number }) {
 async function placeAt(prop: string, b: { x: number; y: number }, label?: string) {
   const f = focus!;
   const at = propAt(prop, b.x, b.y);
+  if (!canPlace(plotOf(f), prop, at.x, at.y)) return problem("It has to stand on the plot, and not on what's already there.");
   const result = await place(f.id, at.x, at.y, prop, label);
   if (typeof result === "string") return problem(result);
   problem("");
@@ -710,13 +771,15 @@ async function placeAt(prop: string, b: { x: number; y: number }, label?: string
 /** Lay ground along the brush's path since the last point, so a quick drag leaves no gaps. */
 function paintTo(to: Cells) {
   if (!stroke || !focus) return;
+  const plot = plotOf(focus);
   const ch = tool.split(":")[1];
   const from = stroke.last;
   const steps = Math.max(Math.abs(to.x - from.x), Math.abs(to.y - from.y), 1);
   for (let i = 0; i <= steps; i++) {
     const x = Math.round(from.x + ((to.x - from.x) * i) / steps);
     const y = Math.round(from.y + ((to.y - from.y) * i) / steps);
-    for (let dy = 0; dy < to.h; dy++) for (let dx = 0; dx < to.w; dx++) stroke.cells[(y + dy) * PLOT_W + x + dx] = ch;
+    for (let dy = 0; dy < to.h; dy++)
+      for (let dx = 0; dx < to.w; dx++) if (canPaint(plot, x + dx, y + dy)) stroke.cells[(y + dy) * plot.w + x + dx] = ch;
   }
   stroke.last = to;
   focus.ground = stroke.cells.join("");
@@ -734,7 +797,7 @@ canvas.addEventListener("pointerdown", (e) => {
   if (e.button !== 0) return;
   canvas.setPointerCapture(e.pointerId);
   if (kind === "ground") {
-    const before = focus.ground ?? EMPTY;
+    const before = focus.ground ?? empty(plotOf(focus));
     const at = brushAt(b.x, b.y);
     stroke = { cells: before.split(""), before, last: at };
     paintTo(at);
@@ -748,7 +811,7 @@ canvas.addEventListener("pointermove", (e) => {
   if (!focus) {
     const p = toArt(e, mapView);
     mouse = p;
-    hover = plotAt(p.x, p.y);
+    hover = plotAt(p.x, p.y)?.id ?? null;
     return;
   }
   const b = toBuild(e);
@@ -789,6 +852,7 @@ canvas.addEventListener("pointerup", async (e) => {
     const { p, x, y } = drag;
     drag = null;
     if (p.x === x && p.y === y) return;
+    if (focus && !canPlace(plotOf(focus), look(p), x, y)) return problem("It has to stand on the plot, and not on what's already there.");
     setPlacement({ ...p, x, y });
     const err = await move(p.id, x, y);
     if (err) {
@@ -833,8 +897,9 @@ function arrows(e: KeyboardEvent) {
   const self = walkers.get(me);
   if (!self || focus || zoom || (e.repeat && pressed.size === was)) return;
   heading = null;
+  waypoints = [];
   const [dx, dy] = [...pressed].reduce(([x, y], k) => [x + ARROWS[k][0], y + ARROWS[k][1]], [0, 0]);
-  walkTo(clamp(self.x + dx * 1000, MARGIN + 2, MAP_W - MARGIN - 2), clamp(self.y + dy * 1000, MARGIN + 7, MAP_H - MARGIN - 1));
+  walkTo(clamp(self.x + dx * 1000, 2, MAP_W - 2), clamp(self.y + dy * 1000, 8, MAP_H - 1));
 }
 window.addEventListener("keydown", arrows);
 window.addEventListener("keyup", arrows);
@@ -844,7 +909,7 @@ window.addEventListener("blur", () => pressed.clear());
 function enterableAt(e: MouseEvent) {
   const p = toArt(e, mapView);
   const plot = plotAt(p.x, p.y);
-  const f = plot && heldPlots().get(plotKey(plot));
+  const f = plot && heldPlots().get(plot.id);
   return f && BUILT.includes(f.status) ? f : null;
 }
 
@@ -878,23 +943,17 @@ canvas.addEventListener("wheel", (e) => {
 
 // --- the map ---------------------------------------------------------------
 
-/** Where you stand to go into a plot: on the path, just outside its gate. */
-function gate(plot: Plot) {
-  const { left, top } = plotOrigin(plot);
-  return { x: left + PLOT_W / 2, y: top + PLOT_H + PATH / 2 + 3 };
-}
-
-/** Walk somewhere, then do something there. */
+/** Walk somewhere along the paths, then do something there. */
 function goTo(x: number, y: number, then: () => void) {
   const self = walkers.get(me);
   if (!self || Math.hypot(self.x - x, self.y - y) < 1) return then();
+  walkAlong(x, y);
   heading = then;
-  walkTo(x, y);
 }
 
 /** Walk to a plot's gate and step inside on arrival. */
 function walkInto(f: Filing) {
-  const g = gate({ x: f.plot_x, y: f.plot_y });
+  const g = plotOf(f).gate;
   goTo(g.x, g.y, () => enterFocus(f));
 }
 
@@ -904,8 +963,10 @@ function onGary(p: { x: number; y: number }) {
   return Math.abs(p.x - g.x) <= 6 && p.y >= g.y - 13 && p.y <= g.y + 1;
 }
 
-const onBoard = (p: { x: number; y: number }) =>
-  p.x >= BOARD.x - 1 && p.x < BOARD.x + BOARD.w + 1 && p.y >= BOARD.y - 1 && p.y < MAP_H;
+const onBoard = (p: { x: number; y: number }) => {
+  const b = BOARD_BOX();
+  return p.x >= b.x && p.x < b.x + b.w && p.y >= b.y && p.y < b.y + b.h;
+};
 
 /** Gary says something, for a few seconds. */
 let said: { line: string; until: number } | null = null;
@@ -932,12 +993,11 @@ canvas.addEventListener("pointerdown", (e) => {
     const { backoffice } = await import("./backoffice.ts");
     backoffice({
       me, filings, arrive, papers, speak,
-      selected: () => (selected ? (heldPlots().get(plotKey(selected))?.id ?? null) : null),
+      selected: () => (selected !== null ? (heldPlots().get(selected)?.id ?? null) : null),
       freePlot: () => {
         const held = heldPlots();
-        if (selected && !held.has(plotKey(selected))) return selected;
-        for (let y = 0; y < ROWS; y++) for (let x = 0; x < COLS; x++) if (!held.has(plotKey({ x, y }))) return { x, y };
-        return null;
+        if (selected !== null && !held.has(selected)) return selected;
+        return PLOTS.find((p) => !held.has(p.id))?.id ?? null;
       },
     });
   }, 5000);
@@ -949,20 +1009,18 @@ canvas.addEventListener("click", (e) => {
   heading = null;
   const p = toArt(e, mapView);
   if (onGary(p)) return speak();
-  const walk = (x: number, y: number) => walkTo(clamp(x, MARGIN + 2, MAP_W - MARGIN - 2), clamp(y, MARGIN + 7, MAP_H - MARGIN - 1));
   if (onBoard(p)) {
     closeCard();
-    return goTo(BOARD.x + BOARD.w / 2, MAP_H - MARGIN - 1, openBoard);
+    return goTo(LANDMARKS.board.at.x, LANDMARKS.board.at.y, openBoard);
   }
   const plot = plotAt(p.x, p.y);
   if (plot) {
     // Walk to the gate, as one does before filing, and read what's pinned there.
-    const g = gate(plot);
-    openCard(plot);
-    return walk(g.x, g.y);
+    openCard(plot.id);
+    return walkAlong(plot.gate.x, plot.gate.y);
   }
   closeCard(); // just out for a walk
-  walk(p.x, p.y);
+  walkAlong(p.x, p.y);
 });
 
 // --- the field channel: avatars (broadcast), who's here (presence), filings --
@@ -977,6 +1035,18 @@ function walkTo(tx: number, ty: number) {
   channel.send({ type: "broadcast", event: "walk", payload: { id: me, x: self.x, y: self.y, tx, ty } });
 }
 
+/** Walk somewhere by the paths, leg by leg; off the path only at the ends, and never into the water. */
+function walkAlong(x: number, y: number) {
+  const self = walkers.get(me);
+  if (!self) return;
+  heading = null;
+  const way = route(self, { x, y }).slice(1);
+  if (way.length > 1 && !walkable(x, y)) way.pop();
+  waypoints = way;
+  const next = waypoints.shift();
+  if (next) walkTo(next.x, next.y);
+}
+
 function step(dt: number) {
   for (const w of walkers.values()) {
     const dx = w.tx - w.x;
@@ -986,8 +1056,22 @@ function step(dt: number) {
     if (!w.moving) continue;
     if (Math.abs(dx) > 0.01) w.facing = Math.sign(dx);
     const move = Math.min(dist, SPEED * dt);
-    w.x += (dx / dist) * move;
-    w.y += (dy / dist) * move;
+    const nx = w.x + (dx / dist) * move, ny = w.y + (dy / dist) * move;
+    // Free walking (the arrow keys) stops at water, wood and walls; routes only cross them by bridge.
+    if (w.id === me && !waypoints.length && !heading && !walkable(nx, ny) && walkable(w.x, w.y)) {
+      w.tx = w.x;
+      w.ty = w.y;
+      w.moving = false;
+      continue;
+    }
+    w.x = nx;
+    w.y = ny;
+    // The next leg of a walk along the paths.
+    if (w.id === me && move === dist && waypoints.length) {
+      const next = waypoints.shift()!;
+      walkTo(next.x, next.y);
+      continue;
+    }
     // Arrived: tell presence where we are, for anyone who joins later.
     if (w.id === me && move === dist) {
       channel.track({ x: w.x, y: w.y });
@@ -1013,13 +1097,14 @@ function overlays(now: number, t: number) {
   const tag = $("nametag");
   const over = mouse && [...walkers.values()].find((w) => Math.abs(mouse!.x - w.x) <= 5 && mouse!.y >= w.y - 14 && mouse!.y <= w.y + 1);
   const name = over ? who(over.id) : mouse && onGary(mouse) ? "Gary" : mouse && onBoard(mouse) ? "the notice board" : null;
+  const b = BOARD_BOX();
   tag.hidden = !name || !bubble.hidden && name === "Gary";
   if (name) {
     tag.textContent = name;
-    const at = over ?? (name === "Gary" ? gary : { x: BOARD.x + BOARD.w / 2, y: BOARD.y + 1 });
+    const at = over ?? (name === "Gary" ? gary : { x: b.x + b.w / 2, y: b.y + 1 });
     Object.assign(tag.style, screen(at.x, at.y - (over ? 18 : name === "Gary" ? 15 : 2)));
   }
-  canvas.style.cursor = name && !over ? "pointer" : hover ? "pointer" : "";
+  canvas.style.cursor = name && !over ? "pointer" : hover !== null ? "pointer" : "";
 }
 
 let last = performance.now();
@@ -1029,13 +1114,13 @@ function frame(now: number) {
   if (zoom) {
     drawZoom(now);
   } else if (focus) {
-    fill(DIRT);
+    fill(SURROUND);
     viewport(focusView);
     drawFocus(ctx, focusScene(focus), now);
     labelItems();
     canvas.style.cursor = mineInFocus() && pointer ? (tool === "move" ? (drag ? "grabbing" : "grab") : "crosshair") : "";
   } else {
-    fill(HILLS);
+    fill(VOID);
     follow();
     viewport(mapView);
     const t = Date.now();
@@ -1067,12 +1152,12 @@ async function arrive(f: Filing) {
   const was = filings.get(f.id);
   if (f.filer === me && (was?.status === "pending" || was?.status === "committee") && f.status !== was.status) {
     unread.add(f.id);
-    letters.push({ plot: { x: f.plot_x, y: f.plot_y }, out: false, status: f.status, filing: f.id });
+    letters.push({ plot: f.plot, out: false, status: f.status, filing: f.id });
   }
   // His inspection, likewise, unless we're standing on the plot to hear it.
   if (f.filer === me && was && f.inspected_at !== was.inspected_at && focus?.id !== f.id) {
     unread.add(f.id);
-    letters.push({ plot: { x: f.plot_x, y: f.plot_y }, out: false, status: f.met_at ? "approved" : "committee", filing: f.id });
+    letters.push({ plot: f.plot, out: false, status: f.met_at ? "approved" : "committee", filing: f.id });
   }
   upsert(f);
   handles = await handlesFor([f.filer]);
@@ -1112,7 +1197,7 @@ async function start() {
   for (const id of new Set(placed.map((p) => p.filing))) regroup(id);
   handles = await handlesFor([me, ...[...filings.values()].map((f) => f.filer)]);
 
-  const spawn = { x: MAP_W / 2 + (Math.random() - 0.5) * 60, y: MAP_H - MARGIN - 3 };
+  const spawn = { x: LANDMARKS.spawn.x + Math.round((Math.random() - 0.5) * 6), y: LANDMARKS.spawn.y };
   walkers.set(me, { id: me, ...spawn, tx: spawn.x, ty: spawn.y });
 
   channel = supabase.channel("the_commons:field", { config: { presence: { key: me } } });

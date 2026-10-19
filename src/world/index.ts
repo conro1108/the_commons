@@ -106,14 +106,11 @@ export function route(from: Point, to: Point): Point[] {
   const prev = new Int32Array(n).fill(-1);
   const bx = b % MAP_W, by = (b / MAP_W) | 0;
   const h = (i: number) => Math.hypot((i % MAP_W) - bx, ((i / MAP_W) | 0) - by);
-  const open: [number, number][] = [[h(a), a]];
+  const open = new Heap();
+  open.push(h(a), a);
   cost[a] = 0;
-  while (open.length) {
-    let k = 0;
-    for (let j = 1; j < open.length; j++) if (open[j][0] < open[k][0]) k = j;
-    const [, i] = open[k];
-    open[k] = open[open.length - 1];
-    open.pop();
+  while (open.size) {
+    const i = open.pop();
     if (i === b) break;
     const x = i % MAP_W, y = (i / MAP_W) | 0;
     for (let dy = -1; dy <= 1; dy++)
@@ -125,7 +122,7 @@ export function route(from: Point, to: Point): Point[] {
         if (c < cost[j]) {
           cost[j] = c;
           prev[j] = i;
-          open.push([c + h(j), j]);
+          open.push(c + h(j), j);
         }
       }
   }
@@ -148,4 +145,39 @@ function straighten(ps: Point[], tol: number): Point[] {
   }
   if (far <= tol) return [a, b];
   return [...straighten(ps.slice(0, at + 1), tol).slice(0, -1), ...straighten(ps.slice(at), tol)];
+}
+
+/** Smallest key first. */
+class Heap {
+  private k: number[] = [];
+  private v: number[] = [];
+  get size() { return this.k.length; }
+  push(key: number, val: number) {
+    const { k, v } = this;
+    let n = k.length;
+    k.push(key); v.push(val);
+    while (n) {
+      const up = (n - 1) >> 1;
+      if (k[up] <= key) break;
+      k[n] = k[up]; v[n] = v[up]; n = up;
+    }
+    k[n] = key; v[n] = val;
+  }
+  pop(): number {
+    const { k, v } = this;
+    const top = v[0], lk = k.pop()!, lv = v.pop()!;
+    if (k.length) {
+      let n = 0;
+      for (;;) {
+        const l = n * 2 + 1, r = l + 1;
+        let m = -1, mk = lk;
+        if (l < k.length && k[l] < mk) { m = l; mk = k[l]; }
+        if (r < k.length && k[r] < mk) { m = r; mk = k[r]; }
+        if (m < 0) break;
+        k[n] = k[m]; v[n] = v[m]; n = m;
+      }
+      k[n] = lk; v[n] = lv;
+    }
+    return top;
+  }
 }

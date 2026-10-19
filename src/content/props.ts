@@ -3,7 +3,8 @@
 // is a client change only — but never rename or drop one that's been placed.
 
 import { CANON, K, type PropDef } from "./canon/props.ts";
-import { ZOOM } from "../layout.ts";
+import { ZOOM } from "../world/index.ts";
+import { FEATURES } from "./features.ts";
 
 const COMMONS: Record<string, PropDef> = {
   item: {
@@ -353,7 +354,10 @@ const COMMONS: Record<string, PropDef> = {
   },
 };
 
-const PROPS: Record<string, PropDef> = Object.assign(Object.create(null), CANON, COMMONS);
+// Features join as "feature:boulder" and so on: drawable, never on the palette.
+const PROPS: Record<string, PropDef> = Object.assign(
+  Object.create(null), CANON, COMMONS, Object.fromEntries(Object.entries(FEATURES).map(([k, v]) => [`feature:${k}`, v])),
+);
 
 /** The build palette, in groups. Gary keeps the notice. */
 export const PALETTE: { group: string; props: string[] }[] = [

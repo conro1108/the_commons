@@ -1,17 +1,22 @@
 import { K } from "./content/canon/props.ts";
 import { propCanvas } from "./content/props.ts";
-import { COLS, MAP_H, MAP_W, MARGIN, PLOT_H, PLOT_W, ROWS, plotOrigin, type Plot } from "./layout.ts";
-import { mini } from "./closeup.ts";
+import * as C from "./content/palette.ts";
+import { LANDMARKS, MAP_H, MAP_W, PLOTS, REGIONS, inPlot, type PlotDef } from "./world/index.ts";
+import type { Boundary } from "./world/types.ts";
 import type { Filing, Placement } from "./net.ts";
-import { drawAir, drawCritters, drawUnder } from "./life.ts";
+import { mini } from "./closeup.ts";
+import { paintGround } from "./map/ground.ts";
+import { bakeScenery, oakCanopy } from "./map/scenery.ts";
+import { drawBoard, drawHut, drawOak } from "./map/landmarks.ts";
+import { hash } from "./map/noise.ts";
+import { critters, drawAir, drawNight, drawUnder } from "./life.ts";
 import { drawAvatar, type Avatar } from "./avatar.ts";
+import { dark, glow, grade, hourNow } from "./light.ts";
 
-const GRASS = "#b2d878";
-const TUFT = "#98c463";
-export const HILLS = "#8ec572";
-export const DIRT = "#d8c08a";
-export const FENCE = "#9a7148";
 export const INK = K;
+export const FENCE = C.PLANK[1];
+/** What shows round the map where the screen is bigger than it. */
+export const VOID = "#1b2622";
 
 export interface Walker {
   id: string;
@@ -22,16 +27,16 @@ export interface Walker {
 }
 
 export interface Scene {
-  held: Map<string, Filing>; // "x,y" -> the filing holding that plot
+  held: Map<number, Filing>; // plot id -> the filing holding it, as this resident should see it
   built: Map<number, Placement[]>; // filing id -> what's on it
   me: string;
-  hover: Plot | null;
-  selected: Plot | null;
+  hover: number | null; // plot ids
+  selected: number | null;
   walkers: Walker[];
   look: (id: string) => Avatar;
   letters: Letter[];
   t: number; // Date.now(), for the commons' own life
-  recent: Plot[]; // newest granted plots, newest first: where Gary goes to look
+  recent: number[]; // newest granted plots, newest first: where Gary goes to look
 }
 
 /**
@@ -40,15 +45,15 @@ export interface Scene {
  * ruling that arrives while you're up close waits for you on the map.
  */
 export interface Letter {
-  plot: Plot;
+  plot: number;
   out: boolean;
   status?: Filing["status"]; // the ruling inside, for the mark it shows on opening
   filing?: number; // whose ruling, so the panel can open it when the letter lands
   start?: number;
 }
 
-/** Gary's office is somewhere off the top right of the map. */
-const OFFICE = { x: MAP_W + 12, y: -12 };
+/** Gary's office is his hut on the Green; letters come and go by its chimney. */
+const OFFICE = { x: LANDMARKS.office.x + 4, y: LANDMARKS.office.y - 10 };
 export const FLIGHT = 1500;
 const OPENING = 1100;
 
@@ -59,161 +64,8 @@ export function letterPhase(l: Letter, now: number): "flying" | "opening" | "don
   return !l.out && age < FLIGHT + OPENING ? "opening" : "done";
 }
 
-export const plotKey = (p: Plot) => `${p.x},${p.y}`;
-
 export function prop(ctx: CanvasRenderingContext2D, name: string, x: number, y: number) {
   ctx.drawImage(propCanvas(name), Math.round(x), Math.round(y));
-}
-
-/** Small deterministic noise so the scenery sits still between frames. */
-export const hash = (n: number) => ((Math.sin(n * 12.9898) * 43758.5453) % 1 + 1) % 1;
-
-let background: HTMLCanvasElement | null = null;
-
-function drawBackground(): HTMLCanvasElement {
-  const c = document.createElement("canvas");
-  c.width = MAP_W;
-  c.height = MAP_H;
-  const ctx = c.getContext("2d")!;
-  ctx.fillStyle = HILLS;
-  ctx.fillRect(0, 0, MAP_W, MAP_H);
-  ctx.fillStyle = DIRT;
-  ctx.fillRect(MARGIN, MARGIN, MAP_W - MARGIN * 2, MAP_H - MARGIN * 2);
-  for (let y = 0; y < ROWS; y++) {
-    for (let x = 0; x < COLS; x++) {
-      const { left, top } = plotOrigin({ x, y });
-      ctx.fillStyle = GRASS;
-      ctx.fillRect(left, top, PLOT_W, PLOT_H);
-      ctx.fillStyle = TUFT;
-      for (let i = 0; i < 3; i++) {
-        const tx = left + 2 + Math.floor(hash(x * 31 + y * 7 + i) * (PLOT_W - 5));
-        const ty = top + 2 + Math.floor(hash(x * 13 + y * 17 + i * 5) * (PLOT_H - 4));
-        ctx.fillRect(tx, ty, 2, 1);
-        ctx.fillRect(tx + 1, ty - 1, 1, 1);
-      }
-    }
-  }
-  // Trees round the edge, a pond at the bottom: the commons' only fixtures.
-  for (let x = -4; x < MAP_W; x += 15) prop(ctx, "tree", x + hash(x) * 5, 1 + hash(x + 1) * 2);
-  for (let y = 14; y < MAP_H - 16; y += 14) {
-    prop(ctx, "tree", 1 + hash(y) * 2, y);
-    prop(ctx, "tree", MAP_W - 17 + hash(y + 3) * 2, y);
-  }
-  for (let x = -4; x < MAP_W; x += 17) {
-    if (Math.abs(x - MAP_W / 2) < 24 || (x + 20 > BOARD.x - 2 && x < BOARD.x + BOARD.w + 2)) continue;
-    prop(ctx, "tree", x + hash(x + 9) * 4, MAP_H - 15);
-  }
-  prop(ctx, "pond", MAP_W / 2 - 12, MAP_H - 12);
-  noticeBoard(ctx);
-  return c;
-}
-
-/** The notice board, in the border by the pond: walk up to it to read it. */
-export const BOARD = { x: 96, y: MAP_H - 17, w: 28, h: 17 };
-
-function noticeBoard(ctx: CanvasRenderingContext2D) {
-  const { x, y, w, h } = BOARD;
-  ctx.fillStyle = "#5c3d22";
-  ctx.fillRect(x + 3, y + 12, 2, h - 12);
-  ctx.fillRect(x + w - 5, y + 12, 2, h - 12);
-  ctx.fillStyle = INK;
-  ctx.fillRect(x, y + 1, w, 12);
-  ctx.fillRect(x - 1, y, w + 2, 2);
-  ctx.fillStyle = "#a97048";
-  ctx.fillRect(x, y, w, 1);
-  ctx.fillStyle = "#7a5230";
-  ctx.fillRect(x + 1, y + 2, w - 2, 10);
-  ctx.fillStyle = "#c9a06a";
-  ctx.fillRect(x + 2, y + 3, w - 4, 8);
-  // Notices, a little uneven, each with its pin.
-  for (const [nx, ny, pin] of [[4, 4, "#e05c48"], [10, 5, "#3e8a5a"], [16, 4, "#5b7fc9"], [21, 6, "#e8c56a"]] as const) {
-    ctx.fillStyle = "#fffdf3";
-    ctx.fillRect(x + nx, y + ny, 4, 4);
-    ctx.fillStyle = "#b0a4b4";
-    ctx.fillRect(x + nx + 1, y + ny + 2, 2, 1);
-    ctx.fillStyle = pin;
-    ctx.fillRect(x + nx + 1, y + ny, 1, 1);
-  }
-}
-
-
-// --- the map ---------------------------------------------------------------
-
-/** A post-and-rail fence with a gate gap in the middle of the bottom rail. */
-export function fence(ctx: CanvasRenderingContext2D, left: number, top: number, w: number, h: number, colour: string, gate: number) {
-  const g0 = left + Math.floor((w - gate) / 2);
-  const g1 = g0 + gate;
-  ctx.fillStyle = colour;
-  ctx.fillRect(left, top + 1, w, 1);
-  ctx.fillRect(left, top + h - 1, g0 - left, 1);
-  ctx.fillRect(g1, top + h - 1, left + w - g1, 1);
-  ctx.fillRect(left, top + 1, 1, h - 1);
-  ctx.fillRect(left + w - 1, top + 1, 1, h - 1);
-  const posts = Math.max(2, Math.round(w / 12));
-  for (let i = 0; i <= posts; i++) {
-    const px = left + Math.round(((w - 1) * i) / posts);
-    ctx.fillRect(px, top, 1, 2);
-    if (px < g0 - 1 || px > g1) ctx.fillRect(px, top + h - 2, 1, 2);
-  }
-  // Gateposts, a touch taller than the rest.
-  ctx.fillRect(g0 - 1, top + h - 3, 1, 3);
-  ctx.fillRect(g1, top + h - 3, 1, 3);
-}
-
-/** A pennant in the holder's colour on the corner post: what a plot gets when it's granted. */
-function pennant(ctx: CanvasRenderingContext2D, left: number, top: number, colour: string) {
-  ctx.fillStyle = INK;
-  ctx.fillRect(left, top - 4, 1, 5);
-  ctx.fillStyle = colour;
-  ctx.fillRect(left + 1, top - 4, 3, 1);
-  ctx.fillRect(left + 1, top - 3, 2, 1);
-}
-
-function drawPlot(ctx: CanvasRenderingContext2D, f: Filing, built: Placement[] | undefined, mine: boolean) {
-  drawPlotBody(ctx, f, built, mine);
-  const { left, top } = plotOrigin({ x: f.plot_x, y: f.plot_y });
-  if (!mine) return;
-  if (f.status !== "pending") pennant(ctx, left, top, colourOf(f.filer));
-  else {
-    // Not granted yet, so no pennant; our filing is pinned up with our colour.
-    ctx.fillStyle = colourOf(f.filer);
-    ctx.fillRect(left + PLOT_W / 2 - 1, top + PLOT_H / 2 - 5, 1, 1);
-  }
-}
-
-function drawPlotBody(ctx: CanvasRenderingContext2D, f: Filing, built: Placement[] | undefined, mine: boolean) {
-  const { left, top } = plotOrigin({ x: f.plot_x, y: f.plot_y });
-  if (f.status === "pending") {
-    // Stakes at the corners and the filing pinned up: claimed, not yet granted.
-    ctx.fillStyle = FENCE;
-    for (const [sx, sy] of [[1, 1], [PLOT_W - 2, 1], [1, PLOT_H - 3], [PLOT_W - 2, PLOT_H - 3]]) {
-      ctx.fillRect(left + sx, top + sy, 1, 2);
-    }
-    prop(ctx, "notice", left + PLOT_W / 2 - 4, top + PLOT_H / 2 - 5);
-    return;
-  }
-  const colour = mine ? INK : FENCE;
-  if (f.status === "committee") {
-    fence(ctx, left, top, PLOT_W, PLOT_H, colour, 4);
-    prop(ctx, "notice", left + PLOT_W / 2 - 4, top + PLOT_H / 2 - 5);
-    return;
-  }
-  const empty = !built?.length && !f.ground;
-  if (!empty) ctx.drawImage(mini(f, built ?? []), left, top);
-  fence(ctx, left, top, PLOT_W, PLOT_H, colour, 4);
-  // The permit, pinned to the gatepost for anyone passing to read.
-  const g1 = left + PLOT_W / 2 + 2;
-  ctx.fillStyle = INK;
-  ctx.fillRect(g1 + 1, top + PLOT_H - 5, 4, 4);
-  ctx.fillStyle = "#fffdf3";
-  ctx.fillRect(g1 + 2, top + PLOT_H - 4, 2, 2);
-}
-
-function outline(ctx: CanvasRenderingContext2D, p: Plot, colour: string) {
-  const { left, top } = plotOrigin(p);
-  ctx.strokeStyle = colour;
-  ctx.lineWidth = 1;
-  ctx.strokeRect(left - 1.5, top - 1.5, PLOT_W + 3, PLOT_H + 3);
 }
 
 /** Colour per resident, from their id, so everyone keeps theirs. */
@@ -221,7 +73,189 @@ export function colourOf(id: string) {
   return `hsl(${parseInt(id.slice(0, 6), 16) % 360} 55% 55%)`;
 }
 
+// --- the land ----------------------------------------------------------------
+
+let background: HTMLCanvasElement | null = null;
+let canopy: HTMLCanvasElement | null = null;
+
+/** The baked land, without plots or anyone on it: the close-up shows its surroundings from it. */
+export const mapGround = () => (background ??= drawBackground());
+
+function drawBackground(): HTMLCanvasElement {
+  const c = document.createElement("canvas");
+  c.width = MAP_W;
+  c.height = MAP_H;
+  const ctx = c.getContext("2d")!;
+  ctx.putImageData(paintGround(), 0, 0);
+  bakeScenery(ctx);
+  const bench = propCanvas("bench");
+  ctx.drawImage(bench, LANDMARKS.bench.x - 5, LANDMARKS.bench.y + LANDMARKS.bench.h - bench.height);
+  return c;
+}
+
+// --- plots -------------------------------------------------------------------
+
+interface Outline {
+  edge: { x: number; y: number }[]; // the plot's own cells along its boundary, map px
+  around: { x: number; y: number }[]; // the cells just outside it
+  corners: { x: number; y: number }[]; // where the surveyor's pegs go
+  door: Set<string>; // edge cells left open for the gate, plot-local
+  post: { x: number; y: number }[]; // the gateposts either side
+}
+
+const outlines = new Map<number, Outline>();
+
+function outlineOf(p: PlotDef): Outline {
+  let o = outlines.get(p.id);
+  if (o) return o;
+  o = { edge: [], around: [], corners: [], door: new Set(), post: [] };
+  const seen = new Set<string>();
+  for (let y = 0; y < p.h; y++)
+    for (let x = 0; x < p.w; x++) {
+      if (!inPlot(p, x, y)) continue;
+      const out = [[1, 0], [-1, 0], [0, 1], [0, -1]].filter(([dx, dy]) => !inPlot(p, x + dx, y + dy));
+      if (!out.length) continue;
+      const near = Math.abs(x - p.door.x) + Math.abs(y - p.door.y);
+      if (near <= 1) o.door.add(`${x},${y}`);
+      else if (near === 2) o.post.push({ x: p.x + x, y: p.y + y });
+      o.edge.push({ x: p.x + x, y: p.y + y });
+      for (const [dx, dy] of out) {
+        const k = `${x + dx},${y + dy}`;
+        if (!seen.has(k)) { seen.add(k); o.around.push({ x: p.x + x + dx, y: p.y + y + dy }); }
+      }
+    }
+  // Pegs at the shape's four extremes, which for a field are its corners.
+  const by = (f: (e: { x: number; y: number }) => number) => o!.edge.reduce((a, b) => (f(b) < f(a) ? b : a));
+  for (const f of [(e: { x: number; y: number }) => e.x + e.y, (e: { x: number; y: number }) => -e.x - e.y, (e: { x: number; y: number }) => e.x - e.y, (e: { x: number; y: number }) => e.y - e.x]) {
+    const c = by(f);
+    if (o.corners.every((d) => Math.abs(d.x - c.x) + Math.abs(d.y - c.y) > 4)) o.corners.push(c);
+  }
+  outlines.set(p.id, o);
+  return o;
+}
+
+type Put = (x: number, y: number, c: string) => void;
+const BOUND: Record<Boundary, (x: number, y: number, put: Put, outer: boolean) => void> = {
+  picket: (x, y, put) => {
+    put(x, y, (x + y) % 2 ? "#e9e2cf" : "#fbf6e6");
+    if ((x + y) % 3 === 0) put(x, y - 1, "#fbf6e6");
+  },
+  drystone: (x, y, put, outer) => {
+    put(x, y, C.STONE[hash(x, y, 5) > 0.55 ? 3 : 2]);
+    if (outer) put(x, y - 1, C.STONE[4]);
+  },
+  hurdle: (x, y, put) => put(x, y, (x + y) % 2 ? C.PLANK[1] : C.PLANK[3]),
+  hedge: (x, y, put, outer) => {
+    put(x, y, C.FOLIAGE[outer ? 3 : 2]);
+    if (outer) put(x, y - 1, C.FOLIAGE[4]);
+  },
+  rail: (x, y, put) => {
+    put(x, y, C.PLANK[2]);
+    if ((x * 3 + y * 5) % 4 === 0) { put(x, y, C.PLANK[0]); put(x, y - 1, C.PLANK[0]); }
+  },
+};
+
+/** A plot's boundary in its ground's style, with its gate open. */
+function boundary(ctx: CanvasRenderingContext2D, p: PlotDef, style: Boundary, mine: boolean) {
+  const o = outlineOf(p);
+  const put: Put = (x, y, c) => {
+    ctx.fillStyle = c;
+    ctx.fillRect(x, y, 1, 1);
+  };
+  for (const e of o.edge) {
+    if (o.door.has(`${e.x - p.x},${e.y - p.y}`)) continue;
+    // Edges facing north stand a pixel proud, toward the light.
+    BOUND[style](e.x, e.y, put, !inPlot(p, e.x - p.x, e.y - p.y - 1));
+  }
+  // Gateposts, in ink if it's yours.
+  for (const g of o.post) {
+    put(g.x, g.y, mine ? INK : C.PLANK[0]);
+    put(g.x, g.y - 1, mine ? INK : C.PLANK[0]);
+  }
+}
+
+/** Surveyor's pegs and a line of twine: land that's been measured and is waiting. */
+function surveyed(ctx: CanvasRenderingContext2D, p: PlotDef) {
+  const o = outlineOf(p);
+  ctx.fillStyle = "#f4ead0";
+  ctx.globalAlpha = 0.6;
+  for (const e of o.edge) if ((e.x + e.y) % 2 === 0) ctx.fillRect(e.x, e.y, 1, 1);
+  ctx.globalAlpha = 1;
+  for (const c of o.corners) {
+    ctx.fillStyle = C.PLANK[0];
+    ctx.fillRect(c.x, c.y - 1, 1, 2);
+    ctx.fillStyle = "#f0a050";
+    ctx.fillRect(c.x, c.y - 2, 1, 1);
+  }
+}
+
+/** A pennant in the holder's colour on the plot's top corner: yours. */
+function pennant(ctx: CanvasRenderingContext2D, p: PlotDef, colour: string) {
+  const top = outlineOf(p).edge[0];
+  ctx.fillStyle = INK;
+  ctx.fillRect(top.x, top.y - 5, 1, 6);
+  ctx.fillStyle = colour;
+  ctx.fillRect(top.x + 1, top.y - 5, 3, 1);
+  ctx.fillRect(top.x + 1, top.y - 4, 2, 1);
+}
+
+/** The permit, pinned to the gatepost for anyone passing to read. */
+function permit(ctx: CanvasRenderingContext2D, p: PlotDef) {
+  const g = outlineOf(p).post[0];
+  if (!g) return;
+  ctx.fillStyle = INK;
+  ctx.fillRect(g.x - 1, g.y - 3, 3, 3);
+  ctx.fillStyle = "#fffdf3";
+  ctx.fillRect(g.x, g.y - 2, 1, 1);
+}
+
+/** Gary's notice, staked near the middle of the plot. */
+function notice(ctx: CanvasRenderingContext2D, p: PlotDef) {
+  const n = propCanvas("notice");
+  let cx = Math.floor(p.w / 2);
+  const cy = Math.floor(p.h / 2);
+  for (let r = 1; !inPlot(p, cx, cy) && r < 40; r++) cx = Math.floor(p.w / 2) + (r % 2 ? r : -r) / 2;
+  ctx.drawImage(n, Math.round(p.x + cx - n.width / 2), p.y + cy - n.height + 2);
+}
+
+const BUILT: Filing["status"][] = ["approved", "conditional"];
+
+function drawPlot(ctx: CanvasRenderingContext2D, p: PlotDef, f: Filing | undefined, built: Placement[], me: string) {
+  const style = REGIONS[p.region].boundary;
+  const mine = f?.filer === me;
+  if (!f || !BUILT.includes(f.status)) ctx.drawImage(mini(p, null, []), p.x, p.y);
+  if (!f) return surveyed(ctx, p);
+  if (f.status === "pending") {
+    surveyed(ctx, p);
+    return notice(ctx, p);
+  }
+  if (f.status === "committee") {
+    boundary(ctx, p, style, mine);
+    return notice(ctx, p);
+  }
+  if (BUILT.includes(f.status)) ctx.drawImage(mini(p, f, built), p.x, p.y);
+  boundary(ctx, p, style, mine);
+  permit(ctx, p);
+  if (mine) pennant(ctx, p, colourOf(f.filer));
+}
+
+function highlight(ctx: CanvasRenderingContext2D, id: number, colour: string) {
+  const p = PLOTS.find((q) => q.id === id);
+  if (!p) return;
+  ctx.fillStyle = colour;
+  for (const a of outlineOf(p).around) ctx.fillRect(a.x, a.y, 1, 1);
+}
+
+// --- residents ---------------------------------------------------------------
+
 function drawWalker(ctx: CanvasRenderingContext2D, w: Walker, look: Avatar, mine: boolean, t: number) {
+  // A shadow under the feet, then the resident.
+  ctx.save();
+  ctx.globalCompositeOperation = "multiply";
+  ctx.globalAlpha = 0.5;
+  ctx.fillStyle = C.SHADOW;
+  ctx.fillRect(Math.round(w.x) - 3, Math.round(w.y), 7, 1);
+  ctx.restore();
   const top = drawAvatar(ctx, look, w.x, w.y, !!w.moving, t, w.facing === -1);
   if (mine) {
     ctx.fillStyle = "#fff8e0";
@@ -231,16 +265,38 @@ function drawWalker(ctx: CanvasRenderingContext2D, w: Walker, look: Avatar, mine
 
 export function draw(ctx: CanvasRenderingContext2D, scene: Scene) {
   background ??= drawBackground();
+  canopy ??= oakCanopy();
+  const hour = hourNow();
+  const lamps = dark(hour);
   ctx.drawImage(background, 0, 0);
   drawUnder(ctx, scene.t);
-  for (const f of scene.held.values()) drawPlot(ctx, f, scene.built.get(f.id), f.filer === scene.me);
-  if (scene.hover) outline(ctx, scene.hover, "#ffffff88");
-  if (scene.selected) outline(ctx, scene.selected, "#fff8e0");
-  drawCritters(ctx, scene.t, scene.recent);
-  for (const w of [...scene.walkers].sort((a, b) => a.y - b.y)) drawWalker(ctx, w, scene.look(w.id), w.id === scene.me, scene.t);
-  drawAir(ctx, scene.t);
+  for (const p of PLOTS) {
+    const f = scene.held.get(p.id);
+    drawPlot(ctx, p, f, f ? (scene.built.get(f.id) ?? []) : [], scene.me);
+  }
+  if (scene.hover !== null && scene.hover !== scene.selected) highlight(ctx, scene.hover, "#ffffff70");
+  if (scene.selected !== null) highlight(ctx, scene.selected, "#fff8e0");
+
+  // Everything that stands, back to front.
+  const standing: { y: number; draw: () => void }[] = [
+    { y: LANDMARKS.office.y + LANDMARKS.office.h, draw: () => drawHut(ctx, scene.t, lamps) },
+    { y: LANDMARKS.board.y + LANDMARKS.board.h, draw: () => drawBoard(ctx) },
+    { y: LANDMARKS.oak.y + LANDMARKS.oak.h, draw: () => drawOak(ctx) },
+    ...critters(ctx, scene.t, scene.recent),
+    ...scene.walkers.map((w) => ({ y: w.y, draw: () => drawWalker(ctx, w, scene.look(w.id), w.id === scene.me, scene.t) })),
+  ];
+  for (const s of standing.sort((a, b) => a.y - b.y)) s.draw();
+  const c = LANDMARKS.canopy;
+  ctx.drawImage(canopy, c.x - 4, c.y - 4);
+  drawAir(ctx, scene.t, hour);
   const now = performance.now();
   for (const l of scene.letters) drawLetter(ctx, l, now);
+  grade(ctx, MAP_W, MAP_H, hour);
+  drawNight(ctx, scene.t, hour);
+  if (lamps) {
+    const o = LANDMARKS.office;
+    glow(ctx, o.x + 8, o.y + 2, 14);
+  }
 }
 
 // --- the post --------------------------------------------------------------
@@ -271,13 +327,18 @@ function pixels(ctx: CanvasRenderingContext2D, rows: string[], left: number, top
   );
 }
 
+/** Where a plot's letters land: on the plot, by its middle. */
+function landing(id: number) {
+  const p = PLOTS.find((q) => q.id === id)!;
+  return { x: p.x + Math.floor(p.w / 2) - 4, y: p.y + Math.floor(p.h / 2) - 3 };
+}
+
 function drawLetter(ctx: CanvasRenderingContext2D, l: Letter, now: number) {
   l.start ??= now;
   const age = now - l.start;
   const phase = letterPhase(l, now);
   if (phase === "done") return;
-  const { left, top } = plotOrigin(l.plot);
-  const home = { x: left + PLOT_W / 2 - 4, y: top + PLOT_H / 2 - 3 };
+  const home = landing(l.plot);
   const [a, b] = l.out ? [home, OFFICE] : [OFFICE, home];
   const colours = { k: INK, w: "#fffdf3" };
   if (phase === "flying") {
@@ -318,4 +379,3 @@ function drawLetter(ctx: CanvasRenderingContext2D, l: Letter, now: number) {
   }
   pixels(ctx, POCKET, b.x, b.y, colours);
 }
-
