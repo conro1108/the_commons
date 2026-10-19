@@ -243,6 +243,13 @@ function renderCard() {
     const box = form.querySelector("textarea")!;
     box.value = typed;
     if (typing) box.focus();
+    // Enter files it; an intent is one breath, so there's no need for a second line.
+    box.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
+        e.preventDefault();
+        form.requestSubmit();
+      }
+    });
     form.addEventListener("submit", (e) => {
       e.preventDefault();
       void claim(plot, form);
