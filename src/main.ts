@@ -3,7 +3,8 @@ import { look, PALETTE, propCanvas, propSize } from "./content/props.ts";
 import { BYLAWS } from "./rulebook.ts";
 import { BUILD_H, BUILD_W, MAP_H, MAP_W, MARGIN, PATH, PLOT_H, PLOT_W, ZOOM, plotAt, plotName, plotOrigin, type Plot } from "./layout.ts";
 import {
-  HELD, fileClaim, handlesFor, loadFilings, loadPlacements, move, paint, place, rehandle, rename, signIn, summonGary, supabase, unplace,
+  HELD, afterGoogle, avatarOf, fileClaim, handlesFor, keepPapers, loadFilings, loadPlacements, move, paint, pencilled, place, rehandle,
+  saveProfile, signIn, summonGary, supabase, unplace,
   type Filing, type Placement,
 } from "./net.ts";
 import type { RealtimeChannel } from "@supabase/supabase-js";
@@ -12,6 +13,8 @@ import {
   type Cells, type FocusScene, type Letter, type Walker,
 } from "./render.ts";
 import { GARY_LINES, garyAt } from "./life.ts";
+import { looksLike } from "./avatar.ts";
+import { openPapers, papersOpen } from "./papers.ts";
 
 const SPEED = 40; // art pixels per second
 const ZOOM_MS = 520; // map <-> plot
@@ -66,6 +69,7 @@ let drag: { p: Placement; dx: number; dy: number; x: number; y: number } | null 
 const pad = (n: number) => String(n).padStart(4, "0");
 const esc = (s: string) => s.replace(/[&<>"]/g, (c) => `&${{ "&": "amp", "<": "lt", ">": "gt", '"': "quot" }[c]};`);
 const touch = matchMedia("(pointer: coarse)").matches;
+const lookOf = (id: string) => looksLike(handles.get(id), avatarOf(id), id);
 const who = (id: string) => (id === me ? "you" : (handles.get(id) ?? "a resident"));
 const clamp = (v: number, lo: number, hi: number) => Math.min(Math.max(v, lo), Math.max(lo, hi));
 
@@ -138,24 +142,37 @@ function conditionHtml(f: Filing) {
     ${coming ? `<p class="meta">He has noticed more building and will be round again once it settles.</p>` : ""}</div>`;
 }
 
-// Your name on file, changed from the tag whenever you like; filings just use it.
-let renaming = false;
-let renameProblem = "";
+// Your papers: name and look, amended from the tag whenever you like.
+let kept = false; // signed with Google, not just pencilled into this browser
+
+function papers() {
+  openPapers({
+    me,
+    name: handles.get(me) ?? "",
+    avatar: avatarOf(me),
+    pencilled: !kept,
+    save: async (name, avatar) => {
+      const problem = await saveProfile(me, name, avatar);
+      if (!problem) {
+        channel?.send({ type: "broadcast", event: "renamed", payload: { id: me } });
+        renderAll();
+      }
+      return problem;
+    },
+    keep: keepPapers,
+    signOut: () => void supabase.auth.signOut(),
+  });
+}
 
 function renderTag() {
-  const typed = $("tag").querySelector<HTMLInputElement>("input[name=name]");
-  const draft = typed?.value;
-  const typing = document.activeElement === typed;
   const names = [...walkers.keys()].map(who).sort((a, b) => (a === "you" ? -1 : b === "you" ? 1 : a.localeCompare(b)));
   const held = [...filings.values()]
     .filter((f) => f.filer === me && (HELD.includes(f.status) || unread.has(f.id)))
     .sort((a, b) => a.plot_y - b.plot_y || a.plot_x - b.plot_x);
   const mine = handles.get(me) ?? "…";
   $("tag").innerHTML = `<h1>The Commons</h1><p class="meta">Administered by Gary. Here: ${names.map(esc).join(", ")}</p>
-    ${renaming
-      ? `<form class="filed-by">On file as <input name="name" maxlength="24" required value="${esc(mine)}"><button>Sign</button></form>`
-      : `<p class="meta">On file as <button class="plot-link rename">${esc(mine)}</button></p>`}
-    ${renameProblem ? `<p class="problem">${esc(renameProblem)}</p>` : ""}
+    <p class="meta">On file as <button class="plot-link rename" title="Amend your papers">${esc(mine)}</button>
+      ${kept ? "" : `<button class="plot-link keep" title="Pencilled in: kept in this browser only">pencilled in</button>`}</p>
     ${held.length
       ? `<p class="yours"><span class="swatch" style="background:${colourOf(me)}"></span>${held
           .map((f) => `<button data-filing="${f.id}" class="plot-link ${unread.has(f.id) ? "pending" : f.status}">${plotName({ x: f.plot_x, y: f.plot_y })}</button>`)
@@ -164,24 +181,7 @@ function renderTag() {
   for (const b of $("tag").querySelectorAll<HTMLButtonElement>("[data-filing]")) {
     b.addEventListener("click", () => visit(filings.get(Number(b.dataset.filing))!));
   }
-  $("tag").querySelector(".rename")?.addEventListener("click", () => {
-    renaming = true;
-    renderTag();
-    $("tag").querySelector<HTMLInputElement>("input[name=name]")!.select();
-  });
-  const form = $("tag").querySelector("form");
-  if (!form) return;
-  const input = form.querySelector("input")!;
-  if (draft !== undefined) input.value = draft;
-  if (typing) input.focus();
-  form.addEventListener("submit", async (e) => {
-    e.preventDefault();
-    const name = input.value.trim();
-    renameProblem = name === mine ? "" : ((await rename(me, name)) ?? "");
-    renaming = !!renameProblem;
-    if (!renameProblem) channel?.send({ type: "broadcast", event: "renamed", payload: { id: me } });
-    renderAll();
-  });
+  for (const b of $("tag").querySelectorAll(".rename, .keep")) b.addEventListener("click", papers);
 }
 
 /** Go to one of our plots: inside if it's granted, otherwise its card on the map. */
@@ -594,7 +594,7 @@ function drawZoom(now: number) {
     ox: Math.round(from.x + (to.x - from.x) * k - s * left),
     oy: Math.round(from.y + (to.y - from.y) * k - s * top),
   });
-  draw(ctx, { held: heldPlots(), built, me, hover: null, selected: null, walkers: [...walkers.values()], letters: [], t: Date.now(), recent: recent() });
+  draw(ctx, { held: heldPlots(), built, me, hover: null, selected: null, walkers: [...walkers.values()], look: lookOf, letters: [], t: Date.now(), recent: recent() });
   const fade = Math.max(0, (u - 0.65) / 0.35);
   if (fade > 0) {
     ctx.globalAlpha = fade;
@@ -814,11 +814,8 @@ canvas.addEventListener("contextmenu", (e) => {
 
 window.addEventListener("keydown", (e) => {
   if (e.key !== "Escape") return;
-  if (renaming) {
-    renaming = false;
-    renameProblem = "";
-    renderTag();
-  } else if (reading !== null) {
+  if (papersOpen()) return;
+  if (reading !== null) {
     reading = null;
     renderBoard();
   } else if (!board.hidden) closeBoard();
@@ -830,7 +827,7 @@ window.addEventListener("keydown", (e) => {
 const ARROWS: Record<string, [number, number]> = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] };
 const pressed = new Set<string>();
 function arrows(e: KeyboardEvent) {
-  if (!(e.key in ARROWS) || (e.target as HTMLElement).closest?.("input, textarea")) return;
+  if (!(e.key in ARROWS) || papersOpen() || (e.target as HTMLElement).closest?.("input, textarea")) return;
   e.preventDefault();
   const was = pressed.size;
   if (e.type === "keydown") pressed.add(e.key);
@@ -964,7 +961,9 @@ function step(dt: number) {
     const dx = w.tx - w.x;
     const dy = w.ty - w.y;
     const dist = Math.hypot(dx, dy);
-    if (dist < 0.01) continue;
+    w.moving = dist >= 0.01;
+    if (!w.moving) continue;
+    if (Math.abs(dx) > 0.01) w.facing = Math.sign(dx);
     const move = Math.min(dist, SPEED * dt);
     w.x += (dx / dist) * move;
     w.y += (dy / dist) * move;
@@ -991,13 +990,13 @@ function overlays(now: number, t: number) {
   bubble.hidden = !said || now > said.until;
   if (!bubble.hidden) Object.assign(bubble.style, screen(gary.x, gary.y - 17));
   const tag = $("nametag");
-  const over = mouse && [...walkers.values()].find((w) => Math.abs(mouse!.x - w.x) <= 3 && mouse!.y >= w.y - 8 && mouse!.y <= w.y + 1);
+  const over = mouse && [...walkers.values()].find((w) => Math.abs(mouse!.x - w.x) <= 5 && mouse!.y >= w.y - 14 && mouse!.y <= w.y + 1);
   const name = over ? who(over.id) : mouse && onGary(mouse) ? "Gary" : mouse && onBoard(mouse) ? "the notice board" : null;
   tag.hidden = !name || !bubble.hidden && name === "Gary";
   if (name) {
     tag.textContent = name;
     const at = over ?? (name === "Gary" ? gary : { x: BOARD.x + BOARD.w / 2, y: BOARD.y + 1 });
-    Object.assign(tag.style, screen(at.x, at.y - (over ? 9 : name === "Gary" ? 15 : 2)));
+    Object.assign(tag.style, screen(at.x, at.y - (over ? 18 : name === "Gary" ? 15 : 2)));
   }
   canvas.style.cursor = name && !over ? "pointer" : hover ? "pointer" : "";
 }
@@ -1019,7 +1018,7 @@ function frame(now: number) {
     follow();
     viewport(mapView);
     const t = Date.now();
-    draw(ctx, { held: heldPlots(), built, me, hover, selected, walkers: [...walkers.values()], letters, t, recent: recent() });
+    draw(ctx, { held: heldPlots(), built, me, hover, selected, walkers: [...walkers.values()], look: lookOf, letters, t, recent: recent() });
     post(now);
     placeCard();
     overlays(now, t);
@@ -1065,7 +1064,9 @@ function removePlacement(id: number) {
 }
 
 async function start() {
+  if (await afterGoogle()) return; // off to Google again, as the resident that account already is
   me = await signIn();
+  kept = !(await pencilled());
   const [loaded, placed] = await Promise.all([loadFilings(), loadPlacements()]);
   for (const f of loaded) upsert(f);
   for (const p of placed) placements.set(p.id, p);
@@ -1135,6 +1136,7 @@ async function start() {
 
   renderAll();
   requestAnimationFrame(frame);
+  if (!avatarOf(me)) papers(); // first time through the gate
 }
 
 resize();

@@ -4,6 +4,7 @@ import { look, propCanvas, propHas, propSize } from "./content/props.ts";
 import { BUILD_H, BUILD_W, COLS, MAP_H, MAP_W, MARGIN, PLOT_H, PLOT_W, ROWS, ZOOM, plotName, plotOrigin, type Plot } from "./layout.ts";
 import type { Filing, Placement } from "./net.ts";
 import { drawAir, drawCritters, drawUnder } from "./life.ts";
+import { drawAvatar, type Avatar } from "./avatar.ts";
 
 const GRASS = "#b2d878";
 const TUFT = "#98c463";
@@ -22,6 +23,8 @@ export interface Walker {
   id: string;
   x: number;
   y: number;
+  moving?: boolean;
+  facing?: number; // -1 or 1
 }
 
 export interface Scene {
@@ -31,6 +34,7 @@ export interface Scene {
   hover: Plot | null;
   selected: Plot | null;
   walkers: Walker[];
+  look: (id: string) => Avatar;
   letters: Letter[];
   t: number; // Date.now(), for the commons' own life
   recent: Plot[]; // newest granted plots, newest first: where Gary goes to look
@@ -339,22 +343,11 @@ export function colourOf(id: string) {
   return `hsl(${parseInt(id.slice(0, 6), 16) % 360} 55% 55%)`;
 }
 
-const BODY = [".kkk.", "kSSSk", "kSSSk", ".kkk.", "kBBBk", "kBBBk", ".k.k."];
-
-function drawWalker(ctx: CanvasRenderingContext2D, w: Walker, mine: boolean) {
-  const left = Math.round(w.x) - 2;
-  const top = Math.round(w.y) - 7;
-  const colours: Record<string, string> = { k: INK, S: "#f2d3b0", B: colourOf(w.id) };
-  BODY.forEach((row, y) =>
-    [...row].forEach((ch, x) => {
-      if (!colours[ch]) return;
-      ctx.fillStyle = colours[ch];
-      ctx.fillRect(left + x, top + y, 1, 1);
-    }),
-  );
+function drawWalker(ctx: CanvasRenderingContext2D, w: Walker, look: Avatar, mine: boolean, t: number) {
+  const top = drawAvatar(ctx, look, w.x, w.y, !!w.moving, t, w.facing === -1);
   if (mine) {
     ctx.fillStyle = "#fff8e0";
-    ctx.fillRect(left + 2, top - 3, 1, 1);
+    ctx.fillRect(Math.round(w.x), top - 3, 1, 1);
   }
 }
 
@@ -366,7 +359,7 @@ export function draw(ctx: CanvasRenderingContext2D, scene: Scene) {
   if (scene.hover) outline(ctx, scene.hover, "#ffffff88");
   if (scene.selected) outline(ctx, scene.selected, "#fff8e0");
   drawCritters(ctx, scene.t, scene.recent);
-  for (const w of [...scene.walkers].sort((a, b) => a.y - b.y)) drawWalker(ctx, w, w.id === scene.me);
+  for (const w of [...scene.walkers].sort((a, b) => a.y - b.y)) drawWalker(ctx, w, scene.look(w.id), w.id === scene.me, scene.t);
   drawAir(ctx, scene.t);
   const now = performance.now();
   for (const l of scene.letters) drawLetter(ctx, l, now);

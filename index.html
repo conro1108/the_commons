@@ -139,6 +139,80 @@
       @media (max-height: 500px) {
         #tag .hint { display: none; }
       }
+
+      /* Form R-1: your papers, over the commons. */
+      #papers { position: fixed; inset: 0; z-index: 20; display: grid; place-items: center; grid-template-columns: minmax(0, 1fr); padding: 16px;
+                background: #2e3a2a99; backdrop-filter: blur(3px); -webkit-backdrop-filter: blur(3px); animation: fade .2s ease-out; }
+      @keyframes fade { from { opacity: 0; } }
+      .papers { position: relative; width: min(760px, 100%); max-height: 100%; overflow: auto; overscroll-behavior: contain;
+                background: #fffdf3; border: 2px solid #402e3a; box-shadow: 5px 6px 0 #402e3a;
+                padding: 22px 26px 18px; animation: pop .25s ease-out;
+                background-image: repeating-linear-gradient(#fffdf3 0 27px, #f1ead2 27px 28px); }
+      .papers header { border-bottom: 3px double #402e3a; padding-bottom: 10px; margin-bottom: 4px; }
+      .papers .form-no { display: flex; justify-content: space-between; margin: 0 0 6px; font-size: 11px;
+                         text-transform: uppercase; letter-spacing: .14em; color: #7a6a8a; }
+      .papers h1 { font-size: 28px; letter-spacing: .04em; }
+      .papers header .meta { margin: 4px 0 0; }
+      .papers section { padding: 14px 0 4px; border-bottom: 1px dashed #c9b88f; }
+      .papers section:last-of-type { border-bottom: 0; }
+      .papers h2 { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+      .sec { display: inline-grid; place-items: center; width: 22px; height: 22px; border: 2px solid #402e3a;
+             background: #ffe9a8; font-size: 12px; }
+      .kinds { display: inline-flex; border: 2px solid #402e3a; box-shadow: 2px 2px 0 #402e3a; margin-bottom: 12px; }
+      .kinds button { margin: 0; border: 0; box-shadow: none; background: #fffdf3; font-weight: normal; padding: 5px 14px; }
+      .kinds button + button { border-left: 2px solid #402e3a; }
+      .kinds button[aria-selected=true] { background: #ffe9a8; font-weight: bold; }
+      .kinds button:active { transform: none; }
+      .meadow { display: grid; grid-template-columns: repeat(auto-fill, minmax(124px, 1fr)); gap: 10px; }
+      .creature { margin: 0; display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 10px 8px 8px;
+                  background: #fffdf3; font-weight: normal; text-align: center; box-shadow: 2px 2px 0 #402e3a; transition: transform .12s; }
+      .creature canvas { image-rendering: pixelated; width: 64px; height: 64px; margin-bottom: 4px; }
+      .creature b { font-size: 12px; line-height: 1.2; }
+      .creature small { font-size: 10.5px; line-height: 1.3; color: #7a6a8a; }
+      .creature:hover { transform: translateY(-2px); }
+      .creature.on { background: #ffe9a8; box-shadow: 3px 3px 0 #402e3a; outline: 2px solid #402e3a; outline-offset: 2px; }
+      .creature.on canvas { animation: hop .5s steps(2) infinite; }
+      @keyframes hop { 50% { transform: translateY(-4px); } }
+      .creature.filled { border: 2px dashed #9a9cb0; box-shadow: none; opacity: .7; cursor: default; }
+      .creature.filled:hover { transform: none; }
+      .creature.filled small { color: #b5404f; font-weight: bold; text-transform: uppercase; letter-spacing: .06em; }
+      .maker { display: grid; grid-template-columns: 184px 1fr; gap: 18px; align-items: start; }
+      .stage { position: sticky; top: 0; display: grid; justify-items: center; gap: 8px; padding: 12px 10px 10px;
+               border: 2px solid #402e3a; box-shadow: 2px 2px 0 #402e3a;
+               background: linear-gradient(#cfe9f2 0 62%, #b2d878 62% 100%); }
+      .stage canvas { image-rendering: pixelated; width: 160px; height: 152px; }
+      .stage .shuffle { margin: 0; width: 100%; background: #fffdf3; }
+      .part { margin-bottom: 10px; }
+      .part h3 { margin-bottom: 5px; }
+      .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+      .chip { margin: 0; padding: 0; box-shadow: 1px 1px 0 #402e3a; background: #fffdf3; }
+      .chip[aria-checked=true] { outline: 2px solid #402e3a; outline-offset: 2px; background: #ffe9a8; }
+      .swatch-chip { width: 26px; height: 26px; background: var(--c); }
+      .swatch-chip[aria-checked=true] { background: var(--c); }
+      .style-chip { display: grid; place-items: center; width: 34px; height: 40px; }
+      .style-chip canvas { image-rendering: pixelated; width: 24px; height: 32px; }
+      .papers input[name=name] { width: 100%; font: inherit; font-size: 18px; padding: 6px 2px; border: 0;
+                                 border-bottom: 2px solid #402e3a; background: transparent; outline: none; }
+      .papers input[name=name]:focus { border-bottom-color: #b07a1e; background: #fff6d8; }
+      .papers .kept .stamp { margin-right: 6px; }
+      .link { margin: 0; padding: 0; border: 0; background: none; box-shadow: none; font-weight: normal; text-decoration: underline; color: #7a6a8a; }
+      .papers footer { padding-top: 6px; }
+      .papers .actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 10px; }
+      .papers .actions button { margin: 0; padding: 7px 16px; }
+      .papers .submit { font-size: 15px; background: #ffd66b; }
+      .google { display: inline-flex; align-items: center; gap: 10px; background: #fff; }
+      .approved-stamp { position: absolute; inset: 0; display: grid; place-items: center; background: #fffdf3aa; }
+      .approved-stamp .stamp { font-size: 42px; padding: 4px 18px; border-width: 5px; background: #fffdf3; }
+      @media (prefers-reduced-motion: reduce) { #papers, .papers, .creature.on canvas { animation: none; } }
+      @media (max-width: 600px) {
+        #papers { padding: 0; align-items: end; }
+        .papers { padding: 16px 14px 14px; box-shadow: none; border-width: 2px 0 0; max-height: 100dvh; }
+        .papers h1 { font-size: 22px; }
+        .maker { grid-template-columns: 1fr; }
+        .stage { position: static; }
+        .meadow { grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); }
+        .papers .actions button { flex: 1; }
+      }
     </style>
   </head>
   <body>
@@ -159,6 +233,7 @@
       </section>
       <div id="board" hidden></div>
     </main>
+    <div id="papers" hidden></div>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

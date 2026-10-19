@@ -1,5 +1,6 @@
 import { createClient, type PostgrestError } from "@supabase/supabase-js";
 import type { PropDef } from "./content/canon/props.ts";
+import { parseAvatar, type Avatar } from "./avatar.ts";
 
 export const supabase = createClient(
   import.meta.env.VITE_SUPABASE_URL,
@@ -51,6 +52,41 @@ export async function signIn(): Promise<string> {
   return signed.user.id;
 }
 
+/** Whether these papers are only pencilled in: an anonymous session, gone with the browser. */
+export async function pencilled(): Promise<boolean> {
+  const { data } = await supabase.auth.getUser();
+  return data.user?.is_anonymous ?? true;
+}
+
+const back = () => ({ redirectTo: location.origin + location.pathname });
+
+/**
+ * Keep these papers: put a Google account on the anonymous user we already
+ * are, so the same id, plots and profile survive a cleared browser. Leaves the
+ * page for Google and comes back.
+ */
+export async function keepPapers(): Promise<string | null> {
+  const { error } = await supabase.auth.linkIdentity({ provider: "google", options: back() });
+  return error && error.message;
+}
+
+/** Sign in as a resident from another browser: whoever that Google account already is. */
+export async function signInWithGoogle(): Promise<string | null> {
+  const { error } = await supabase.auth.signInWithOAuth({ provider: "google", options: back() });
+  return error && error.message;
+}
+
+/**
+ * Back from Google with an account that's already somebody's: linking can't
+ * merge two residents, so become that one instead. True if we're off again.
+ */
+export async function afterGoogle(): Promise<boolean> {
+  const query = new URLSearchParams(location.search + "&" + location.hash.slice(1));
+  if (query.get("error_code") !== "identity_already_exists") return false;
+  history.replaceState(null, "", location.pathname);
+  return !(await signInWithGoogle());
+}
+
 export async function loadFilings(): Promise<Filing[]> {
   const { data, error } = await supabase.from("filings").select("*").order("id", { ascending: false }).limit(500);
   if (error) throw error;
@@ -58,28 +94,36 @@ export async function loadFilings(): Promise<Filing[]> {
 }
 
 const handles = new Map<string, string>();
+const avatars = new Map<string, Avatar | null>();
 
-/** Handles from app.profiles, the shared core every toy reads names from. */
+/** Handles and avatars from app.profiles, the shared core every toy reads names from. */
 export async function handlesFor(ids: string[]): Promise<Map<string, string>> {
   const missing = [...new Set(ids)].filter((id) => !handles.has(id));
   if (missing.length) {
-    const { data } = await supabase.schema("app").from("profiles").select("id, handle").in("id", missing);
-    for (const p of data ?? []) handles.set(p.id, p.handle);
+    const { data } = await supabase.schema("app").from("profiles").select("id, handle, avatar").in("id", missing);
+    for (const p of data ?? []) {
+      handles.set(p.id, p.handle);
+      avatars.set(p.id, parseAvatar(p.avatar));
+    }
   }
   return handles;
 }
 
-/** Look a handle up again, after word that it changed. */
+/** What someone looks like, if they've chosen; ask handlesFor first. */
+export const avatarOf = (id: string) => avatars.get(id) ?? null;
+
+/** Look someone up again, after word that their papers changed. */
 export async function rehandle(id: string) {
   handles.delete(id);
   return handlesFor([id]);
 }
 
-/** Put a name on file: the handle every toy shows for you. */
-export async function rename(id: string, name: string): Promise<string | null> {
-  const { error } = await supabase.schema("app").from("profiles").update({ handle: name, display_name: name }).eq("id", id);
+/** Put a name and a look on file: what every toy shows for you. */
+export async function saveProfile(id: string, name: string, avatar: Avatar): Promise<string | null> {
+  const { error } = await supabase.schema("app").from("profiles").update({ handle: name, display_name: name, avatar }).eq("id", id);
   if (!error) {
     handles.set(id, name);
+    avatars.set(id, avatar);
     return null;
   }
   if (error.code === "23505") return "That name is already on file for someone else.";

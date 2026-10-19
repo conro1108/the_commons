@@ -3,7 +3,7 @@
 // t = Date.now(), so every resident sees Gary in the same place without a
 // server. All in map art pixels, whole-pixel fillRects only.
 
-import { K } from "./content/canon/props.ts";
+import { K, type PropDef } from "./content/canon/props.ts";
 import { COLS, MAP_H, MAP_W, MARGIN, PATH, PLOT_H, PLOT_W, ROWS, plotOrigin, type Plot } from "./layout.ts";
 
 const INK = K;
@@ -154,6 +154,7 @@ const GARY = [
   ".kkkkkkkkk.",
 ];
 const GARY_COLOURS = { k: INK, B: "#c4c6d4", S: "#9a9cb0", T: "#6f6a80", b: "#6f6a80", e: "#3a2b3f" };
+export const GARY_SPRITE: PropDef = { rows: GARY, palette: GARY_COLOURS };
 const CLIPBOARD = ["bb", "wb", "wb"];
 const CLIP_COLOURS = { b: "#7a5230", w: "#fffdf3" };
 

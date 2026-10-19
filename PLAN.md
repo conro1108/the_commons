@@ -92,7 +92,7 @@ No fail states: spread is never damage, a dispute is never a loss.
 | Service | Its job here |
 |---|---|
 | **Supabase Postgres + RLS** | All state. Clients write directly only where RLS can judge it alone (props on your own plot, a filing row in `pending`). |
-| **Supabase Auth** | Anonymous sign-in; link GitHub/Google later to keep your plot. |
+| **Supabase Auth** | Anonymous sign-in; Google via `linkIdentity()` keeps your papers (same uuid). Look and name live in `app.profiles`, filled in on Form R-1 (`src/papers.ts`). |
 | **Supabase Realtime** | Postgres Changes for the map and stamps; **Broadcast** for avatars walking around (never persisted); **Presence** for who's on the commons, which also feeds path wear. |
 | **pg_cron** | The world tick (every few minutes) and draining Gary's queue (every five seconds). Vercel Hobby crons are daily-only, so anything frequent lives here. |
 | **Supabase Queues (pgmq)** | Gary's in-tray. A filing insert enqueues; retries and backlog for free. |
