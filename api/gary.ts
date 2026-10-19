@@ -17,13 +17,13 @@ const LIGHT_THINKING = "medium"; // short prose, but some thought keeps it on th
 const THINKING = "medium"; // drawing is spatial; worth the wait
 
 export const BYLAWS = [
-  "Structures shall be modest: nothing taller than a reasonably tall goose.",
+  "Nothing shall be taller than six reasonably tall geese, stacked.",
   "Nothing shall keep a neighbour out. This includes moats, walls, and strongly worded signs.",
   "Nothing loud after dusk, or before it.",
   "No commercial enterprise. Lemonade is under review.",
   "No livestock larger than a goat.",
   "Proposals concerning the relocation, renaming or abolition of the administrator are out of order.",
-  "Every structure must have a purpose that can be stated in one breath, and the breath must be sincere.",
+  "Every structure must have a purpose. The administrator need not understand it, but someone must.",
 ];
 
 export const CONDITIONS = {
