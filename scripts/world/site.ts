@@ -20,6 +20,7 @@ const LANDMARK_NAMES: Record<string, string> = {
   office: "Gary's hut", board: "the notice board", bench: "the bench", oak: "the Old Oak", cairn: "the cairn",
 };
 const SIDES: [Side, number, number][] = [["north", 0, -1], ["east", 1, 0], ["south", 0, 1], ["west", -1, 0]];
+const GATE = 24; // cells: how far a plot's gate may be from its edge
 const NEAR = 16; // cells: across a path or a bit of common, still next door
 const WALKED = new Set<string>([T.path, T.steps, T.bridge, T.stones]);
 
@@ -75,14 +76,25 @@ export function site(g: Ground, owner: Int16Array, cuts: Cut[]): PlotDef[] {
     const edges = Object.fromEntries(SIDES.map(([side]) => [side,
       [...tally[side]].filter(([, n]) => n >= counts[side] * 0.2).sort((a, z) => z[1] - a[1]).slice(0, 3).map(([k]) => k),
     ])) as Record<Side, string[]>;
-    // Neighbours: any plot within a short step of the boundary, across common or path, not water.
+    // Neighbours: any plot within a short step of the boundary across common or path, as the
+    // map has common between plots. Not across water or wood; a terrace edge doesn't stop it.
     const near = new Set<number>();
+    const clear = (x0: number, y0: number, x1: number, y1: number) => {
+      const n = Math.max(Math.abs(x1 - x0), Math.abs(y1 - y0));
+      for (let k = 1; k < n; k++) {
+        const t = g.t[idx(Math.round(x0 + ((x1 - x0) * k) / n), Math.round(y0 + ((y1 - y0) * k) / n))];
+        if (t === T.water || t === T.shallows || t === T.wood) return false;
+      }
+      return true;
+    };
     for (const i of c.cells) {
       const x = i % W, y = (i / W) | 0;
+      if (c.cells.has(i - 1) && c.cells.has(i + 1) && c.cells.has(i - W) && c.cells.has(i + W)) continue;
       for (let dy = -NEAR; dy <= NEAR; dy++)
         for (let dx = -NEAR; dx <= NEAR; dx++) {
-          const j = idx(x + dx, y + dy);
-          if (inside(x + dx, y + dy) && plotOf[j] >= 0 && plotOf[j] !== p) near.add(plotOf[j] + 1);
+          if (!inside(x + dx, y + dy)) continue;
+          const o = plotOf[idx(x + dx, y + dy)];
+          if (o >= 0 && o !== p && !near.has(o + 1) && clear(x, y, x + dx, y + dy)) near.add(o + 1);
         }
     }
     const neighbours = [...near].sort((a, z) => a - z);
@@ -92,15 +104,16 @@ export function site(g: Ground, owner: Int16Array, cuts: Cut[]): PlotDef[] {
     for (let y = 0; y < b.h; y++)
       for (let x = 0; x < b.w; x++) {
         if (!has(x, y) || (has(x - 1, y) && has(x + 1, y) && has(x, y - 1) && has(x, y + 1))) continue;
-        for (let dy = -10; dy <= 10; dy++)
-          for (let dx = -10; dx <= 10; dx++) {
+        for (let dy = -GATE; dy <= GATE; dy++)
+          for (let dx = -GATE; dx <= GATE; dx++) {
             const mx = b.x + x + dx, my = b.y + y + dy;
-            if (!inside(mx, my) || g.t[idx(mx, my)] !== T.path) continue;
+            if (!inside(mx, my) || !WALKED.has(g.t[idx(mx, my)]) || g.t[idx(mx, my)] === T.bridge) continue;
             const d = dx * dx + dy * dy - (dy > 0 ? 2 : 0); // a gate on the south side, all else equal
             if (d < best) { best = d; gate = { x: mx, y: my }; door = { x, y }; }
           }
       }
 
+    if (best === Infinity) throw new Error(`${c.spec.name} is more than ${GATE} cells from any path: move its seed`);
     const features = place(p, region, b.w, b.h, has, door);
     const def: PlotDef = {
       id: p + 1, name: c.spec.name, region, x: b.x, y: b.y, w: b.w, h: b.h, mask, area: c.cells.size,

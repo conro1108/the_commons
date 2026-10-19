@@ -59,6 +59,8 @@ export const SIZES: Record<string, [number, number]> = {
 };
 const PROPS = Object.keys(SIZES);
 const GROUND: Record<string, string> = { ".": "grass", p: "path", c: "stone", s: "soil", w: "water", m: "wildflowers" };
+/** The ground kinds as Gary names them on one plot: '.' is its own ground, unpainted. Same words writing a condition and inspecting it. */
+const groundKey = (p: PlotDef): Record<string, string> => ({ ...GROUND, ".": `the plot's own ground (${regionOf(p).soil}), unpainted` });
 
 // --- the land -----------------------------------------------------------------
 
@@ -318,8 +320,8 @@ You are earnest, procedural and kind, and you take very small things extremely s
 A filing has been approved with conditions. Write the condition: one sentence beginning "Must", at most 20 words, plain text, no markdown.
 Make it about this filing in particular: a small, serious, slightly absurd requirement, in proportion to the intent.
 It must be something the filer can meet on their own plot: by what they put there and where, how they paint the ground ("ground"), or by having a neighbour on a plot next door.
-"plot" describes the plot: its size and shape, its ground and weather, the features already on it, and what lies along each side (north is the top). Suit the condition to the plot where you can: it may ask for things along a side ("a hedge along its west side, against the wind"), beside a feature already there ("beside the spring"), or on a kind of ground. Never ask for anything off the plot.
-If "concern" is given, the filing was approved only on condition because it does not suit this plot: "cramped" means it is too big or ambitious for the plot's size, "against the grain" means it is wrong for the plot's ground or weather. Make the condition put that right on the plot.
+"plot" describes the plot: its size and shape, its ground and weather, the features already on it, and what lies along each side (north is the top). Suit the condition to the plot where you can: it may ask for things along a side ("a hedge along its west side, against the wind"), beside a feature already there ("beside the spring"), or on a kind of ground. Features stay as they are: nothing can be built on them or painted under them. Never ask for anything off the plot.
+If "concern" is given, the filing was approved only on condition because it does not suit this plot: "cramped" means it is too big or ambitious for the plot's size, "against the grain" means it is wrong for the plot's ground or weather. Make the condition put that right on the plot; a cramped filing may be held to a number of things ("no more than four trees").
 If "debate" is given, the Commons Committee has argued over this filing: make the condition answer the concerns its members raised, recast as something the plot can show (a worry about noise might become a hedge between it and the neighbours).
 If "amend" is given, Gary has audited the plot since it was granted and found it out of order: "amend.departs" means what's built has strayed from the intent, "amend.lapsed" is an earlier condition no longer met, and "amend.on_the_plot" is what's there now. Write an amended condition, up to 30 words: it requires putting right what's wrong (restoring the lapsed condition, or bringing the plot back to its intent) and adds one small further requirement, as administrators do. Ask for what's missing rather than for things to be taken away: extra things may stay.
 If "write_in" is false, any things it asks for must be from "things". If it is true, it must ask for one particular thing that is not in "things", specific and a little unexpected, suited to the intent: the filer will write it in by name, and Gary will draw it.
@@ -333,7 +335,7 @@ Must be positioned so that the pond can be looked at without craning, and must p
 const CONDITION_CHECKS = {
   irrelevant: "Does the condition have nothing to do with what the filing's intent describes?",
   unmeetable:
-    "Is the condition impossible to meet by putting things on the plot (listed ones, or any item written in by name), arranging them, painting its ground, or having a neighbour next door? It is, if it depends on which way something faces, or on its size, colour, wording or state: none of those are recorded. It is, if it needs anything done off the plot, or a feature the plot does not have.",
+    "Is the condition impossible to meet by putting things on the plot (listed ones, or any item written in by name), arranging them, painting its ground, or having a neighbour next door? It is, if it depends on which way something faces, or on its size, colour, wording or state: none of those are recorded. It is, if it needs anything done off the plot, or a feature the plot does not have. A limit on how many of something there may be is meetable: they can be counted.",
   unfit: "Is the condition crude or unkind, or does it contain a link, a handle or personal information?",
 } as const;
 
@@ -352,7 +354,7 @@ export async function writeCondition(
 ) {
   const { plot, debate, amend, concern, writeIn = Math.random() < 0.2 } = opts;
   const input = {
-    filing: pad(filing.id), intent: filing.intent, things: PROPS, ground: Object.values(GROUND), write_in: writeIn,
+    filing: pad(filing.id), intent: filing.intent, things: PROPS, ground: Object.values(groundKey(plot)), write_in: writeIn,
     plot: { ...siteOf(plot), features: plot.features.map((f) => f.kind.replace("_", " ")), sides: plot.edges },
     ...(debate && { debate }), ...(amend && { amend }), ...(concern && { concern }),
   };
@@ -752,7 +754,7 @@ export async function survey(db: Db, f: { id: number; plot: number; ground: stri
     plot: `${label(plot)}, on ${native.name}. Its box is ${W} cells wide and ${H} deep, north at the top; the plot is the non-blank cells of "ground". Each thing covers the cells given, counted across and down from the box's top-left corner`,
     site: plot.particulars,
     sides: plot.edges,
-    things, beside, ground, key: { ...GROUND, ".": `${native.soil} (unpainted)` }, neighbours: (next ?? []).length,
+    things, beside, ground, key: groundKey(plot), neighbours: (next ?? []).length,
   };
 }
 
@@ -857,6 +859,12 @@ async function auditPlot(db: Db, id: number): Promise<Response> {
   return Response.json({ compliant: false, condition: result.condition, remark });
 }
 
+/** JSON with keys sorted, so evidence back from jsonb compares equal to the same evidence fresh. */
+const stable = (v: unknown): string =>
+  Array.isArray(v) ? `[${v.map(stable).join(",")}]`
+  : v && typeof v === "object" ? `{${Object.keys(v).sort().map((k) => `${JSON.stringify(k)}:${stable((v as Record<string, unknown>)[k])}`).join(",")}}`
+  : JSON.stringify(v);
+
 /** Go round to one plot. The same evidence never gets a second look. */
 async function inspectPlot(db: Db, id: number): Promise<Response> {
   const { data: f } = await db.from("filings").select("*").eq("id", id).single();
@@ -864,7 +872,7 @@ async function inspectPlot(db: Db, id: number): Promise<Response> {
   const evidence = await survey(db, f);
   const { data: last } = await db
     .from("inspections").select("evidence").eq("filing", id).order("id", { ascending: false }).limit(1).maybeSingle();
-  if (last && JSON.stringify(last.evidence) === JSON.stringify(evidence)) return Response.json({ skipped: "unchanged" });
+  if (last && stable(last.evidence) === stable(evidence)) return Response.json({ skipped: "unchanged" });
 
   const { met, remark, answers } = await inspect(f, evidence);
   const at = new Date().toISOString();

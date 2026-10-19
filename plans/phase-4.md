@@ -84,7 +84,10 @@ trapezoid on the slope. Not rectangles, not Voronoi soup. Each has a name a
 clerk would give it ("the Wedge", "Long Strip", "Sluice Corner", "the
 Nook"), a region, a few site features (fixed: a boulder, a stump, a spring,
 molehills, an old post, oak roots, a puddle that never dries), and a gate on
-a path. Neighbours are plots that share a boundary, not grid adjacency.
+a path. Neighbours are plots within a short step (16 cells) of each other across
+common or path, not across water or wood (a terrace edge doesn't stop it): plots
+have common land between them, so "sharing a boundary" would leave half the map
+with no neighbours and the neighbour condition unmeetable.
 
 **Baked, not generated at runtime.** `npm run world` runs `scripts/world.ts`,
 which composes the map and writes `src/world/plots.json` (a `World`: regions +
@@ -193,5 +196,8 @@ SURROUND                              // fill colour round the close-up
       routes, ambient life per region, day/night grade. `dev/map.html?hour=`.
 - [x] Close-up + papers: masked build view over the real surroundings, native ground, features, particulars card, routes.
       `dev/plot.html?plot=N`.
-- [ ] Integrated, checked in the browser (claim → ruling → build → map), pushed
-- [ ] Review (negotiate)
+- [x] Integrated, checked in the live app (claim → Gary's ruling by post → step inside), pushed
+- [x] Review (negotiate): fixed minis rebuilt every frame, six gates off any path, covenant votes in the
+      minutes, one ground vocabulary for conditions and inspections, the pending notice, in_plot's parameter
+      names, the evidence comparison. Neighbours contested: kept generous (16 cells), now not across water or
+      wood; reviewer conceded. Back office exposing private filings is pre-existing and deliberate; left.

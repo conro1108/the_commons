@@ -31,3 +31,14 @@ export const rgb = (hex: string): RGB => {
 export const mix = (a: RGB, b: RGB, t: number): RGB => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
 
 export const hex = ([r, g, b]: RGB) => `#${((1 << 24) | (Math.round(r) << 16) | (Math.round(g) << 8) | Math.round(b)).toString(16).slice(1)}`;
+
+/**
+ * A canvas for something baked once and kept: backed by memory rather than the
+ * GPU, so a lost graphics context (a phone backgrounding the tab) can't blank it.
+ */
+export function keep(w: number, h: number): { c: HTMLCanvasElement; ctx: CanvasRenderingContext2D } {
+  const c = document.createElement("canvas");
+  c.width = w;
+  c.height = h;
+  return { c, ctx: c.getContext("2d", { willReadFrequently: true })! };
+}

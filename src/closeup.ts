@@ -9,7 +9,7 @@ import { REGIONS, ZOOM, inPlot, type PlotDef } from "./world/index.ts";
 import type { Boundary } from "./world/types.ts";
 import type { Filing, Placement } from "./net.ts";
 import { INK, mapGround } from "./render.ts";
-import { hash } from "./map/noise.ts";
+import { hash, keep } from "./map/noise.ts";
 import { grade } from "./light.ts";
 
 /** Commons shown round the plot up close, in art px. */
@@ -197,11 +197,10 @@ function groundCanvas(plot: PlotDef, f: Filing): HTMLCanvasElement {
   const ground = f.ground ?? empty(plot);
   const hit = grounds.get(f.id);
   if (hit?.ground === ground) return hit.c;
-  const c = hit?.c ?? document.createElement("canvas");
-  c.width = plot.w * ZOOM;
-  c.height = plot.h * ZOOM;
-  c.getContext("2d")!.clearRect(0, 0, c.width, c.height);
-  paintGround(c.getContext("2d")!, ground, f.id, plot);
+  const c = hit?.c ?? keep(plot.w * ZOOM, plot.h * ZOOM).c;
+  const ctx = c.getContext("2d", { willReadFrequently: true })!;
+  ctx.clearRect(0, 0, c.width, c.height);
+  paintGround(ctx, ground, f.id, plot);
   grounds.set(f.id, { ground, c });
   return c;
 }
@@ -218,10 +217,9 @@ function surround(plot: PlotDef): HTMLCanvasElement {
   if (c) return c;
   const { w, h } = focusSize(plot);
   const pad = FOCUS_PAD / ZOOM;
-  c = document.createElement("canvas");
-  c.width = w;
-  c.height = h;
-  const ctx = c.getContext("2d")!;
+  const kept = keep(w, h);
+  c = kept.c;
+  const ctx = kept.ctx;
   ctx.imageSmoothingEnabled = false;
   ctx.fillStyle = SURROUND; // past the map's edge
   ctx.fillRect(0, 0, w, h);
@@ -283,6 +281,12 @@ function fenceOf(plot: PlotDef) {
       if (gate <= 2) continue;
       (gate === 3 ? f.posts : f.fence).push(cell);
     }
+  // Two gateposts, one either side: the nearest pair that isn't side by side.
+  const [a, ...rest] = f.posts;
+  const b = rest.find((q) => Math.abs(q.x - a.x) + Math.abs(q.y - a.y) >= 3);
+  const keepPosts = a ? (b ? [a, b] : [a]) : [];
+  f.fence.push(...f.posts.filter((q) => !keepPosts.includes(q))); // the rest are just fence
+  f.posts = keepPosts;
   fences.set(plot.id, f);
   return f;
 }

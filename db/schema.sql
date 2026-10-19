@@ -66,11 +66,12 @@ insert into the_commons.plots (id, name, region, w, h, mask) values
 -- </plots>
 
 -- Whether a build cell (x, y) on a plot is part of it.
-create function the_commons.in_plot(plot smallint, x int, y int) returns boolean
+-- Positional parameters, so a column ever added to plots can't shadow them.
+create function the_commons.in_plot(smallint, int, int) returns boolean
 language sql stable security definer set search_path = '' as $$
   select exists (select 1 from the_commons.plots p
-    where p.id = plot and x between 0 and p.w - 1 and y between 0 and p.h - 1
-      and substr(p.mask, y * p.w + x + 1, 1) = '#')
+    where p.id = $1 and $2 between 0 and p.w - 1 and $3 between 0 and p.h - 1
+      and substr(p.mask, $3 * p.w + $2 + 1, 1) = '#')
 $$;
 grant execute on function the_commons.in_plot(smallint, int, int) to anon, authenticated;
 

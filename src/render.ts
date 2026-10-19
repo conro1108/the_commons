@@ -8,7 +8,7 @@ import { mini } from "./closeup.ts";
 import { paintGround } from "./map/ground.ts";
 import { bakeScenery, oakCanopy } from "./map/scenery.ts";
 import { drawBoard, drawHut, drawOak } from "./map/landmarks.ts";
-import { hash } from "./map/noise.ts";
+import { hash, keep } from "./map/noise.ts";
 import { critters, drawAir, drawNight, drawUnder } from "./life.ts";
 import { drawAvatar, type Avatar } from "./avatar.ts";
 import { dark, glow, grade, hourNow } from "./light.ts";
@@ -82,10 +82,7 @@ let canopy: HTMLCanvasElement | null = null;
 export const mapGround = () => (background ??= drawBackground());
 
 function drawBackground(): HTMLCanvasElement {
-  const c = document.createElement("canvas");
-  c.width = MAP_W;
-  c.height = MAP_H;
-  const ctx = c.getContext("2d")!;
+  const { c, ctx } = keep(MAP_W, MAP_H);
   ctx.putImageData(paintGround(), 0, 0);
   bakeScenery(ctx);
   const bench = propCanvas("bench");
@@ -212,18 +209,24 @@ function permit(ctx: CanvasRenderingContext2D, p: PlotDef) {
 /** Gary's notice, staked near the middle of the plot. */
 function notice(ctx: CanvasRenderingContext2D, p: PlotDef) {
   const n = propCanvas("notice");
-  let cx = Math.floor(p.w / 2);
-  const cy = Math.floor(p.h / 2);
-  for (let r = 1; !inPlot(p, cx, cy) && r < 40; r++) cx = Math.floor(p.w / 2) + (r % 2 ? r : -r) / 2;
+  // The plot cell nearest its box's middle.
+  let cx = Math.floor(p.w / 2), cy = Math.floor(p.h / 2), best = Infinity;
+  for (let y = 0; y < p.h; y++)
+    for (let x = 0; x < p.w; x++) {
+      const d = (x - p.w / 2) ** 2 + (y - p.h / 2) ** 2;
+      if (inPlot(p, x, y) && d < best) { best = d; cx = x; cy = y; }
+    }
   ctx.drawImage(n, Math.round(p.x + cx - n.width / 2), p.y + cy - n.height + 2);
 }
 
 const BUILT: Filing["status"][] = ["approved", "conditional"];
+/** Nothing built: one list, so the miniatures' cache recognises it frame to frame. */
+const NONE: Placement[] = [];
 
 function drawPlot(ctx: CanvasRenderingContext2D, p: PlotDef, f: Filing | undefined, built: Placement[], me: string) {
   const style = REGIONS[p.region].boundary;
   const mine = f?.filer === me;
-  if (!f || !BUILT.includes(f.status)) ctx.drawImage(mini(p, null, []), p.x, p.y);
+  if (!f || !BUILT.includes(f.status)) ctx.drawImage(mini(p, null, NONE), p.x, p.y);
   if (!f) return surveyed(ctx, p);
   if (f.status === "pending") {
     surveyed(ctx, p);
@@ -272,7 +275,7 @@ export function draw(ctx: CanvasRenderingContext2D, scene: Scene) {
   drawUnder(ctx, scene.t);
   for (const p of PLOTS) {
     const f = scene.held.get(p.id);
-    drawPlot(ctx, p, f, f ? (scene.built.get(f.id) ?? []) : [], scene.me);
+    drawPlot(ctx, p, f, f ? (scene.built.get(f.id) ?? NONE) : NONE, scene.me);
   }
   if (scene.hover !== null && scene.hover !== scene.selected) highlight(ctx, scene.hover, "#ffffff70");
   if (scene.selected !== null) highlight(ctx, scene.selected, "#fff8e0");

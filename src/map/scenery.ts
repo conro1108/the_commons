@@ -6,7 +6,7 @@
 import { LANDMARKS, MAP_H, MAP_W, plotAt } from "../world/index.ts";
 import * as C from "../content/palette.ts";
 import { DEPTH, REGIONS_AT, TERRAIN } from "./ground.ts";
-import { hash, hex, mix, noise, rgb } from "./noise.ts";
+import { hash, hex, keep, mix, noise, rgb } from "./noise.ts";
 
 const W = MAP_W, H = MAP_H;
 const at = (x: number, y: number) => (x < 0 || y < 0 || x >= W || y >= H ? null : TERRAIN[y * W + x]);
@@ -201,10 +201,7 @@ export function bakeScenery(ctx: CanvasRenderingContext2D) {
 /** The Old Oak's canopy: drawn over everything, walkers included, since they pass under it. */
 export function oakCanopy(): HTMLCanvasElement {
   const { x, y, w, h } = LANDMARKS.canopy;
-  const c = document.createElement("canvas");
-  c.width = w + 8;
-  c.height = h + 8;
-  const ctx = c.getContext("2d")!;
+  const { c, ctx } = keep(w + 8, h + 8);
   ctx.translate(-x + 4, -y + 4);
   const parts: [number, number, number][] = [[0.5, 0.42, 11], [0.24, 0.55, 8], [0.76, 0.55, 8], [0.36, 0.3, 8], [0.66, 0.28, 9], [0.5, 0.7, 8], [0.18, 0.36, 6], [0.84, 0.38, 6]];
   const ramp = [C.FOLIAGE[0], C.FOLIAGE[1], C.FOLIAGE[2], C.FOLIAGE[3], hex(mix(rgb(C.FOLIAGE[4]), rgb("#e6d47a"), 0.25))];
