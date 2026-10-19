@@ -8,10 +8,8 @@ import {
   type Filing, type Placement,
 } from "./net.ts";
 import type { RealtimeChannel } from "@supabase/supabase-js";
-import {
-  BOARD, DIRT, FOCUS_H, FOCUS_PAD, FOCUS_W, HILLS, colourOf, draw, drawFocus, land, letterPhase, placementAt, plotKey,
-  type Cells, type FocusScene, type Letter, type Walker,
-} from "./render.ts";
+import { BOARD, DIRT, HILLS, colourOf, draw, letterPhase, plotKey, type Letter, type Walker } from "./render.ts";
+import { FOCUS_H, FOCUS_PAD, FOCUS_W, drawFocus, land, placementAt, type Cells, type FocusScene } from "./closeup.ts";
 import { GARY_LINES, garyAt } from "./life.ts";
 import { looksLike } from "./avatar.ts";
 import { openPapers, papersOpen } from "./papers.ts";
