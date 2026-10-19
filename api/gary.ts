@@ -254,6 +254,7 @@ You are earnest, procedural and kind, and you take very small things extremely s
 A filing has been approved with conditions. Write the condition: one sentence beginning "Must", at most 20 words, plain text, no markdown.
 Make it about this filing in particular: a small, serious, slightly absurd requirement, in proportion to the intent.
 It must be something the filer can meet on their own plot: by what they put there and where, how they paint the ground ("ground"), or by having a neighbour on a plot next door.
+If "debate" is given, the Commons Committee has argued over this filing: make the condition answer the concerns its members raised, recast as something the plot can show (a worry about noise might become a hedge between it and the neighbours).
 If "write_in" is false, any things it asks for must be from "things". If it is true, it must ask for one particular thing that is not in "things", specific and a little unexpected, suited to the intent: the filer will write it in by name, and Gary will draw it.
 Never require anything off the plot, anything only Gary could do, or anything that can't be seen.
 The plot records only which things are there, where they stand, the ground and the neighbours. Things have no facing, orientation, size, colour, wording or state, so never require any of those.
@@ -270,10 +271,10 @@ const CONDITION_CHECKS = {
 } as const;
 
 /** Gary writes a condition for this filing, checked like a permit; the stock one if it won't do twice. */
-export async function writeCondition(filing: { id: number; intent: string }, stock: Condition) {
+export async function writeCondition(filing: { id: number; intent: string }, stock: Condition, debate?: string[]) {
   // Now and then he asks for something off the palette, to be written in. Code decides how often, not the model.
   const writeIn = Math.random() < 0.2;
-  const input = { filing: pad(filing.id), intent: filing.intent, things: PROPS, ground: Object.values(GROUND), write_in: writeIn };
+  const input = { filing: pad(filing.id), intent: filing.intent, things: PROPS, ground: Object.values(GROUND), write_in: writeIn, ...(debate && { debate }) };
   const tries: { text: string; checks: Record<string, number>; problems: string[] }[] = [];
   for (let attempt = 0; attempt < 2; attempt++) {
     const last = tries.at(-1);
@@ -413,7 +414,8 @@ export async function sit(filing: { id: number; intent: string }) {
   });
   const verdict = tally(members.map((m) => m.vote), answers.condition.choice as Condition);
   if (!verdict) return null;
-  const written = verdict.condition ? await writeCondition(filing, verdict.condition) : null;
+  const debate = members.filter((m) => m.speech).map((m) => `${m.seat}: ${m.speech}`);
+  const written = verdict.condition ? await writeCondition(filing, verdict.condition, debate) : null;
 
   // The clerk writes up the finding; Jev checks it against the speeches. One more go, then the count alone.
   const input = {
