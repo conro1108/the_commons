@@ -76,61 +76,78 @@ export function walkable(x: number, y: number): boolean {
 // --- getting about -----------------------------------------------------------
 
 const TRODDEN: Terrain[] = ["path", "steps", "bridge", "stones"];
-const trodden = new Uint8Array(MAP_W * MAP_H);
-for (let i = 0; i < trodden.length; i++) trodden[i] = TRODDEN.includes(TERRAIN[String.fromCharCode(terrain[i])]) ? 1 : 0;
+// What a step onto each cell costs: paths are cheapest, so routes keep to them
+// where they reasonably can; 0 is nowhere a resident can stand.
+const cost = new Float32Array(MAP_W * MAP_H);
+for (let i = 0; i < cost.length; i++) {
+  const x = i % MAP_W, y = (i / MAP_W) | 0;
+  cost[i] = !walkable(x + 0.5, y + 0.5) ? 0 : TRODDEN.includes(TERRAIN[String.fromCharCode(terrain[i])]) ? 1 : 2.5;
+}
 
-/** The nearest trodden cell to a point. */
-function onPath({ x, y }: Point): number {
+/** The nearest cell a resident can stand on. */
+function nearestStanding({ x, y }: Point): number {
   const cx = Math.floor(x), cy = Math.floor(y);
   for (let r = 0; r < 80; r++)
     for (let dy = -r; dy <= r; dy++)
       for (let dx = -r; dx <= r; dx++) {
         if (Math.max(Math.abs(dx), Math.abs(dy)) !== r || !inMap(cx + dx, cy + dy)) continue;
         const i = (cy + dy) * MAP_W + cx + dx;
-        if (trodden[i]) return i;
+        if (cost[i]) return i;
       }
   return -1;
 }
 
+/** Nothing solid on the straight line between two points. */
+function clear(a: Point, b: Point): boolean {
+  const n = Math.ceil(Math.hypot(b.x - a.x, b.y - a.y) * 6);
+  for (let i = 1; i < n; i++) if (!walkable(a.x + ((b.x - a.x) * i) / n, a.y + ((b.y - a.y) * i) / n)) return false;
+  return true;
+}
+
 /**
- * From one point to another along the paths: onto the nearest path, along it,
- * and off at the nearest point to the destination. Ends included; a handful of
- * points, straightened where the path runs straight.
+ * From one point to another over ground a resident can stand on, by the paths
+ * where they go the right way. Somewhere unreachable or solid ends at the
+ * nearest reachable spot. Ends included; a handful of points, straightened
+ * where the way runs straight.
  */
 export function route(from: Point, to: Point): Point[] {
-  const a = onPath(from), b = onPath(to);
-  if (a < 0 || b < 0 || a === b) return [from, to];
-  // A* over trodden cells, eight ways.
+  const a = nearestStanding(from), b = nearestStanding(to);
+  if (a < 0 || b < 0) return [from];
+  const end = walkable(to.x, to.y) ? to : { x: (b % MAP_W) + 0.5, y: ((b / MAP_W) | 0) + 0.5 };
+  if (a === b) return [from, end];
+  // A* over standing cells, eight ways, never cutting a solid corner.
   const n = MAP_W * MAP_H;
-  const cost = new Float32Array(n).fill(Infinity);
+  const spent = new Float64Array(n).fill(Infinity);
   const prev = new Int32Array(n).fill(-1);
   const bx = b % MAP_W, by = (b / MAP_W) | 0;
   const h = (i: number) => Math.hypot((i % MAP_W) - bx, ((i / MAP_W) | 0) - by);
   const open = new Heap();
   open.push(h(a), a);
-  cost[a] = 0;
+  spent[a] = 0;
+  let best = a; // the closest we've come, should b be out of reach
   while (open.size) {
     const i = open.pop();
     if (i === b) break;
+    if (h(i) < h(best)) best = i;
     const x = i % MAP_W, y = (i / MAP_W) | 0;
     for (let dy = -1; dy <= 1; dy++)
       for (let dx = -1; dx <= 1; dx++) {
         if ((!dx && !dy) || !inMap(x + dx, y + dy)) continue;
         const j = i + dy * MAP_W + dx;
-        if (!trodden[j]) continue;
-        const c = cost[i] + (dx && dy ? 1.414 : 1);
-        if (c < cost[j]) {
-          cost[j] = c;
+        if (!cost[j] || (dx && dy && (!cost[i + dx] || !cost[i + dy * MAP_W]))) continue;
+        const c = spent[i] + cost[j] * (dx && dy ? 1.414 : 1);
+        if (c < spent[j]) {
+          spent[j] = c;
           prev[j] = i;
           open.push(c + h(j), j);
         }
       }
   }
-  if (prev[b] < 0) return [from, to];
+  const goal = spent[b] < Infinity ? b : best;
   const cells: Point[] = [];
-  for (let i = b; i >= 0; i = prev[i]) cells.push({ x: (i % MAP_W) + 0.5, y: ((i / MAP_W) | 0) + 0.5 });
+  for (let i = goal; i >= 0; i = prev[i]) cells.push({ x: (i % MAP_W) + 0.5, y: ((i / MAP_W) | 0) + 0.5 });
   cells.reverse();
-  return [from, ...straighten(cells, 1.2), to];
+  return [from, ...straighten(cells, 1.2), ...(goal === b ? [end] : [])];
 }
 
 /** Ramer–Douglas–Peucker: drop points that sit within tol of the line past them. */
@@ -143,7 +160,8 @@ function straighten(ps: Point[], tol: number): Point[] {
     const d = Math.abs((b.x - a.x) * (a.y - ps[i].y) - (a.x - ps[i].x) * (b.y - a.y)) / len;
     if (d > far) { far = d; at = i; }
   }
-  if (far <= tol) return [a, b];
+  if (far <= tol && clear(a, b)) return [a, b];
+  if (!at) at = ps.length >> 1; // straight but blocked: split anyway
   return [...straighten(ps.slice(0, at + 1), tol).slice(0, -1), ...straighten(ps.slice(at), tol)];
 }
 

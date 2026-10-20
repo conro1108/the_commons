@@ -156,6 +156,12 @@
       }
       @media (max-width: 600px) {
         #tag { top: auto; bottom: 12px; }
+        /* The card as a sheet along the bottom, leaving the map above it to walk on. */
+        #card, #card:has(.schedule) { left: 0; right: 0; bottom: 0; width: auto; max-height: 50dvh; overflow-y: auto;
+                                      transform: none; border-width: 2px 0 0; box-shadow: 0 -3px 0 #402e3a33; }
+        #card .close { position: sticky; float: right; top: 0; font-size: 20px; }
+        .fold summary { cursor: pointer; color: #7a6a8a; }
+        .fold .condition { margin-top: 4px; }
       }
       @media (max-height: 500px) {
         #tag .hint { display: none; }

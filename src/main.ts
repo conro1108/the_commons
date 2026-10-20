@@ -53,6 +53,7 @@ let me = "";
 let hover: number | null = null; // plot ids
 let selected: number | null = null;
 let waypoints: Point[] = []; // the rest of the way, along the paths
+let free = false; // walking by the arrow keys, which stop at anything solid
 const letters: Letter[] = [];
 let heading: (() => void) | null = null; // what to do when we get where we're walking
 // Our rulings still in the post: the panel keeps them sealed until the letter lands.
@@ -73,6 +74,7 @@ let drag: { p: Placement; dx: number; dy: number; x: number; y: number } | null 
 const pad = (n: number) => String(n).padStart(4, "0");
 const esc = (s: string) => s.replace(/[&<>"]/g, (c) => `&${{ "&": "amp", "<": "lt", ">": "gt", '"': "quot" }[c]};`);
 const touch = matchMedia("(pointer: coarse)").matches;
+const phone = matchMedia("(max-width: 600px)"); // papers sit along the bottom, the card as a sheet
 const lookOf = (id: string) => looksLike(handles.get(id), avatarOf(id), id);
 const who = (id: string) => (id === me ? "you" : (handles.get(id) ?? "a resident"));
 const clamp = (v: number, lo: number, hi: number) => Math.min(Math.max(v, lo), Math.max(lo, hi));
@@ -233,21 +235,21 @@ function renderCard() {
   const def = plotById(plot)!;
   const fresh = thunk !== null && thunk === f?.id;
   thunk = null;
+  const enter = f && BUILT.includes(f.status) && !unread.has(f.id) ? `<button class="enter">Step inside</button>` : "";
   let body: string;
   if (f && reply !== null) {
-    body = `<h2>A reply from Gary</h2>${exchange(f, fresh)}`;
+    body = `<h2>A reply from Gary</h2>${exchange(f, fresh)}${enter}`;
   } else if (f) {
     body = `<h2>${esc(plotLabel(def))}</h2><p class="meta where">${esc(REGIONS[def.region].name)}</p>
       <p>Held by ${esc(who(f.filer))}: <q>${esc(f.intent)}</q></p>
-      ${ruling(f, fresh)}${conditionHtml(f)}<p class="meta">Filing ${pad(f.id)}</p>`;
+      ${enter}${ruling(f, fresh)}${conditionHtml(f)}<p class="meta">Filing ${pad(f.id)}</p>`;
   } else {
     body = `${particulars(def)}
       <form><label class="intent">Your intent, in one breath
       <textarea rows="2" maxlength="120" placeholder="a bench, for looking at the pond with" required></textarea></label>
       <button>Submit to Gary</button><p class="problem"></p></form>`;
   }
-  const enter = f && BUILT.includes(f.status) && !unread.has(f.id) ? `<button class="enter">Step inside</button>` : "";
-  card.innerHTML = `<button class="close" aria-label="Close">×</button>${body}${enter}`;
+  card.innerHTML = `<button class="close" aria-label="Close">×</button>${body}`;
   card.hidden = false;
   card.querySelector(".close")!.addEventListener("click", closeCard);
   if (f) card.querySelector(".enter")?.addEventListener("click", () => walkInto(f));
@@ -323,6 +325,7 @@ async function claim(plot: number, form: HTMLFormElement) {
 /** Hang the card beside its plot, above or below, kept on screen. */
 function placeCard() {
   if (card.hidden || selected === null) return;
+  if (phone.matches) return void (card.style.left = card.style.top = "");
   const p = plotById(selected)!;
   const v = mapView;
   const w = card.offsetWidth;
@@ -406,7 +409,7 @@ function renderBuildInfo() {
   const count = built.get(f.id)?.length ?? 0;
   $("build-info").innerHTML = `<h2>${esc(plotLabel(p))}</h2><p class="meta where">${esc(REGIONS[p.region].name)}, ${Math.round(p.area / 10) * 10} sq. yd.</p>
     <p>${f.filer === me ? "Yours" : `Held by ${esc(who(f.filer))}`}: <q>${esc(f.intent)}</q></p>
-    ${conditionHtml(f)}
+    ${foldCondition(f)}
     ${f.filer === me
       ? `<p class="hint">Building on a granted plot needs no further paperwork. Gary finds this difficult.</p>`
       : `<p class="meta">${count ? `${count} thing${count === 1 ? "" : "s"} built.` : "Nothing built yet."}</p>`}`;
@@ -414,6 +417,19 @@ function renderBuildInfo() {
   if (f.filer === me) renderTools(f);
   fitFocus(); // the info's height moves the plot on an upright screen
 }
+
+/** On a phone the condition folds away, so the plot gets the screen; keep it as it was left. */
+let conditionOpen = false;
+function foldCondition(f: Filing) {
+  const html = conditionHtml(f);
+  if (!html || !phone.matches) return html;
+  return `<details class="fold"${conditionOpen ? " open" : ""}><summary>Condition${f.met_at ? ", met" : BUILT.includes(f.status) ? ", outstanding" : ""}</summary>${html}</details>`;
+}
+
+$("build-info").addEventListener("toggle", (e) => {
+  conditionOpen = (e.target as HTMLDetailsElement).open;
+  fitFocus();
+}, true);
 
 /** Flip the toolbar's classes; it only exists on your own plot. */
 function renderTools(f: Filing) {
@@ -567,20 +583,38 @@ function fitMap(): View {
   return s === whole.s ? whole : { s, ox: 0, oy: 0 };
 }
 
+// Dragged, the map stays where it's put until you set off somewhere; then it glides back to you.
+let camera: { ox: number; oy: number } | null = null;
+let gliding = false;
+let panning: { x: number; y: number; ox: number; oy: number; moved: boolean } | null = null;
+
+function release() {
+  if (camera) gliding = true;
+  camera = null;
+}
+
 /**
- * Centre the map on us along any side it overflows, stopping at its edges.
- * When the tag sits at the bottom (a phone held upright), centre the map in
- * the room above it, if the map fits there, so the tag isn't over the board.
+ * Centre the map on us along any side it overflows, stopping at its edges, in
+ * the room above whatever paper sits along the bottom (a phone held upright).
  */
 function follow() {
   const self = walkers.get(me);
   const { s } = mapView;
-  const axis = (room: number, art: number, at = art / 2) =>
-    room >= art * s ? Math.floor((room - art * s) / 2) : Math.round(clamp(room / 2 - at * s, room - art * s, 0));
-  const tag = $("tag");
-  const above = tag.offsetTop * 2 > canvas.height / dpr ? (tag.offsetTop - 8) * dpr : canvas.height;
-  mapView.ox = axis(canvas.width, MAP_W, self?.x);
-  mapView.oy = axis(above >= MAP_H * s ? above : canvas.height, MAP_H, self?.y);
+  const low = !card.hidden ? card : $("tag");
+  const room = phone.matches ? (low.offsetTop - 8) * dpr : canvas.height;
+  const axis = (room: number, art: number, at: number | undefined, held: number | undefined) =>
+    room >= art * s ? Math.floor((room - art * s) / 2) : Math.round(clamp(held ?? room / 2 - (at ?? art / 2) * s, room - art * s, 0));
+  const ox = axis(canvas.width, MAP_W, self?.x, camera?.ox);
+  const oy = axis(room, MAP_H, self?.y, camera?.oy);
+  if (camera) Object.assign(camera, { ox, oy });
+  if (gliding) {
+    mapView.ox += Math.round((ox - mapView.ox) * 0.2);
+    mapView.oy += Math.round((oy - mapView.oy) * 0.2);
+    gliding = Math.abs(ox - mapView.ox) > 2 || Math.abs(oy - mapView.oy) > 2;
+    if (gliding) return;
+  }
+  mapView.ox = ox;
+  mapView.oy = oy;
 }
 
 /** Up close, clear of the toolbar when there is one. */
@@ -809,6 +843,17 @@ canvas.addEventListener("pointerdown", (e) => {
 });
 
 canvas.addEventListener("pointermove", (e) => {
+  if (!focus && panning) {
+    const dx = (e.clientX - panning.x) * dpr, dy = (e.clientY - panning.y) * dpr;
+    if (!panning.moved && Math.hypot(dx, dy) > 8 * dpr) {
+      panning.moved = true;
+      clearTimeout(holding);
+    }
+    if (panning.moved) {
+      gliding = false;
+      camera = { ox: panning.ox + dx, oy: panning.oy + dy };
+    }
+  }
   if (!focus) {
     const p = toArt(e, mapView);
     mouse = p;
@@ -899,6 +944,8 @@ function arrows(e: KeyboardEvent) {
   if (!self || focus || zoom || (e.repeat && pressed.size === was)) return;
   heading = null;
   waypoints = [];
+  free = true;
+  release();
   const [dx, dy] = [...pressed].reduce(([x, y], k) => [x + ARROWS[k][0], y + ARROWS[k][1]], [0, 0]);
   walkTo(clamp(self.x + dx * 1000, 2, MAP_W - 2), clamp(self.y + dy * 1000, 8, MAP_H - 1));
 }
@@ -952,9 +999,11 @@ function goTo(x: number, y: number, then: () => void) {
   heading = then;
 }
 
-/** Walk to a plot's gate and step inside on arrival. */
+/** Walk round to a plot's gate, in view, and step inside on arrival. */
 function walkInto(f: Filing) {
   const g = plotOf(f).gate;
+  closeCard();
+  release();
   goTo(g.x, g.y, () => enterFocus(f));
 }
 
@@ -986,8 +1035,11 @@ async function summon() {
 // Hold the notice board for five seconds and the back office opens (src/backoffice.ts).
 let holding: number | undefined;
 let heldOpen = false; // the click that ends a hold that opened it isn't a click
+let panned = false; // nor is the one that ends a drag
 canvas.addEventListener("pointerdown", (e) => {
   heldOpen = false;
+  panned = false;
+  if (!focus && !zoom && e.button === 0) panning = { x: e.clientX, y: e.clientY, ox: mapView.ox, oy: mapView.oy, moved: false };
   if (focus || zoom || !onBoard(toArt(e, mapView))) return;
   holding = window.setTimeout(async () => {
     heldOpen = true;
@@ -1003,10 +1055,16 @@ canvas.addEventListener("pointerdown", (e) => {
     });
   }, 5000);
 });
-for (const ev of ["pointerup", "pointercancel", "pointerleave"]) canvas.addEventListener(ev, () => clearTimeout(holding));
+for (const ev of ["pointerup", "pointercancel", "pointerleave"]) {
+  canvas.addEventListener(ev, () => {
+    clearTimeout(holding);
+    panned = !!panning?.moved;
+    panning = null;
+  });
+}
 
 canvas.addEventListener("click", (e) => {
-  if (focus || zoom || heldOpen) return;
+  if (focus || zoom || heldOpen || panned) return;
   heading = null;
   const p = toArt(e, mapView);
   if (onGary(p)) return speak();
@@ -1021,6 +1079,7 @@ canvas.addEventListener("click", (e) => {
     return walkAlong(plot.gate.x, plot.gate.y);
   }
   closeCard(); // just out for a walk
+  release();
   walkAlong(p.x, p.y);
 });
 
@@ -1036,14 +1095,13 @@ function walkTo(tx: number, ty: number) {
   channel.send({ type: "broadcast", event: "walk", payload: { id: me, x: self.x, y: self.y, tx, ty } });
 }
 
-/** Walk somewhere by the paths, leg by leg; off the path only at the ends, and never into the water. */
+/** Walk somewhere, by the paths where they go that way, leg by leg; never into the water. */
 function walkAlong(x: number, y: number) {
   const self = walkers.get(me);
   if (!self) return;
   heading = null;
-  const way = route(self, { x, y }).slice(1);
-  if (way.length > 1 && !walkable(x, y)) way.pop();
-  waypoints = way;
+  free = false;
+  waypoints = route(self, { x, y }).slice(1);
   const next = waypoints.shift();
   if (next) walkTo(next.x, next.y);
 }
@@ -1054,12 +1112,24 @@ function step(dt: number) {
     const dy = w.ty - w.y;
     const dist = Math.hypot(dx, dy);
     w.moving = dist >= 0.01;
-    if (!w.moving) continue;
+    if (!w.moving) {
+      // A leg that ends where we already stand is done: on to the next, or there.
+      if (w.id !== me) continue;
+      if (waypoints.length) {
+        const next = waypoints.shift()!;
+        walkTo(next.x, next.y);
+      } else if (heading && !focus && !zoom) {
+        const then = heading;
+        heading = null;
+        then();
+      }
+      continue;
+    }
     if (Math.abs(dx) > 0.01) w.facing = Math.sign(dx);
     const move = Math.min(dist, SPEED * dt);
     const nx = w.x + (dx / dist) * move, ny = w.y + (dy / dist) * move;
-    // Free walking (the arrow keys) stops at water, wood and walls; routes only cross them by bridge.
-    if (w.id === me && !waypoints.length && !heading && !walkable(nx, ny) && walkable(w.x, w.y)) {
+    // The arrow keys stop at water, wood and walls; routes go round them.
+    if (w.id === me && free && !walkable(nx, ny) && walkable(w.x, w.y)) {
       w.tx = w.x;
       w.ty = w.y;
       w.moving = false;
