@@ -1,5 +1,5 @@
 import { BRUSHES, empty, groundLabel, paintGround } from "./content/ground.ts";
-import { look, PALETTE, propCanvas, propSize } from "./content/props.ts";
+import { drawnAs, look, PALETTE, propCanvas, propSize } from "./content/props.ts";
 import { BYLAWS } from "./rulebook.ts";
 import {
   LANDMARKS, MAP_H, MAP_W, PLOTS, REGIONS, ZOOM, plotAt, plotById, plotLabel, route, walkable, type PlotDef, type Point,
@@ -414,7 +414,10 @@ function renderBuildInfo() {
       ? `<p class="hint">Building on a granted plot needs no further paperwork. Gary finds this difficult.</p>`
       : `<p class="meta">${count ? `${count} thing${count === 1 ? "" : "s"} built.` : "Nothing built yet."}</p>`}`;
   $("tool-hint").textContent = HINTS[tool.split(":")[0]];
-  if (f.filer === me) renderTools(f);
+  if (f.filer === me) {
+    if (drawnHere(f).map((d) => d.look).join() !== drawnKey) renderPalette();
+    renderTools(f);
+  }
   fitFocus(); // the info's height moves the plot on an upright screen
 }
 
@@ -465,12 +468,25 @@ function swatch(ch: string, p: PlotDef) {
   return c;
 }
 
-/** The toolbar, built once per visit; tool changes only flip classes. */
+/** The written-in things on a plot Gary has drawn, one of each. */
+function drawnHere(f: Filing) {
+  const seen = new Map<string, { label: string; look: string }>();
+  for (const p of built.get(f.id) ?? []) {
+    if (p.prop !== "item" || !p.label_ok || !p.sprite) continue;
+    const name = look(p);
+    if (!seen.has(name)) seen.set(name, { label: p.label!.trim(), look: name });
+  }
+  return [...seen.values()];
+}
+let drawnKey = ""; // which drawings the toolbar has buttons for
+
+/** The toolbar, built once per visit (and when Gary finishes a drawing); tool changes only flip classes. */
 function renderPalette() {
   const mine = focus?.filer === me;
   $("tools").hidden = !mine;
   if (!mine) return;
   const p = plotOf(focus!);
+  drawnKey = drawnHere(focus!).map((d) => d.look).join();
   const button = (t: Tool, title: string, inner: string) =>
     `<button data-tool="${t}" title="${title}">${inner}</button>`;
   const group = (name: string, inner: string) =>
@@ -484,8 +500,9 @@ function renderPalette() {
     ...PALETTE.map(({ group: name, props }) => group(name, props
       .map((p) => button(`prop:${p}`, p, `<img src="${icon(p, () => propCanvas(p))}" width="${Math.min(propSize(p).w * 2, 40)}" alt="${p}">`))
       .join(""))),
-    // Anything not in the palette, by name: it goes down as a labelled parcel.
-    group("Write in", `<form class="write-in"><input maxlength="24" placeholder="a lobster" aria-label="something of your own" required><button>Use</button></form>`),
+    // Anything not in the palette, by name: it goes down as a labelled parcel. What Gary has drawn here, again in a tap.
+    group("Write in", drawnHere(focus!).map((d) => button(`item:${esc(d.label)}`, esc(d.label), `<img src="${propCanvas(d.look).toDataURL()}" width="${Math.min(propSize(d.look).w * 2, 40)}" alt="${esc(d.label)}">`)).join("")
+      + `<form class="write-in"><input maxlength="24" placeholder="a lobster" aria-label="something of your own" required><button>Use</button></form>`),
   ].join("");
   // On a phone the groups are tabs, one open at a time; Tools stays out.
   const names = ["Ground", ...PALETTE.map((g) => g.group), "Write in"];
@@ -742,7 +759,7 @@ function focusScene(f: Filing): FocusScene {
     scene.built = ps.map((p) => (p.id === moved.id ? moved : p));
     scene.hover = { p: moved, colour: "#fff8e0" };
   } else if (kind === "prop" || kind === "item") {
-    const prop = kind === "item" ? "item" : arg;
+    const prop = kind === "item" ? drawnAs(tool.slice(5)) : arg;
     scene.ghost = { id: 0, filing: f.id, prop, ...propAt(prop, pointer.x, pointer.y) };
   } else if (kind === "ground") {
     scene.brush = brushAt(pointer.x, pointer.y);
@@ -794,8 +811,9 @@ function takeDown(b: { x: number; y: number }) {
 
 async function placeAt(prop: string, b: { x: number; y: number }, label?: string) {
   const f = focus!;
-  const at = propAt(prop, b.x, b.y);
-  if (!canPlace(plotOf(f), prop, at.x, at.y)) return problem("It has to stand on the plot, and not on what's already there.");
+  const shape = label ? drawnAs(label) : prop;
+  const at = propAt(shape, b.x, b.y);
+  if (!canPlace(plotOf(f), shape, at.x, at.y)) return problem("It has to stand on the plot, and not on what's already there.");
   const result = await place(f.id, at.x, at.y, prop, label);
   if (typeof result === "string") return problem(result);
   problem("");

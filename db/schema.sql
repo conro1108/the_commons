@@ -237,8 +237,24 @@ begin
   return new;
 end $$;
 revoke execute on function the_commons.enqueue_item() from public, anon, authenticated;
+-- A name Gary has already read (and drawn) needs no second reading: it goes up
+-- as he left it, drawing and all. Only new names reach his in-tray.
+create function the_commons.known_item() returns trigger
+language plpgsql security definer set search_path = '' as $$
+begin
+  select p.label_ok, p.sprite into new.label_ok, new.sprite
+    from the_commons.placements p
+    where lower(btrim(p.label)) = lower(btrim(new.label)) and (p.label_ok = false or p.sprite is not null)
+    order by p.label_ok desc, p.id
+    limit 1;
+  return new;
+end $$;
+revoke execute on function the_commons.known_item() from public, anon, authenticated;
+create trigger placements_known before insert on the_commons.placements
+  for each row when (new.label is not null) execute function the_commons.known_item();
+
 create trigger placements_enqueue after insert on the_commons.placements
-  for each row when (new.label is not null) execute function the_commons.enqueue_item();
+  for each row when (new.label is not null and new.label_ok is null) execute function the_commons.enqueue_item();
 
 -- Every five seconds: hand each queued filing to /api/gary. A message stays in the
 -- queue (invisible for two minutes, then retried) until its filing is no longer

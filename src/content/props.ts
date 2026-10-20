@@ -377,6 +377,12 @@ export function look(p: { prop: string; label?: string | null; sprite?: PropDef 
   return name;
 }
 
+/** What a written-in item will look like when it goes up: its drawing, if that name has one yet, or a parcel. */
+export function drawnAs(label: string): string {
+  const name = `item:${label.trim().toLowerCase()}`;
+  return PROPS[name] ? name : "item";
+}
+
 const cache = new Map<string, HTMLCanvasElement>();
 
 /** A prop rasterised at one canvas pixel per cell, cached. Unknown names draw nothing. */
