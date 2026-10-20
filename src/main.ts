@@ -208,9 +208,12 @@ function visit(f: Filing) {
 const card = $("card");
 let reply: number | null = null; // a filing whose reply the card is showing, rather than the plot
 let thunk: number | null = null; // a ruling just opened, to stamp as the card appears
+let folded = false; // the card shrunk to its title, out of the way
+let cardAt: { x: number; y: number } | null = null; // where it's been dragged to, if it has (CSS px)
 
 function openCard(plot: number, filing: number | null = null) {
   if (selected !== null && selected !== plot) heading = null;
+  if (selected !== plot) folded = false;
   selected = plot;
   reply = filing;
   renderCard();
@@ -237,7 +240,9 @@ function renderCard() {
   thunk = null;
   const enter = f && BUILT.includes(f.status) && !unread.has(f.id) ? `<button class="enter">Step inside</button>` : "";
   let body: string;
-  if (f && reply !== null) {
+  if (folded) {
+    body = `<h2>${f && reply !== null ? "A reply from Gary" : esc(plotLabel(def))}</h2>${enter}`;
+  } else if (f && reply !== null) {
     body = `<h2>A reply from Gary</h2>${exchange(f, fresh)}${enter}`;
   } else if (f) {
     body = `<h2>${esc(plotLabel(def))}</h2><p class="meta where">${esc(REGIONS[def.region].name)}</p>
@@ -249,9 +254,14 @@ function renderCard() {
       <textarea rows="2" maxlength="120" placeholder="a bench, for looking at the pond with" required></textarea></label>
       <button>Submit to Gary</button><p class="problem"></p></form>`;
   }
-  card.innerHTML = `<button class="close" aria-label="Close">×</button>${body}`;
+  card.innerHTML = `<div class="bar"><button class="fold" aria-label="${folded ? "Unfold" : "Fold up"}">${folded ? "+" : "–"}</button><button class="close" aria-label="Close">×</button></div>${body}`;
+  card.classList.toggle("folded", folded);
   card.hidden = false;
   card.querySelector(".close")!.addEventListener("click", closeCard);
+  card.querySelector(".fold")!.addEventListener("click", () => {
+    folded = !folded;
+    renderCard();
+  });
   if (f) card.querySelector(".enter")?.addEventListener("click", () => walkInto(f));
   const form = card.querySelector("form");
   if (form) {
@@ -326,16 +336,36 @@ async function claim(plot: number, form: HTMLFormElement) {
 function placeCard() {
   if (card.hidden || selected === null) return;
   if (phone.matches) return void (card.style.left = card.style.top = "");
-  const p = plotById(selected)!;
-  const v = mapView;
   const w = card.offsetWidth;
   const h = card.offsetHeight;
+  if (cardAt) {
+    card.style.left = `${clamp(cardAt.x, 8, canvas.width / dpr - w - 8)}px`;
+    card.style.top = `${clamp(cardAt.y, 8, canvas.height / dpr - h - 8)}px`;
+    return;
+  }
+  const p = plotById(selected)!;
+  const v = mapView;
   const x = (v.ox + (p.x + p.w / 2) * v.s) / dpr - w / 2;
   let y = (v.oy + p.y * v.s) / dpr - h - 12;
   if (y < 8) y = (v.oy + (p.y + p.h) * v.s) / dpr + 12;
   card.style.left = `${clamp(x, 8, canvas.width / dpr - w - 8)}px`;
   card.style.top = `${clamp(y, 8, canvas.height / dpr - h - 8)}px`;
 }
+
+// Drag the card anywhere (not on a phone, where it's a sheet); it stays put after.
+let carrying: { dx: number; dy: number } | null = null;
+card.addEventListener("pointerdown", (e) => {
+  if (phone.matches || e.button !== 0 || (e.target as HTMLElement).closest("button, input, textarea, a, label")) return;
+  e.preventDefault();
+  carrying = { dx: e.clientX - card.offsetLeft, dy: e.clientY - card.offsetTop };
+  card.setPointerCapture(e.pointerId);
+});
+card.addEventListener("pointermove", (e) => {
+  if (!carrying) return;
+  cardAt = { x: e.clientX - carrying.dx, y: e.clientY - carrying.dy };
+  placeCard();
+});
+card.addEventListener("pointerup", () => void (carrying = null));
 
 // The notice board, read up close.
 const board = $("board");

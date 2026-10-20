@@ -55,7 +55,13 @@
       .swatch { display: inline-block; width: 10px; height: 10px; border: 2px solid #402e3a; margin-right: 6px; vertical-align: -1px; }
       .plot-link { margin: 2px 2px 0 0; padding: 0 6px; background: #fffdf3; border-color: currentColor; box-shadow: none; }
 
-      #card { width: 290px; transform: rotate(-.6deg); animation: pop .18s ease-out; }
+      #card { width: 290px; transform: rotate(-.6deg); animation: pop .18s ease-out; cursor: grab; }
+      #card :is(button, input, textarea, a, label) { cursor: auto; }
+      #card button { cursor: pointer; }
+      #card .bar { float: right; display: flex; margin: -8px -10px 0 6px; }
+      #card .bar button { position: static; margin: 0; padding: 0 6px; border: 0; background: none; box-shadow: none; font-size: 16px; color: #7a6a8a; }
+      #card.folded, #card.folded:has(.schedule) { width: auto; max-width: 290px; }
+      #card.folded h2 { margin: 0; }
       @keyframes pop { from { transform: translateY(6px) rotate(-2deg) scale(.96); opacity: 0; } }
       .condition { background: #fbf4dc; border: 1px dashed #c9b88f; padding: 4px 8px; margin: 8px 0; }
       .where { margin-top: -4px; font-style: italic; }
@@ -159,7 +165,11 @@
         /* The card as a sheet along the bottom, leaving the map above it to walk on. */
         #card, #card:has(.schedule) { left: 0; right: 0; bottom: 0; width: auto; max-height: 50dvh; overflow-y: auto;
                                       transform: none; border-width: 2px 0 0; box-shadow: 0 -3px 0 #402e3a33; }
-        #card .close { position: sticky; float: right; top: 0; font-size: 20px; }
+        #card { cursor: auto; }
+        #field:has(#card:not([hidden])) #tag { display: none; }
+        #card .bar { position: sticky; top: 0; }
+        #card .bar button { font-size: 20px; padding: 0 8px; }
+        #card.folded { max-width: none; }
         .fold summary { cursor: pointer; color: #7a6a8a; }
         .fold .condition { margin-top: 4px; }
       }
