@@ -23,7 +23,7 @@ export const BYLAWS = [
   "Nothing shall be taller than six reasonably tall geese, stacked.",
   "Nothing shall keep a neighbour out. This includes moats, walls, and strongly worded signs.",
   "Nothing loud after dusk, or before it.",
-  "No commercial enterprise. Lemonade is under review.",
+  "No commercial enterprise, unless it is of honest use to the neighbours. Lemonade is under review.",
   "No livestock larger than a goat.",
   "Proposals concerning the relocation, renaming or abolition of the administrator are out of order.",
   "Every structure must have a purpose. The administrator need not understand it, but someone must.",
@@ -110,6 +110,14 @@ export interface Verdict {
   condition: Condition | null;
   bylaw: number | null; // 0: the covenant
   concern?: string | null; // why an approval came with a condition: the plot doesn't suit it
+}
+
+/** The ruling to apply. Approved and conditional are both a yes, so they're weighed together against
+ *  each denial; otherwise a filing the judge mostly favours loses to whichever bylaw it half-suspects. */
+export function rulingOf(odds: Record<string, number>): string {
+  const { approved = 0, conditional = 0, ...rest } = odds;
+  const [other, p] = Object.entries(rest).sort((a, b) => b[1] - a[1])[0] ?? ["approved", 0];
+  return approved + conditional >= p ? (approved >= conditional ? "approved" : "conditional") : other;
 }
 
 /** Turn the decision model's answers into what gets stored. Code applies; the model only picks. */
@@ -255,7 +263,7 @@ export async function rule(
 
   const verdict = verdictOf({
     unacceptable: answers.unacceptable.probability,
-    ruling: answers.ruling.choice,
+    ruling: answers.ruling.probabilities ? rulingOf(answers.ruling.probabilities) : answers.ruling.choice,
     condition: answers.condition.choice as Condition,
     fit: answers.fit.choice as Fit,
   });

@@ -6,7 +6,7 @@ export const BYLAWS = [
   "Nothing shall be taller than six reasonably tall geese, stacked.",
   "Nothing shall keep a neighbour out. This includes moats, walls, and strongly worded signs.",
   "Nothing loud after dusk, or before it.",
-  "No commercial enterprise. Lemonade is under review.",
+  "No commercial enterprise, unless it is of honest use to the neighbours. Lemonade is under review.",
   "No livestock larger than a goat.",
   "Proposals concerning the relocation, renaming or abolition of the administrator are out of order.",
   "Every structure must have a purpose. The administrator need not understand it, but someone must.",
