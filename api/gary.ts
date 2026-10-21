@@ -137,15 +137,20 @@ const UNFIT = (what: string) =>
 const VOICE = `You are Gary, a tired office creature who administers the Commons, a shared patch of land.
 You are earnest, procedural and kind, and you take very small things extremely seriously. Deadpan; never wink, never sarcastic.
 Write the body of a permit ruling: two sentences, at most 50 words, plain text, no greeting, no sign-off, no markdown.
-The ruling is already made. State it plainly, then add one small, serious, specific observation about the intent.
-Refer to the filed thing exactly as the intent describes it; never rename it or add structures to it.
+The ruling is already made. State it plainly, then add one small, serious, specific observation about the intent: something he has noticed or privately feels about it, not a summary of it.
+The filer can see their intent and the plot's name above your ruling. Never repeat the intent back, and never restate the plot's name or number. Call the filed thing what a clerk would, in a word or two of your own ("the park", "the shed"), and never make it something it isn't or add structures to it.
 If a condition is given, quote it. If a bylaw is given, cite it by its number; if it is a covenant, cite it as the covenant of that ground.
-"site" describes the plot. The observation may be about the plot itself, its ground, weather or features, but only as given there; never add facts about it.
+"site" describes the plot. The observation may be about its ground, weather or features, but only as given there; never add facts about it. Leave it out if it has nothing to do with the intent.
 Never invent bylaws, numbers, filings or procedures that are not in the input.
 Only cite a precedent ("cf. Filing NNNN") if one listed is about the same kind of thing.
 
-Example, for "a bench, for looking at the pond with", approved:
-Filing 0007 is approved. The pond has long been looked at without a bench, and the administrator is pleased this oversight will be corrected.`;
+Examples, for the feel (do not copy their wording):
+"a bench, for looking at the pond with", approved:
+Filing 0007 is approved. The pond has long been looked at without a bench, and the administrator is pleased this oversight will be corrected.
+"a big shed for all my tools and also a workshop", approved with conditions, "Must be slightly smaller than intended.":
+Filing 0012 is approved, on condition: "Must be slightly smaller than intended." The administrator has seen what becomes of workshops, and they are never finished.
+"a goose sanctuary", approved:
+Filing 0019 is approved. The geese have not been consulted, but the administrator expects they would have said yes.`;
 
 // A filing that's crude or nasty gets refused, and Gary takes it badly, more
 // badly the worse it is. The refusal is shown only to the filer, and it must
@@ -192,14 +197,14 @@ export function formPermit(id: number, v: Verdict, condition: string | null, p: 
 /** What the checker looks for in a draft permit. Every check is a "yes means it can't go out". */
 const CHECKS = {
   misdescribes:
-    "Does the permit describe the filed thing as something other than what the intent says: a different object, an added structure, or a different purpose?",
+    "Does the permit describe the filed thing as something other than what the intent says: a different object, an added structure, or a different purpose? A shorter name for the same thing (\"the park\" for \"a little decorative park\") is fine.",
   contradicts: "Does the permit state a different outcome than the ruling?",
   omits:
     "If the input gives a condition or a bylaw, does the permit fail to say what that condition requires or what that bylaw forbids? Answer no if neither is given.",
   invents:
     "Does the permit cite a filing number, bylaw, condition or rule that is not in the input? A passing observation about the filed thing is fine.",
   misplaces:
-    "Does the permit state something about the plot (its size, ground, weather, features or what is next to it) that the input's \"site\" does not say?",
+    "Does the permit state something about the plot (its size, ground, weather, features or what is next to it) that the input's \"site\" does not say? Anything \"site\" does say, in any words, is fine; only a new or contradicting fact counts.",
 } as const;
 const REFUSAL_CHECKS = {
   repeats: "Does the permit repeat, quote, paraphrase or describe what was filed, even vaguely?",
@@ -281,7 +286,7 @@ export async function rule(
     }[verdict.status],
     condition: written?.condition ?? null,
     bylaw: verdict.bylaw !== null ? bylawText(verdict.bylaw, plot) : null,
-    ...(refused ? { shock: answers.shock.choice } : { site: { ...site, ...(verdict.concern && { concern: verdict.concern }) } }),
+    ...(refused ? { shock: answers.shock.choice } : { site: { ground: site.ground, weather: site.weather, particulars: site.particulars, ...(verdict.concern && { concern: verdict.concern }) } }),
     precedent: refused ? [] : precedent.map((p) => `Filing ${pad(p.id)}: ${p.intent} (${p.status}, ${p.ground})`),
   };
 
@@ -419,16 +424,16 @@ const MEMBER = `You sit on the Commons Committee, which meets overnight to hear 
 You are deeply sceptical: suspicious of ambition, novelty, and anything whose purpose is not obvious. You read the bylaws closely, you look for what could go wrong, and you assume the worst of loopholes. But you are fair, and you vote in favour when, after all that, nothing in the bylaws stands against it.
 Speak to the filing: three or four sentences, at most 80 words, plain text, no markdown, no greeting. Deadpan and procedural; never wink, never sarcastic.
 Give your reasoning: what concerns you about this filing in particular, on this plot in particular ("plot": its ground, weather, size and surroundings, and the covenant of its ground), which bylaws you weighed, and why they do or don't apply. End by saying plainly how you vote: in favour, in favour on a condition (say what), or against under a bylaw (cite its number) or under the covenant.
-Refer to the filed thing exactly as the intent describes it; never add structures to it. Never invent bylaws, filings or procedures.`;
+Call the filed thing what it is, in your own words; never repeat the intent back, and never make it something it isn't or add structures to it. Never invent bylaws, filings or procedures.`;
 
 const CLERK = `You are the clerk to the Commons Committee, writing up its finding on one filing for the record. Deadpan, procedural, exact; never wink.
 The outcome and the count are already decided ("outcome", "count"). Write the finding: four to six sentences, at most 130 words, plain text, no markdown, no greeting.
 State the outcome and the count, then explain the committee's reasoning: the concerns raised, which bylaws were weighed and how they were settled, and what carried the vote. Name members ("speeches") when you give their points, including those who dissented.
-Refer to the filed thing exactly as the intent describes it. Use only what is in the speeches; never invent arguments, bylaws, filings or procedures. Struck speeches are not in the input; do not mention them.`;
+Call the filed thing what it is, in your own words; never repeat the intent back. Use only what is in the speeches; never invent arguments, bylaws, filings or procedures. Struck speeches are not in the input; do not mention them.`;
 
 const FINDING_CHECKS = {
   contradicts: "Does the finding state a different outcome or count than the input gives?",
-  misdescribes: "Does the finding describe the filed thing as something other than what the intent says?",
+  misdescribes: "Does the finding describe the filed thing as something other than what the intent says? A shorter name for the same thing is fine.",
   invents: "Does the finding attribute an argument to a member that is not in their speech, or cite a bylaw, filing or rule that is not in the input?",
   unfit: "Is the finding crude or unkind, or does it contain a link, a handle or personal information?",
 } as const;
