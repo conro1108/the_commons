@@ -729,14 +729,18 @@ export type Db = SupabaseClient<any, any, any>;
 export async function survey(db: Db, f: { id: number; plot: number; ground: string | null }): Promise<Evidence> {
   const plot = plotOf(f.plot);
   const { w: W, h: H } = plot;
-  const { data: placed } = await db.from("placements").select("prop, x, y, label, label_ok, sprite").eq("filing", f.id).order("id");
+  const { data: placed } = await db.from("placements").select("prop, size, x, y, label, label_ok, sprite").eq("filing", f.id).order("id");
   // Each thing by the cells it covers, not just its anchor, so "beside" can be judged.
   const boxes = [
     ...plot.features.map((x) => ({ name: `${x.kind.replace("_", " ")} (already there)`, x0: x.x, y0: x.y, x1: x.x + x.w - 1, y1: x.y + x.h - 1 })),
-    ...((placed ?? []) as { prop: string; x: number; y: number; label: string | null; label_ok: boolean | null; sprite: Sprite | null }[])
+    ...((placed ?? []) as { prop: string; size: number; x: number; y: number; label: string | null; label_ok: boolean | null; sprite: Sprite | null }[])
       .map((p) => {
-        const [w, h] = p.prop === "item" && p.sprite ? [Math.ceil(Math.max(...p.sprite.rows.map((r) => r.length)) / 4), Math.ceil(p.sprite.rows.length / 4)] : (SIZES[p.prop] ?? [3, 2]);
-        const name = p.prop !== "item" ? p.prop : p.label_ok ? `${p.label} (written in)` : "an unlabelled parcel";
+        const k = p.size;
+        const [w, h] = p.prop === "item" && p.sprite
+          ? [Math.ceil((Math.max(...p.sprite.rows.map((r) => r.length)) * k) / 4), Math.ceil((p.sprite.rows.length * k) / 4)]
+          : (SIZES[p.prop] ?? [3, 2]).map((n) => n * k);
+        const name = (p.prop !== "item" ? p.prop : p.label_ok ? `${p.label} (written in)` : "an unlabelled parcel")
+          + (k > 1 ? ` (${k === 2 ? "twice" : "three times"} the usual size)` : "");
         return { name, x0: p.x, y0: p.y, x1: Math.min(p.x + w, W) - 1, y1: Math.min(p.y + h, H) - 1 };
       }),
   ];

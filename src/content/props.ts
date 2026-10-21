@@ -369,12 +369,22 @@ export const PALETTE: { group: string; props: string[] }[] = [
   { group: "Festive", props: ["bunting", "lanterns"] },
 ];
 
+/** How big things may be built: whole multiples only, so the pixels stay square. */
+export const SCALES = [1, 2, 3];
+
+/** A prop at a size, as "bench@2"; every name below takes one. */
+export const sized = (name: string, size = 1) => (size > 1 ? `${name}@${size}` : name);
+const unsized = (name: string): [string, number] => {
+  const at = name.lastIndexOf("@");
+  return at < 0 ? [name, 1] : [name.slice(0, at), Number(name.slice(at + 1)) || 1];
+};
+
 /** The prop a placement draws as: a written-in item Gary has drawn wears its drawing, filed under its name. */
-export function look(p: { prop: string; label?: string | null; sprite?: PropDef | null }): string {
-  if (!p.sprite || !p.label) return p.prop;
+export function look(p: { prop: string; label?: string | null; sprite?: PropDef | null; size?: number }): string {
+  if (!p.sprite || !p.label) return sized(p.prop, p.size);
   const name = `item:${p.label.trim().toLowerCase()}`;
   PROPS[name] ??= p.sprite;
-  return name;
+  return sized(name, p.size);
 }
 
 /** What a written-in item will look like when it goes up: its drawing, if that name has one yet, or a parcel. */
@@ -389,6 +399,19 @@ const cache = new Map<string, HTMLCanvasElement>();
 export function propCanvas(name: string): HTMLCanvasElement {
   let c = cache.get(name);
   if (c) return c;
+  const [base, k] = unsized(name);
+  if (k > 1) {
+    // Bigger by whole pixels: the plain one, drawn k times over.
+    const src = propCanvas(base);
+    c = document.createElement("canvas");
+    c.width = src.width * k;
+    c.height = src.height * k;
+    const ctx = c.getContext("2d")!;
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(src, 0, 0, c.width, c.height);
+    cache.set(name, c);
+    return c;
+  }
   const def = PROPS[name] ?? { rows: [""], palette: {} };
   c = document.createElement("canvas");
   c.width = Math.max(1, ...def.rows.map((r) => r.length));
@@ -408,8 +431,9 @@ export function propCanvas(name: string): HTMLCanvasElement {
 
 /** The build cells a prop covers, wide and deep, from its top-left anchor. No canvas, so tests can ask. */
 export function footprint(name: string): [number, number] {
-  const def = PROPS[name] ?? PROPS.item;
-  return [Math.ceil(Math.max(1, ...def.rows.map((r) => r.length)) / ZOOM), Math.ceil(def.rows.length / ZOOM)];
+  const [base, k] = unsized(name);
+  const def = PROPS[base] ?? PROPS.item;
+  return [Math.ceil((Math.max(1, ...def.rows.map((r) => r.length)) * k) / ZOOM), Math.ceil((def.rows.length * k) / ZOOM)];
 }
 
 export function propSize(name: string): { w: number; h: number } {
@@ -419,6 +443,7 @@ export function propSize(name: string): { w: number; h: number } {
 
 /** Whether the prop has paint at (x, y), so clicks land on the prop and not its box. */
 export function propHas(name: string, x: number, y: number): boolean {
-  const def = PROPS[name];
-  return !!def?.palette[def.rows[y]?.[x] ?? ""];
+  const [base, k] = unsized(name);
+  const def = PROPS[base];
+  return !!def?.palette[def.rows[Math.floor(y / k)]?.[Math.floor(x / k)] ?? ""];
 }

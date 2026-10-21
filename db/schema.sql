@@ -151,6 +151,7 @@ create table the_commons.placements (
   x         smallint not null check (x between 0 and 43),
   y         smallint not null check (y between 0 and 31),
   prop      text not null check (prop ~ '^[a-z_]{1,24}$'),
+  size      smallint not null default 1 check (size between 1 and 3), -- drawn this many times over
   -- A written-in item ('item') carries its own name, shown once Gary has read
   -- it (label_ok); until then it's a parcel to everyone but its builder.
   label     text check (label is null or (prop = 'item' and length(btrim(label)) between 1 and 24)),
@@ -180,7 +181,7 @@ create policy "take down what's on your plot"
   using (exists (select 1 from the_commons.filings f
     where f.id = filing and f.filer = auth.uid()));
 grant select on the_commons.placements to anon, authenticated;
-grant insert (filing, x, y, prop, label), update (x, y), delete on the_commons.placements to authenticated;
+grant insert (filing, x, y, prop, label, size), update (x, y, size), delete on the_commons.placements to authenticated;
 grant all on the_commons.placements to service_role;
 alter publication supabase_realtime add table the_commons.placements;
 

@@ -1,5 +1,5 @@
 import { BRUSHES, empty, groundLabel, paintGround } from "./content/ground.ts";
-import { drawnAs, look, PALETTE, propCanvas, propSize } from "./content/props.ts";
+import { drawnAs, look, PALETTE, propCanvas, propSize, SCALES, sized } from "./content/props.ts";
 import { BYLAWS } from "./rulebook.ts";
 import {
   LANDMARKS, MAP_H, MAP_W, PLOTS, REGIONS, ZOOM, plotAt, plotById, plotLabel, route, walkable, type PlotDef, type Point,
@@ -62,6 +62,7 @@ const unread = new Set<number>();
 let focus: Filing | null = null; // the plot we're up close to, if any
 let zoom: { start: number; dir: 1 | -1; filing: Filing } | null = null; // flying in or out
 let tool: Tool = "prop:bench";
+let size = 1; // how big the next thing goes up
 let pointer: { x: number; y: number } | null = null; // build space, while over the plot
 let stroke: { cells: string[]; before: string; last: Cells } | null = null; // painting ground
 // Ground we've painted this visit. Only the holder paints a plot, so ours is
@@ -472,6 +473,7 @@ function renderTools(f: Filing) {
     b.classList.toggle("wanted", wants.has(b.dataset.tool!.slice(5)));
   }
   $("palette").querySelector(".write-in")?.classList.toggle("on", tool.startsWith("item:"));
+  for (const b of $("palette").querySelectorAll<HTMLButtonElement>("[data-size]")) b.classList.toggle("on", Number(b.dataset.size) === size);
   for (const g of $("palette").querySelectorAll<HTMLElement>("[data-group]")) {
     g.classList.toggle("open", g.dataset.group === openGroup);
     $("tabs").querySelector(`[data-tab="${g.dataset.group}"]`)?.classList.toggle("wanted", !!g.querySelector(".wanted"));
@@ -522,7 +524,8 @@ function renderPalette() {
   const group = (name: string, inner: string) =>
     `<div class="group" data-group="${name}"><h3>${name}</h3><div class="row">${inner}</div></div>`;
   $("palette").innerHTML = [
-    group("Tools", button("move", "move things", "move") + button("remove", "take down", "take down")),
+    group("Tools", button("move", "move things", "move") + button("resize", "make a thing bigger, then back again", "resize") + button("remove", "take down", "take down")
+      + SCALES.map((k) => `<button data-size="${k}" title="build things ${k} times over">${k}×</button>`).join("")),
     `<div id="tabs"></div>`,
     group("Ground", BRUSHES.map((ch) =>
       button(`ground:${ch}`, groundLabel(ch, p), `<img src="${icon(`ground:${ch}:${p.region}`, () => swatch(ch, p))}" width="24" alt="${groundLabel(ch, p)}">`),
@@ -552,6 +555,12 @@ function renderPalette() {
   for (const b of $("palette").querySelectorAll<HTMLButtonElement>("[data-tool]")) {
     b.addEventListener("click", () => {
       tool = b.dataset.tool!;
+      renderBuildInfo();
+    });
+  }
+  for (const b of $("palette").querySelectorAll<HTMLButtonElement>("[data-size]")) {
+    b.addEventListener("click", () => {
+      size = Number(b.dataset.size);
       renderBuildInfo();
     });
   }
@@ -789,13 +798,13 @@ function focusScene(f: Filing): FocusScene {
     scene.built = ps.map((p) => (p.id === moved.id ? moved : p));
     scene.hover = { p: moved, colour: "#fff8e0" };
   } else if (kind === "prop" || kind === "item") {
-    const prop = kind === "item" ? drawnAs(tool.slice(5)) : arg;
+    const prop = sized(kind === "item" ? drawnAs(tool.slice(5)) : arg, size);
     scene.ghost = { id: 0, filing: f.id, prop, ...propAt(prop, pointer.x, pointer.y) };
   } else if (kind === "ground") {
     scene.brush = brushAt(pointer.x, pointer.y);
   } else {
     const p = placementAt(ps, pointer.x, pointer.y);
-    if (p) scene.hover = { p, colour: kind === "move" ? "#fff8e0" : "#e05c48" };
+    if (p) scene.hover = { p, colour: kind === "remove" ? "#e05c48" : "#fff8e0" };
   }
   return scene;
 }
@@ -839,12 +848,30 @@ function takeDown(b: { x: number; y: number }) {
   unplace(p.id).then((ok) => ok || setPlacement(p));
 }
 
+/** The next size up that fits where it stands, round to the plain one again. */
+async function regrow(b: { x: number; y: number }) {
+  if (!focus) return;
+  const plot = plotOf(focus);
+  const p = placementAt(built.get(focus.id) ?? [], b.x, b.y);
+  if (!p) return;
+  const from = p.size ?? 1;
+  const to = SCALES.find((k) => k > from && canPlace(plot, look({ ...p, size: k }), p.x, p.y)) ?? 1;
+  if (to === from) return problem("There isn't room for it any bigger.");
+  problem("");
+  setPlacement({ ...p, size: to });
+  const err = await move(p.id, p.x, p.y, to);
+  if (err) {
+    setPlacement(p);
+    problem(err);
+  }
+}
+
 async function placeAt(prop: string, b: { x: number; y: number }, label?: string) {
   const f = focus!;
-  const shape = label ? drawnAs(label) : prop;
+  const shape = sized(label ? drawnAs(label) : prop, size);
   const at = propAt(shape, b.x, b.y);
   if (!canPlace(plotOf(f), shape, at.x, at.y)) return problem("It has to stand on the plot, and not on what's already there.");
-  const result = await place(f.id, at.x, at.y, prop, label);
+  const result = await place(f.id, at.x, at.y, prop, size, label);
   if (typeof result === "string") return problem(result);
   problem("");
   land(result.id);
@@ -877,6 +904,7 @@ canvas.addEventListener("pointerdown", (e) => {
   if (!b) return void (placing = false);
   pointer = b;
   if (e.button === 2 || kind === "remove") return takeDown(b);
+  if (kind === "resize") return void regrow(b);
   if (e.button !== 0) return;
   canvas.setPointerCapture(e.pointerId);
   if (kind === "ground") {

@@ -144,6 +144,7 @@ export interface Placement {
   x: number;
   y: number;
   prop: string;
+  size?: number; // drawn this many times over
   label?: string | null; // a written-in item's name
   label_ok?: boolean | null; // Gary's read of it: null while he hasn't
   sprite?: PropDef | null; // and his drawing of it, once he's done one
@@ -159,10 +160,10 @@ export async function loadPlacements(): Promise<Placement[]> {
   }
 }
 
-const COLUMNS = "id, filing, x, y, prop, label, label_ok, sprite";
+const COLUMNS = "id, filing, x, y, prop, size, label, label_ok, sprite";
 
-export async function place(filing: number, x: number, y: number, prop: string, label?: string): Promise<Placement | string> {
-  const { data, error } = await supabase.from("placements").insert({ filing, x, y, prop, label }).select(COLUMNS).single();
+export async function place(filing: number, x: number, y: number, prop: string, size: number, label?: string): Promise<Placement | string> {
+  const { data, error } = await supabase.from("placements").insert({ filing, x, y, prop, size, label }).select(COLUMNS).single();
   if (!error) return data;
   if (error.code === "23505") return "Something is already standing exactly there.";
   return said(error);
@@ -179,8 +180,8 @@ export async function unplace(id: number): Promise<boolean> {
   return !error;
 }
 
-export async function move(id: number, x: number, y: number): Promise<string | null> {
-  const { error } = await supabase.from("placements").update({ x, y }).eq("id", id);
+export async function move(id: number, x: number, y: number, size?: number): Promise<string | null> {
+  const { error } = await supabase.from("placements").update({ x, y, size }).eq("id", id);
   if (!error) return null;
   if (error.code === "23505") return "Something is already standing exactly there.";
   return said(error);
