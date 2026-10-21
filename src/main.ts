@@ -2,7 +2,7 @@ import { BRUSHES, empty, groundLabel, paintGround } from "./content/ground.ts";
 import { drawnAs, look, PALETTE, propCanvas, propSize, SCALES, sized } from "./content/props.ts";
 import { BYLAWS } from "./rulebook.ts";
 import {
-  LANDMARKS, MAP_H, MAP_W, PLOTS, REGIONS, ZOOM, plotAt, plotById, plotLabel, route, walkable, type PlotDef, type Point,
+  LANDMARKS, MAP_H, MAP_W, PLOTS, REGIONS, ZOOM, plotAt, plotById, plotLabel, route, slide, walkable, type PlotDef, type Point,
 } from "./world/index.ts";
 import {
   HELD, afterGoogle, avatarOf, fileClaim, handlesFor, keepPapers, loadFilings, loadPlacements, move, paint, pencilled, place, rehandle,
@@ -1204,11 +1204,20 @@ function step(dt: number) {
     if (Math.abs(dx) > 0.01) w.facing = Math.sign(dx);
     const move = Math.min(dist, SPEED * dt);
     const nx = w.x + (dx / dist) * move, ny = w.y + (dy / dist) * move;
-    // The arrow keys stop at water, wood and walls; routes go round them.
+    // The arrow keys slide along water, wood and walls, and into gaps close by; routes go round them.
     if (w.id === me && free && !walkable(nx, ny) && walkable(w.x, w.y)) {
-      w.tx = w.x;
-      w.ty = w.y;
-      w.moving = false;
+      const to = slide(w.x, w.y, nx - w.x, ny - w.y);
+      if (!to) {
+        w.tx = w.x;
+        w.ty = w.y;
+        w.moving = false;
+        continue;
+      }
+      // Carry the heading along, so a held key keeps on the same way once past.
+      w.tx += to.x - nx;
+      w.ty += to.y - ny;
+      w.x = to.x;
+      w.y = to.y;
       continue;
     }
     w.x = nx;

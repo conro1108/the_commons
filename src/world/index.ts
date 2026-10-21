@@ -75,6 +75,27 @@ export function walkable(x: number, y: number): boolean {
 
 // --- getting about -----------------------------------------------------------
 
+/**
+ * Where a step of (mx, my) can go instead when it's blocked: along the edge it
+ * ran into, or sideways towards an opening within a few pixels, so the arrow
+ * keys find their way onto a narrow bridge without lining up to the pixel.
+ */
+export function slide(x: number, y: number, mx: number, my: number, reach = 4): Point | null {
+  if (mx && walkable(x + mx, y)) return { x: x + mx, y };
+  if (my && walkable(x, y + my)) return { x, y: y + my };
+  const d = Math.hypot(mx, my);
+  if (!d) return null;
+  const fx = mx / d, fy = my / d; // ahead
+  for (let o = 0.5; o <= reach; o += 0.5)
+    for (const side of [1, -1]) {
+      const sx = -fy * side, sy = fx * side; // sideways
+      let clear = true;
+      for (let k = 0.5; k <= o && clear; k += 0.5) clear = walkable(x + sx * k, y + sy * k);
+      if (clear && walkable(x + sx * o + fx, y + sy * o + fy)) return { x: x + sx * d, y: y + sy * d };
+    }
+  return null;
+}
+
 const TRODDEN: Terrain[] = ["path", "steps", "bridge", "stones"];
 // What a step onto each cell costs: paths are cheapest, so routes keep to them
 // where they reasonably can; 0 is nowhere a resident can stand.
