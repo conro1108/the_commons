@@ -677,26 +677,18 @@ async function hearAppeal(db: Db, id: number): Promise<Response> {
   if (!a || a.heard_at) return Response.json({ skipped: true });
   const { data: f } = await db.from("filings").select("*").eq("id", a.filing).single();
   if (!f || f.status !== "denied") return Response.json({ skipped: true });
-  const { data: earlier } = await db.from("appeals").select("plea, reply").eq("filing", f.id).lt("n", a.n).order("n");
+  const { data: earlier } = await db.from("appeals").select("plea, reply").eq("filing", f.id).lt("n", a.n).not("ok", "is", false).order("n");
   const plot = plotOf(f.plot);
   const h = await hear(f, a.plea, earlier ?? [], plot);
-  let { reply } = h;
-  let allowed = !!h.verdict && h.verdict.status !== "denied";
-  if (allowed) {
-    const { error } = await db
-      .from("filings")
-      .update({ status: h.verdict!.status, condition: h.written?.condition ?? null, wants: h.written?.wants ?? null, stamped_at: new Date().toISOString() })
-      .eq("id", f.id)
-      .eq("status", "denied");
-    // Someone filed for the plot while Gary was reading.
-    if (error) [allowed, reply] = [false, "The plot has been claimed by another filing while this appeal was being read. The administrator can only apologise."];
-  }
-  await db
-    .from("appeals")
-    .update({ heard_at: new Date().toISOString(), ok: h.ok, allowed, bylaw: allowed ? null : (h.verdict?.bylaw ?? null), reply, record: h.record })
-    .eq("id", id)
-    .is("heard_at", null);
-  return Response.json({ allowed });
+  const allowed = !!h.verdict && h.verdict.status !== "denied";
+  // One transaction (apply_appeal() in db/schema.sql), so a slow hearing retried alongside can't grant what the other dismissed.
+  const { data, error } = await db.rpc("apply_appeal", {
+    p_id: id, p_ok: h.ok, p_allowed: allowed, p_bylaw: allowed ? null : (h.verdict?.bylaw ?? null), p_reply: h.reply, p_record: h.record,
+    p_status: allowed ? h.verdict!.status : null, p_condition: h.written?.condition ?? null, p_wants: h.written?.wants ?? null,
+    p_claimed: "The plot has been claimed by another filing while this appeal was being read. The administrator can only apologise.",
+  });
+  if (error) throw error;
+  return Response.json({ allowed: data });
 }
 
 // --- inspections -------------------------------------------------------------

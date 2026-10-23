@@ -270,6 +270,36 @@ revoke execute on function the_commons.number_appeal() from public, anon, authen
 create trigger appeals_number before insert on the_commons.appeals
   for each row execute function the_commons.number_appeal();
 
+-- Gary's hearing, written down in one go: the appeal is heard only once, and
+-- allowed only if the plot is still free. /api/gary's alone.
+create function the_commons.apply_appeal(
+  p_id bigint, p_ok boolean, p_allowed boolean, p_bylaw smallint, p_reply text, p_record jsonb,
+  p_status text, p_condition text, p_wants text, p_claimed text
+) returns boolean
+language plpgsql security definer set search_path = '' as $$
+declare
+  f bigint;
+begin
+  update the_commons.appeals
+    set heard_at = now(), ok = p_ok, allowed = p_allowed, bylaw = p_bylaw, reply = p_reply, record = p_record
+    where id = p_id and heard_at is null
+    returning filing into f;
+  if f is null or not p_allowed then return false; end if;
+  begin
+    update the_commons.filings
+      set status = p_status, condition = p_condition, wants = p_wants, stamped_at = now()
+      where id = f and status = 'denied';
+  exception when unique_violation then
+    update the_commons.appeals set allowed = false, reply = p_claimed where id = p_id;
+    return false;
+  end;
+  return true;
+end $$;
+revoke execute on function the_commons.apply_appeal(bigint, boolean, boolean, smallint, text, jsonb, text, text, text, text)
+  from public, anon, authenticated;
+grant execute on function the_commons.apply_appeal(bigint, boolean, boolean, smallint, text, jsonb, text, text, text, text)
+  to service_role;
+
 -- Gary's in-tray.
 select pgmq.drop_queue('the_commons_gary')
   where exists (select 1 from pgmq.list_queues() where queue_name = 'the_commons_gary');

@@ -109,11 +109,16 @@ const mineInFocus = () => !!focus && focus.filer === me && !zoom;
 
 // --- paper: the corner tag, cards by the things you click, the board ---------
 
-function ruling(f: Filing, fresh = false): string {
+function ruling(f: Filing, fresh = false) {
   if (unread.has(f.id)) return `<p class="stamp pending">In the post</p><p class="meta">Gary's reply is on its way.</p>`;
   // Appealed, the filing reads as first denied, whatever came of it after.
   const heard = appeals.get(f.id) ?? [];
-  if (heard.length) return ruling({ ...f, status: "denied" }) + heard.map((a, i) => appealHtml(a, fresh && i === heard.length - 1)).join("");
+  if (heard.length) return stamped({ ...f, status: "denied" }) + heard.map((a, i) => appealHtml(a, fresh && i === heard.length - 1)).join("");
+  return stamped(f, fresh);
+}
+
+/** Gary's ruling as stamped: the stamp, the bylaw it's under, the permit, and any minutes. */
+function stamped(f: Filing, fresh = false) {
   const denied = f.status === "denied" && f.bylaw !== null;
   const region = REGIONS[plotOf(f).region];
   const [cite, text] = !denied ? ["", ""] : f.bylaw ? [`Bylaw ${f.bylaw}`, BYLAWS[f.bylaw! - 1]] : [`the covenant of ${region.name}`, region.covenant];
