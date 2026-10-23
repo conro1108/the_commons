@@ -215,6 +215,61 @@ create policy "inspections are public"
 grant select on the_commons.inspections to anon, authenticated;
 grant all on the_commons.inspections to service_role;
 
+-- Appeals: a denied filer may write back to make their case, up to three
+-- times, one at a time, while the plot is still free. Gary reads the plea and
+-- rules again (/api/gary); allowed, the filing is granted, its original denial
+-- kept for the record. Clients insert only the plea; the rest is Gary's.
+create table the_commons.appeals (
+  id       bigint generated always as identity primary key,
+  filing   bigint not null references the_commons.filings on delete cascade,
+  n        smallint not null check (n between 1 and 3), -- set by trigger
+  plea     text not null check (length(btrim(plea)) between 3 and 280),
+  filed_at timestamptz not null default now(),
+  heard_at timestamptz,
+  ok       boolean, -- fit for anyone else to read
+  allowed  boolean,
+  bylaw    smallint, -- dismissed: what the denial still stands under (0 the covenant)
+  reply    text,
+  record   jsonb, -- the decision model's answers and the drafts; stored, never regenerated
+  unique (filing, n)
+);
+alter table the_commons.appeals enable row level security;
+
+-- Whether the caller may appeal this filing now.
+create function the_commons.can_appeal(bigint) returns boolean
+language sql stable security definer set search_path = '' as $$
+  select exists (select 1 from the_commons.filings f
+    where f.id = $1 and f.filer = auth.uid() and f.status = 'denied'
+      and not exists (select 1 from the_commons.filings g where g.plot = f.plot
+        and g.status in ('pending', 'approved', 'conditional', 'committee'))
+      and not exists (select 1 from the_commons.appeals a where a.filing = f.id and a.heard_at is null)
+      and (select count(*) from the_commons.appeals a where a.filing = f.id) < 3)
+$$;
+grant execute on function the_commons.can_appeal(bigint) to authenticated;
+
+-- Heard appeals are public with their filing; unheard or unfit ones are the filer's.
+create policy "heard appeals are public; your own are yours"
+  on the_commons.appeals for select
+  using (ok or exists (select 1 from the_commons.filings f where f.id = filing and f.filer = auth.uid()));
+create policy "appeal a denial"
+  on the_commons.appeals for insert to authenticated
+  with check (the_commons.can_appeal(filing));
+grant select on the_commons.appeals to anon, authenticated;
+grant insert (filing, plea) on the_commons.appeals to authenticated;
+grant all on the_commons.appeals to service_role;
+alter publication supabase_realtime add table the_commons.appeals;
+
+-- Numbered in order; two at once collide on (filing, n) rather than make a fourth.
+create function the_commons.number_appeal() returns trigger
+language plpgsql security definer set search_path = '' as $$
+begin
+  new.n := (select count(*) + 1 from the_commons.appeals where filing = new.filing);
+  return new;
+end $$;
+revoke execute on function the_commons.number_appeal() from public, anon, authenticated;
+create trigger appeals_number before insert on the_commons.appeals
+  for each row execute function the_commons.number_appeal();
+
 -- Gary's in-tray.
 select pgmq.drop_queue('the_commons_gary')
   where exists (select 1 from pgmq.list_queues() where queue_name = 'the_commons_gary');
@@ -257,6 +312,17 @@ create trigger placements_known before insert on the_commons.placements
 create trigger placements_enqueue after insert on the_commons.placements
   for each row when (new.label is not null and new.label_ok is null) execute function the_commons.enqueue_item();
 
+-- And so does an appeal.
+create function the_commons.enqueue_appeal() returns trigger
+language plpgsql security definer set search_path = '' as $$
+begin
+  perform pgmq.send('the_commons_gary', jsonb_build_object('appeal', new.id));
+  return new;
+end $$;
+revoke execute on function the_commons.enqueue_appeal() from public, anon, authenticated;
+create trigger appeals_enqueue after insert on the_commons.appeals
+  for each row execute function the_commons.enqueue_appeal();
+
 -- Every five seconds: hand each queued filing to /api/gary. A message stays in the
 -- queue (invisible for two minutes, then retried) until its filing is no longer
 -- pending. After five tries it backs off to hourly; the filing stays pending —
@@ -267,11 +333,34 @@ language plpgsql security definer set search_path = '' as $$
 declare
   m record;
   f the_commons.filings;
+  a the_commons.appeals;
   secret text;
 begin
   select decrypted_secret into secret from vault.decrypted_secrets where name = 'the_commons_gary';
   if secret is null then return; end if;
   for m in select * from pgmq.read('the_commons_gary', 120, 10) loop
+    -- An appeal: heard like a filing, and lost in the post the same way.
+    if m.message ? 'appeal' then
+      select * into a from the_commons.appeals where id = (m.message->>'appeal')::bigint;
+      if a.id is null or a.heard_at is not null then
+        perform pgmq.delete('the_commons_gary', m.msg_id);
+      elsif m.read_ct > 53 then
+        update the_commons.appeals
+          set heard_at = now(), allowed = false,
+              reply = 'Your appeal appears to have been lost in the post. These things happen.'
+          where id = a.id;
+        perform pgmq.delete('the_commons_gary', m.msg_id);
+      else
+        if m.read_ct > 5 then perform pgmq.set_vt('the_commons_gary', m.msg_id, 3600); end if;
+        perform net.http_post(
+          url := 'https://the-commons-eosin.vercel.app/api/gary',
+          body := jsonb_build_object('appeal', a.id),
+          headers := jsonb_build_object('Content-Type', 'application/json',
+                                        'Authorization', 'Bearer ' || secret),
+          timeout_milliseconds := 30000);
+      end if;
+      continue;
+    end if;
     -- An item's name: read until it's been ruled on, or given up as unlabelled.
     if m.message ? 'item' then
       if m.read_ct > 20 or not exists (select 1 from the_commons.placements

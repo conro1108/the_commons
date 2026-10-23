@@ -138,6 +138,37 @@ export async function fileClaim(plot: number, intent: string): Promise<string | 
   return said(error);
 }
 
+export interface Appeal {
+  id: number;
+  filing: number;
+  n: number; // 1 to APPEALS
+  plea: string;
+  heard_at: string | null;
+  allowed: boolean | null;
+  bylaw: number | null; // dismissed: what the denial still stands under
+  reply: string | null;
+}
+
+/** A denied filing gets this many goes at making its case. The database counts too. */
+export const APPEALS = 3;
+
+const APPEAL_COLUMNS = "id, filing, n, plea, heard_at, allowed, bylaw, reply";
+
+export async function loadAppeals(): Promise<Appeal[]> {
+  const { data, error } = await supabase.from("appeals").select(APPEAL_COLUMNS).order("id");
+  if (error) throw error;
+  return data;
+}
+
+/** Write back to Gary about a denial; the appeal, or a clerk's explanation if it can't be heard. */
+export async function fileAppeal(filing: number, plea: string): Promise<Appeal | string> {
+  const { data, error } = await supabase.from("appeals").insert({ filing, plea }).select(APPEAL_COLUMNS).single();
+  if (!error) return data;
+  if (error.code === "23514") return "An appeal must be between 3 and 280 characters.";
+  if (error.code === "42501" || error.code === "23505") return "Gary can't hear an appeal on this filing just now.";
+  return said(error);
+}
+
 export interface Placement {
   id: number;
   filing: number;

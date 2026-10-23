@@ -5,9 +5,9 @@ import {
   LANDMARKS, MAP_H, MAP_W, PLOTS, REGIONS, ZOOM, plotAt, plotById, plotLabel, route, slide, walkable, type PlotDef, type Point,
 } from "./world/index.ts";
 import {
-  HELD, afterGoogle, avatarOf, fileClaim, handlesFor, keepPapers, loadFilings, loadPlacements, move, paint, pencilled, place, rehandle,
-  saveProfile, signIn, summonGary, supabase, unplace,
-  type Filing, type Placement,
+  APPEALS, HELD, afterGoogle, avatarOf, fileAppeal, fileClaim, handlesFor, keepPapers, loadAppeals, loadFilings, loadPlacements, move, paint,
+  pencilled, place, rehandle, saveProfile, signIn, summonGary, supabase, unplace,
+  type Appeal, type Filing, type Placement,
 } from "./net.ts";
 import type { RealtimeChannel } from "@supabase/supabase-js";
 import { VOID, colourOf, draw, letterPhase, type Letter, type Walker } from "./render.ts";
@@ -46,6 +46,7 @@ const $ = (id: string) => document.getElementById(id)!;
 
 const filings = new Map<number, Filing>();
 const placements = new Map<number, Placement>();
+const appeals = new Map<number, Appeal[]>(); // filing -> its appeals, in order
 const built = new Map<number, Placement[]>(); // filing -> its placements; replaced, never mutated, so minis can cache
 const walkers = new Map<string, Mover>();
 let handles = new Map<string, string>();
@@ -108,8 +109,11 @@ const mineInFocus = () => !!focus && focus.filer === me && !zoom;
 
 // --- paper: the corner tag, cards by the things you click, the board ---------
 
-function ruling(f: Filing, fresh = false) {
+function ruling(f: Filing, fresh = false): string {
   if (unread.has(f.id)) return `<p class="stamp pending">In the post</p><p class="meta">Gary's reply is on its way.</p>`;
+  // Appealed, the filing reads as first denied, whatever came of it after.
+  const heard = appeals.get(f.id) ?? [];
+  if (heard.length) return ruling({ ...f, status: "denied" }) + heard.map((a, i) => appealHtml(a, fresh && i === heard.length - 1)).join("");
   const denied = f.status === "denied" && f.bylaw !== null;
   const region = REGIONS[plotOf(f).region];
   const [cite, text] = !denied ? ["", ""] : f.bylaw ? [`Bylaw ${f.bylaw}`, BYLAWS[f.bylaw! - 1]] : [`the covenant of ${region.name}`, region.covenant];
@@ -118,6 +122,32 @@ function ruling(f: Filing, fresh = false) {
     ${f.permit ? `<p class="permit">${esc(f.permit)}</p>` : ""}
     ${minutesHtml(f)}`;
 }
+
+/** One appeal: the plea, and what Gary made of it. */
+function appealHtml(a: Appeal, fresh: boolean) {
+  const under = a.bylaw === null ? "" : ` (${a.bylaw ? `Bylaw ${a.bylaw}` : "covenant"})`;
+  return `<div class="condition"><p><b>Appeal ${a.n}.</b> <q>${esc(a.plea)}</q></p>
+    ${a.heard_at
+      ? `<p class="stamp ${a.allowed ? "approved" : "denied"}${fresh ? " thunk" : ""}">${a.allowed ? "Allowed" : `Dismissed${under}`}</p>
+        <p class="permit">${esc(a.reply ?? "")}</p>`
+      : `<p class="stamp pending">In Gary's in-tray</p>`}</div>`;
+}
+
+/** Room to write back about one of our denials, if there's any left. */
+function appealForm(f: Filing) {
+  if (f.filer !== me || f.status !== "denied" || unread.has(f.id)) return "";
+  const made = appeals.get(f.id) ?? [];
+  if (made.some((a) => !a.heard_at)) return "";
+  if (made.length >= APPEALS) return `<p class="meta">No further appeals. The matter is closed.</p>`;
+  if (heldPlots().has(f.plot)) return `<p class="meta">The plot has been claimed since, so there is nothing left to appeal.</p>`;
+  return `<form class="appeal"><label class="intent">Not quite understood? Make your case
+      <textarea rows="3" maxlength="280" placeholder="it isn't a business: the lemonade is free" required></textarea></label>
+      <button>Appeal</button> <span class="meta">${APPEALS - made.length} of ${APPEALS} left</span><p class="problem"></p></form>`;
+}
+
+/** Our latest denial on a free plot that could still be appealed, to point to from its card. */
+const appealableOn = (plot: number) =>
+  [...filings.values()].filter((f) => f.plot === plot && appealForm(f).startsWith("<form")).sort((a, b) => b.id - a.id)[0];
 
 const VOTED = (v: string | null, f: Filing) =>
   !v ? "remarks struck from the record" : v === "approved" ? "in favour" : v === "conditional" ? "in favour, on a condition"
@@ -244,13 +274,15 @@ function renderCard() {
   if (folded) {
     body = `<h2>${f && reply !== null ? "A reply from Gary" : esc(plotLabel(def))}</h2>${enter}`;
   } else if (f && reply !== null) {
-    body = `<h2>A reply from Gary</h2>${exchange(f, fresh)}${enter}`;
+    body = `<h2>A reply from Gary</h2>${exchange(f, fresh)}${appealForm(f)}${enter}`;
   } else if (f) {
     body = `<h2>${esc(plotLabel(def))}</h2><p class="meta where">${esc(REGIONS[def.region].name)}</p>
       <p>Held by ${esc(who(f.filer))}: <q>${esc(f.intent)}</q></p>
       ${enter}${ruling(f, fresh)}${conditionHtml(f)}<p class="meta">Filing ${pad(f.id)}</p>`;
   } else {
+    const denial = appealableOn(plot);
     body = `${particulars(def)}
+      ${denial ? `<p class="meta">Gary denied your Filing ${pad(denial.id)} here. <button class="plot-link" data-reply="${denial.id}">Appeal it</button></p>` : ""}
       <form><label class="intent">Your intent, in one breath
       <textarea rows="2" maxlength="120" placeholder="a bench, for looking at the pond with" required></textarea></label>
       <button>Submit to Gary</button><p class="problem"></p></form>`;
@@ -264,6 +296,8 @@ function renderCard() {
     renderCard();
   });
   if (f) card.querySelector(".enter")?.addEventListener("click", () => walkInto(f));
+  card.querySelector<HTMLButtonElement>("[data-reply]")?.addEventListener("click", (e) =>
+    openCard(plot, Number((e.currentTarget as HTMLButtonElement).dataset.reply)));
   const form = card.querySelector("form");
   if (form) {
     const box = form.querySelector("textarea")!;
@@ -278,7 +312,7 @@ function renderCard() {
     });
     form.addEventListener("submit", (e) => {
       e.preventDefault();
-      void claim(plot, form);
+      void (form.classList.contains("appeal") && f ? appeal(f, form) : claim(plot, form));
     });
   }
   const shape = card.querySelector<HTMLCanvasElement>("canvas.shape");
@@ -331,6 +365,24 @@ async function claim(plot: number, form: HTMLFormElement) {
   box.value = "";
   letters.push({ plot, out: true });
   closeCard();
+}
+
+async function appeal(f: Filing, form: HTMLFormElement) {
+  const box = form.querySelector("textarea")!;
+  const button = form.querySelector("button")!;
+  button.disabled = true;
+  const made = await fileAppeal(f.id, box.value.trim());
+  button.disabled = false;
+  if (typeof made === "string") return void (form.querySelector(".problem")!.textContent = made);
+  box.value = "";
+  setAppeal(made);
+  letters.push({ plot: f.plot, out: true });
+  renderCard();
+}
+
+function setAppeal(a: Appeal) {
+  const list = (appeals.get(a.filing) ?? []).filter((x) => x.id !== a.id);
+  appeals.set(a.filing, [...list, a].sort((x, y) => x.n - y.n));
 }
 
 /** Hang the card beside its plot, above or below, kept on screen. */
@@ -1304,9 +1356,9 @@ function post(now: number) {
 
 /** A filing as the database now has it, by Realtime (or from the dev back office). */
 async function arrive(f: Filing) {
-  // Gary's ruling on one of ours: it comes by post.
+  // Gary's ruling on one of ours, or an appeal allowed: it comes by post.
   const was = filings.get(f.id);
-  if (f.filer === me && (was?.status === "pending" || was?.status === "committee") && f.status !== was.status) {
+  if (f.filer === me && (was?.status === "pending" || was?.status === "committee" || was?.status === "denied") && f.status !== was.status) {
     unread.add(f.id);
     letters.push({ plot: f.plot, out: false, status: f.status, filing: f.id });
   }
@@ -1347,8 +1399,9 @@ async function start() {
   if (await afterGoogle()) return; // off to Google again, as the resident that account already is
   me = await signIn();
   kept = !(await pencilled());
-  const [loaded, placed] = await Promise.all([loadFilings(), loadPlacements()]);
+  const [loaded, placed, appealed] = await Promise.all([loadFilings(), loadPlacements(), loadAppeals()]);
   for (const f of loaded) upsert(f);
+  for (const a of appealed) setAppeal(a);
   for (const p of placed) placements.set(p.id, p);
   for (const id of new Set(placed.map((p) => p.filing))) regroup(id);
   handles = await handlesFor([me, ...[...filings.values()].map((f) => f.filer)]);
@@ -1383,6 +1436,18 @@ async function start() {
     })
     .on("postgres_changes", { event: "*", schema: "the_commons", table: "filings" }, ({ new: row }) => {
       if (row && "id" in row) void arrive(row as Filing);
+    })
+    .on("postgres_changes", { event: "UPDATE", schema: "the_commons", table: "appeals" }, ({ new: row }) => {
+      const a = row as Appeal;
+      const f = filings.get(a.filing);
+      const was = appeals.get(a.filing)?.find((x) => x.id === a.id);
+      // Gary's dismissal of one of ours comes by post (one allowed came with the filing, in arrive()).
+      if (f?.filer === me && a.heard_at && !was?.heard_at && !a.allowed) {
+        unread.add(f.id);
+        letters.push({ plot: f.plot, out: false, status: "denied", filing: f.id });
+      }
+      setAppeal(a);
+      renderAll();
     })
     .on("postgres_changes", { event: "*", schema: "the_commons", table: "placements" }, ({ eventType, new: row, old }) => {
       // Deletes carry only the id.
