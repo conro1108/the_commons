@@ -4,7 +4,8 @@
 // against them (the escalation is a proposal, not yet in the game). A dry run;
 // api/backoffice.ts runs it and nothing is written. Loaded only when opened.
 
-import { PLOTS, REGIONS } from "./world/index.ts";
+import { mapGround } from "./render.ts";
+import { MAP_H, MAP_W, PLOTS, REGIONS, plotAt, plotById, type PlotDef } from "./world/index.ts";
 
 // Mirrors Call in api/gary.ts.
 interface Call { step: string; model: string; sent: any; got?: any; reasoning?: string; ms?: number; error?: string }
@@ -115,13 +116,51 @@ let panel: HTMLElement | null = null;
 
 /** Open the back office, or close it if it's open. Starts on the given plot. */
 export function backoffice(plot: number) {
-  if (!panel) panel = mount();
+  if (!panel) panel = mount(plot);
   panel.hidden = !panel.hidden;
-  const field = panel.querySelector<HTMLInputElement>("[name=plot]")!;
-  if (!panel.hidden && !field.value) {
-    field.value = String(plot);
-    field.dispatchEvent(new Event("input"));
+}
+
+/** The commons with every plot lit, to pick one from: hovered, it says what it is; clicked, it's the one. */
+function picker(el: HTMLElement, first: number, card: HTMLElement) {
+  const c = el.querySelector("canvas")!;
+  const g = c.getContext("2d")!;
+  let chosen = first;
+  let hover: number | null = null;
+  const cells = (p: PlotDef) => [...p.mask].flatMap((m, i) => (m === "#" ? [[i % p.w, Math.floor(i / p.w)]] : []));
+  const edge = (p: PlotDef, x: number, y: number) =>
+    [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dy]) => p.mask[(y + dy) * p.w + x + dx] !== "#" || x + dx < 0 || x + dx >= p.w);
+
+  function paint() {
+    g.drawImage(mapGround(), 0, 0);
+    g.fillStyle = "#1b262266";
+    g.fillRect(0, 0, MAP_W, MAP_H);
+    for (const p of PLOTS) {
+      const lit = p.id === chosen ? "#ffe9a8dd" : p.id === hover ? "#fffdf3aa" : "#fffdf344";
+      for (const [x, y] of cells(p)) {
+        g.fillStyle = (p.id === chosen || p.id === hover) && edge(p, x, y) ? "#402e3a" : lit;
+        g.fillRect(p.x + x, p.y + y, 1, 1);
+      }
+    }
+    const p = plotById(hover ?? chosen)!;
+    const r = REGIONS[p.region];
+    card.innerHTML = `<h3>${hover !== null && hover !== chosen ? "" : "Chosen: "}Plot ${p.id}, ${esc(p.name)} <span class="dim">on ${esc(r.name)}</span></h3>
+      <p class="dim">${esc(r.blurb)}</p><ul>${p.particulars.map((x) => `<li>${esc(x)}</li>`).join("")}</ul>`;
   }
+  const at = (e: MouseEvent) => {
+    const b = c.getBoundingClientRect();
+    return plotAt(Math.floor(((e.clientX - b.left) / b.width) * MAP_W), Math.floor(((e.clientY - b.top) / b.height) * MAP_H));
+  };
+  c.addEventListener("mousemove", (e) => {
+    const id = at(e)?.id ?? null;
+    if (id !== hover) (hover = id), paint();
+  });
+  c.addEventListener("mouseleave", () => ((hover = null), paint()));
+  c.addEventListener("click", (e) => {
+    const p = at(e);
+    if (p) (chosen = p.id), paint();
+  });
+  paint();
+  return () => chosen;
 }
 
 const STYLE = `
@@ -133,7 +172,11 @@ const STYLE = `
   #dev h3 { margin: 12px 0 4px; }
   #dev textarea, #dev input, #dev select { font: inherit; border: 2px solid #402e3a; background: #fbf4dc; padding: 4px 8px; }
   #dev textarea { display: block; width: 100%; box-sizing: border-box; padding: 8px 10px; resize: vertical; }
-  #dev input[type=number] { width: 64px; }
+  #dev .picker { margin-top: 16px; }
+  #dev .picker canvas { display: block; width: 100%; image-rendering: pixelated; cursor: pointer; border: 2px solid #402e3a; }
+  #dev .picker .card { min-height: 9em; margin-top: 10px; }
+  #dev .picker .card h3 { margin: 0; text-transform: none; letter-spacing: 0; font-size: 14px; color: inherit; }
+  #dev .picker .card ul { margin: 6px 0 0; padding-left: 18px; }
   #dev .row { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; margin-top: 12px; }
   #dev .flows { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 10px; }
   #dev .flow { position: relative; border: 2px solid #c9b88f; padding: 8px 12px; cursor: pointer; }
@@ -165,7 +208,7 @@ const STYLE = `
   #dev .sprite { image-rendering: pixelated; background: #8ec572; padding: 8px; margin: 10px 0; }
 `;
 
-function mount(): HTMLElement {
+function mount(first: number): HTMLElement {
   const style = document.createElement("style");
   style.textContent = STYLE;
   document.head.append(style);
@@ -180,8 +223,9 @@ function mount(): HTMLElement {
     <section>
       <h2>The filing</h2>
       <textarea name="intent" rows="3" maxlength="120" placeholder="a bench, for looking at the pond with"></textarea>
-      <div class="row" data-for="life committee">
-        <label>On plot <input type="number" name="plot" min="1" max="${PLOTS.length}"></label><span class="where dim"></span>
+      <div class="picker" data-for="life committee">
+        <canvas width="${MAP_W}" height="${MAP_H}"></canvas>
+        <div class="card"></div>
       </div>
     </section>
     <section>
@@ -209,10 +253,7 @@ function mount(): HTMLElement {
   const refit = () => panel.querySelectorAll<HTMLElement>("[data-for]").forEach((el) => (el.hidden = !el.dataset.for!.split(" ").includes(flow())));
   refit();
   panel.querySelectorAll("[name=flow]").forEach((r) => r.addEventListener("change", refit));
-  field("plot").addEventListener("input", () => {
-    const p = PLOTS.find((q) => q.id === Number(field("plot").value));
-    $(".where").textContent = p ? `${p.name}, on ${REGIONS[p.region].name}` : "no such plot";
-  });
+  const chosen = picker($(".picker"), first, $(".picker .card"));
 
   // The case, while it's open to appeal: what it's denied under, and what's been said.
   let open: { intent: string; plot: number; bylaw: number | null; exchange: { plea: string; reply: string | null }[]; finding?: string } | null = null;
@@ -269,7 +310,7 @@ function mount(): HTMLElement {
     if (busy) return;
     const f = flow();
     const intent = field<HTMLTextAreaElement>("intent").value.trim();
-    const plot = Number(field("plot").value) || 1;
+    const plot = chosen();
     $(".out").hidden = false;
     $(".stages").innerHTML = "";
     open = null;
