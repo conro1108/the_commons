@@ -300,6 +300,24 @@ revoke execute on function the_commons.apply_appeal(bigint, boolean, boolean, sm
 grant execute on function the_commons.apply_appeal(bigint, boolean, boolean, smallint, text, jsonb, text, text, text, text)
   to service_role;
 
+-- The back office's runs, kept so what's seen there can be talked over afterwards
+-- (scripts/runs.mjs). A session is one case, from filing it to its last appeal.
+-- Written only by api/backoffice.ts; nobody else reads it.
+create table the_commons.backoffice_runs (
+  id      bigint generated always as identity primary key,
+  session uuid not null,
+  at      timestamptz not null default now(),
+  what    text not null,
+  body    jsonb not null, -- what the back office sent
+  result  jsonb,
+  error   text,
+  calls   jsonb not null, -- every model call, as transcript() wrote it down
+  ms      int not null
+);
+create index backoffice_runs_session on the_commons.backoffice_runs (session, id);
+alter table the_commons.backoffice_runs enable row level security;
+grant all on the_commons.backoffice_runs to service_role;
+
 -- Gary's in-tray.
 select pgmq.drop_queue('the_commons_gary')
   where exists (select 1 from pgmq.list_queues() where queue_name = 'the_commons_gary');

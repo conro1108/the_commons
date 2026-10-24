@@ -265,6 +265,7 @@ function mount(first: number): HTMLElement {
     intent: string; plot: number; bylaw: number | null; refused: boolean; exchange: { plea: string; reply: string | null }[]; finding?: string;
   } | null = null;
   let busy = false;
+  let session = crypto.randomUUID(); // one case, filing to last appeal, as kept in backoffice_runs
 
   /** One step of the case: a stage with its outcome and the conversation that produced it. */
   async function stage(title: string, what: Step, input: Record<string, unknown>, before = ""): Promise<any> {
@@ -281,10 +282,10 @@ function mount(first: number): HTMLElement {
     const tick = setInterval(wait, 1000);
     el.scrollIntoView({ behavior: "smooth", block: "start" });
     try {
-      const res = await fetch("/api/backoffice", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ what, id: 9999, ...input }) });
+      const res = await fetch("/api/backoffice", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ what, id: 9999, session, ...input }) });
       const body = await res.json();
       at(".outcome").innerHTML = body.error ? `<p class="problem">${esc(body.error)}</p>` : outcome(what, body.result);
-      at(".took").textContent = `${secs(body.ms)}, ${body.calls?.length ?? 0} calls`;
+      at(".took").textContent = `${secs(body.ms)}, ${body.calls?.length ?? 0} calls${body.run ? `, run ${body.run}` : ""}`;
       at(".calls").innerHTML = (body.calls ?? []).map(message).join("") || `<p class="dim">No models were asked.</p>`;
       return body.error ? undefined : body.result;
     } catch (e) {
@@ -323,6 +324,7 @@ function mount(first: number): HTMLElement {
     $(".out").hidden = false;
     $(".stages").innerHTML = "";
     open = null;
+    session = crypto.randomUUID();
     standing();
     if (!intent) return standing("Write a filing first.");
 

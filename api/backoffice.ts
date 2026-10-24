@@ -1,25 +1,36 @@
 // Gary's back office (src/backoffice.ts): dry runs of his pipeline, nothing
-// written, each with the transcript of every model call it made. Open to
-// anyone who finds the door (a 3s hold on the notice board); deliberately, for now.
+// written but the run itself (backoffice_runs, read by scripts/runs.mjs), each
+// with the transcript of every model call it made. Open to anyone who finds the
+// door (a 3s hold on the notice board); deliberately, for now.
 
 import * as gary from "./gary.js";
 
 type Body = {
-  what: string; id?: number; plot?: number; intent?: string; label?: string;
+  what: string; session?: string; id?: number; plot?: number; intent?: string; label?: string;
   bylaw?: number | null; refused?: boolean; plea?: string; earlier?: { plea: string; reply: string | null }[]; against?: { finding: string; plea: string };
 };
 
 export async function POST(req: Request): Promise<Response> {
   const db = gary.deskDb();
   const t = performance.now();
-  const ms = () => Math.round(performance.now() - t);
   const calls: gary.Call[] = [];
+  let body: Body | undefined;
+  let out: { result?: unknown; error?: string };
   try {
-    const body = await req.json();
-    return Response.json({ result: await gary.transcript.run(calls, () => run(db, body)), calls, ms: ms() });
+    body = (await req.json()) as Body;
+    out = { result: await gary.transcript.run(calls, () => run(db, body!)) };
   } catch (e) {
-    return Response.json({ error: e instanceof Error ? e.message : String(e), calls, ms: ms() }, { status: 500 });
+    out = { error: e instanceof Error ? e.message : String(e) };
   }
+  const ms = Math.round(performance.now() - t);
+  let logged: number | undefined;
+  if (body?.session) {
+    const { data, error } = await db.from("backoffice_runs")
+      .insert({ session: body.session, what: body.what, body, ...out, calls, ms }).select("id").single();
+    if (error) console.error("backoffice_runs:", error.message);
+    logged = data?.id;
+  }
+  return Response.json({ ...out, calls, ms, run: logged }, { status: out.error ? 500 : 200 });
 }
 
 async function run(db: gary.Db, { what, ...b }: Body): Promise<unknown> {
