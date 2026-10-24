@@ -6,7 +6,7 @@
 import * as gary from "./gary.js";
 
 type Body = {
-  what: string; session?: string; id?: number; plot?: number; intent?: string; label?: string;
+  what: string; session?: string; step?: string; id?: number; plot?: number; intent?: string; label?: string;
   bylaw?: number | null; refused?: boolean; plea?: string; earlier?: { plea: string; reply: string | null }[]; against?: { finding: string; plea: string };
 };
 
@@ -31,6 +31,17 @@ export async function POST(req: Request): Promise<Response> {
     logged = data?.id;
   }
   return Response.json({ ...out, calls, ms, run: logged }, { status: out.error ? 500 : 200 });
+}
+
+// A phone that lost the line (a backgrounded tab, mostly) asks after its step here; the run
+// carries on without it and is kept, so the reply turns up once it's done.
+export async function GET(req: Request): Promise<Response> {
+  const step = new URL(req.url).searchParams.get("step");
+  const { data } = step
+    ? await gary.deskDb().from("backoffice_runs").select("id, result, error, calls, ms").eq("body->>step", step).maybeSingle()
+    : { data: null };
+  if (!data) return new Response(null, { status: 404 });
+  return Response.json({ result: data.result, error: data.error ?? undefined, calls: data.calls, ms: data.ms, run: data.id });
 }
 
 async function run(db: gary.Db, { what, ...b }: Body): Promise<unknown> {

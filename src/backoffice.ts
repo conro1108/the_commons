@@ -267,6 +267,16 @@ function mount(first: number): HTMLElement {
   let busy = false;
   let session = crypto.randomUUID(); // one case, filing to last appeal, as kept in backoffice_runs
 
+  /** A step's reply, asked after until it's been kept or the deadline passes. */
+  async function recover(step: string, deadline: number): Promise<any> {
+    while (Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 3000));
+      const res = await fetch(`/api/backoffice?step=${step}`).catch(() => null);
+      if (res?.ok) return res.json();
+    }
+    throw new Error("The line dropped, and his reply never came.");
+  }
+
   /** One step of the case: a stage with its outcome and the conversation that produced it. */
   async function stage(title: string, what: Step, input: Record<string, unknown>, before = ""): Promise<any> {
     panel.querySelectorAll<HTMLDetailsElement>(".talk").forEach((d) => (d.open = false));
@@ -277,13 +287,22 @@ function mount(first: number): HTMLElement {
     $(".stages").append(el);
     const at = (sel: string) => el.querySelector<HTMLElement>(sel)!;
     const t = Date.now();
-    const wait = () => (at(".outcome").innerHTML = `<p class="dim">At his desk… ${Math.round((Date.now() - t) / 1000)}s</p>`);
+    let waiting = "At his desk…";
+    const wait = () => (at(".outcome").innerHTML = `<p class="dim">${waiting} ${Math.round((Date.now() - t) / 1000)}s</p>`);
     wait();
     const tick = setInterval(wait, 1000);
     el.scrollIntoView({ behavior: "smooth", block: "start" });
+    const step = crypto.randomUUID();
     try {
-      const res = await fetch("/api/backoffice", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ what, id: 9999, session, ...input }) });
-      const body = await res.json();
+      let body: any;
+      try {
+        const res = await fetch("/api/backoffice", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ what, id: 9999, session, step, ...input }) });
+        body = await res.json();
+      } catch {
+        // The line dropped (a phone puts a backgrounded tab to sleep), but the run carries on and is kept: ask after it.
+        waiting = "The line dropped; waiting on his reply…";
+        body = await recover(step, t + 5 * 60_000);
+      }
       at(".outcome").innerHTML = body.error ? `<p class="problem">${esc(body.error)}</p>` : outcome(what, body.result);
       at(".took").textContent = `${secs(body.ms)}, ${body.calls?.length ?? 0} calls${body.run ? `, run ${body.run}` : ""}`;
       at(".calls").innerHTML = (body.calls ?? []).map(message).join("") || `<p class="dim">No models were asked.</p>`;
@@ -348,6 +367,7 @@ function mount(first: number): HTMLElement {
     /** The committee hears it on appeal; against them, one plea more. */
     async function upstairs(before = "") {
       const sat = await stage("The committee, on appeal", "escalate", base(), before);
+      if (sat === undefined) return close("Something went wrong at the desk.");
       if (!sat) return close("No quorum, so it'd sit again tomorrow night. The case is closed here.");
       if (sat.verdict.status !== "denied" && sat.verdict.status !== "refused") return close("Allowed on appeal. The case is closed.");
       c.finding = sat.minutes.finding ?? sat.minutes.outcome;
