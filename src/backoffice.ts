@@ -10,17 +10,11 @@ import { PLOTS, REGIONS } from "./world/index.ts";
 interface Call { step: string; model: string; sent: any; got?: any; reasoning?: string; ms?: number; error?: string }
 
 const FLOWS = {
-  rule: ["Rule", "Jev rules. Haiku writes the permit, Jev checks it."],
-  life: ["Whole life", "Ruled, then the committee if referred. Denied, you write back."],
-  committee: ["Committee", "Five councillors speak to it, Jev hears the votes, the clerk writes it up."],
-  appeal: ["Appeal", "Start from a denial, and write back to Gary."],
-  condition: ["Condition", "Gary writes a condition for it."],
+  life: ["File it", "Gary rules, and the committee sits if he refers it. Denied, you write back."],
+  committee: ["Straight to committee", "As if Gary referred it: five councillors, Jev hears the votes, the clerk writes it up."],
   draw: ["Draw", "Haiku draws it as a sprite, taking the filing as the thing's name."],
 } as const;
 type Flow = keyof typeof FLOWS;
-
-// Mirrors CONDITIONS in api/gary.ts; "local" is the plot's own ground's.
-const STOCK = ["local", "north", "flag", "plaque", "tuesdays", "dignified", "neighbour", "goose", "smaller"];
 const STATUS: Record<string, string> = {
   approved: "Approved", conditional: "Approved on condition", committee: "Referred to committee", denied: "Denied", refused: "Refused",
 };
@@ -54,13 +48,11 @@ const heard = (h: any) => `${!h.verdict ? `<span class="stamp refused">Not heard
   ? `<span class="stamp denied">Dismissed</span> <span class="dim">still under ${bylawName(h.verdict.bylaw)}</span>`
   : `<span class="stamp approved">Allowed</span> ${stamp(h.verdict)}`}${said(h.reply)}${conditionOf(h.written)}`;
 
-type Step = "rule" | "life" | "committee" | "condition" | "draw" | "appeal" | "escalate";
+type Step = Flow | "appeal" | "escalate";
 function outcome(what: Step, r: any): string {
   switch (what) {
-    case "rule": return ruled(r);
     case "committee": case "escalate": return sat(r);
     case "appeal": return heard(r);
-    case "condition": return said(r.condition) + (r.wants ? `<p class="dim">Met with: ${esc(r.wants)}</p>` : `<p class="dim">Asks for something written in.</p>`);
     case "draw": return r.sprite ? sprite(r.sprite) : `<p>No usable sprite after three tries.</p>`;
     case "life": return ruled(r.ruled) + (r.ruled.verdict.status === "committee" ? `<h3>The committee</h3>${sat(r.sat)}` : "");
   }
@@ -148,8 +140,6 @@ const STYLE = `
   #dev .flow:has(input:checked) { border-color: #402e3a; background: #ffe9a8; box-shadow: 2px 2px 0 #402e3a; }
   #dev .flow input { position: absolute; opacity: 0; pointer-events: none; }
   #dev .flow b { display: block; } #dev .flow span { display: block; font-size: 12px; color: #7a6a8a; line-height: 1.35; }
-  #dev .opts { margin-top: 16px; display: grid; gap: 12px; }
-  #dev .opts label { display: block; }
   #dev .go { margin-top: 20px; padding: 8px 26px; font-size: 15px; }
   #dev .dim, #dev .k { color: #8a7a98; } #dev .k { margin-right: 6px; }
   #dev blockquote { margin: 10px 0 14px; padding: 10px 14px; background: #fbf4dc; border: 1px dashed #c9b88f; white-space: pre-wrap; }
@@ -190,7 +180,7 @@ function mount(): HTMLElement {
     <section>
       <h2>The filing</h2>
       <textarea name="intent" rows="3" maxlength="120" placeholder="a bench, for looking at the pond with"></textarea>
-      <div class="row" data-for="rule life committee appeal condition">
+      <div class="row" data-for="life committee">
         <label>On plot <input type="number" name="plot" min="1" max="${PLOTS.length}"></label><span class="where dim"></span>
       </div>
     </section>
@@ -198,14 +188,6 @@ function mount(): HTMLElement {
       <h2>What happens to it</h2>
       <div class="flows">${Object.entries(FLOWS).map(([k, [name, blurb]], i) =>
         `<label class="flow"><input type="radio" name="flow" value="${k}"${i ? "" : " checked"}><b>${name}</b><span>${blurb}</span></label>`).join("")}</div>
-      <div class="opts">
-        <label data-for="appeal">Denied under <select name="bylaw">${["the covenant", ...[1, 2, 3, 4, 5, 6, 7].map((n) => `Bylaw ${n}`)]
-          .map((b, i) => `<option value="${i}"${i === 2 ? " selected" : ""}>${b}</option>`).join("")}</select></label>
-        <div class="row" data-for="condition">
-          <label>Falling back on <select name="stock">${STOCK.map((c) => `<option>${c}</option>`).join("")}</select></label>
-          <label><input type="checkbox" name="writeIn"> Ask for something written in</label>
-        </div>
-      </div>
       <button class="go">Run</button>
     </section>
     <section class="out" hidden>
@@ -293,14 +275,11 @@ function mount(): HTMLElement {
     open = null;
     standing();
     if (!intent) return standing("Write a filing first.");
-    if (f === "appeal") return settle({ status: "denied", bylaw: Number(field<HTMLSelectElement>("bylaw").value) }, intent, plot);
 
     busy = true;
-    const r = await stage(FLOWS[f][0], f, {
-      intent, label: intent, plot, stock: field<HTMLSelectElement>("stock").value, writeIn: field("writeIn").checked,
-    });
+    const r = await stage({ life: "Gary rules", committee: "The committee", draw: "Drawn" }[f], f, { intent, label: intent, plot });
     busy = false;
-    if (f === "life" && r) settle(r.sat?.verdict ?? r.ruled.verdict, intent, plot);
+    if (r && f !== "draw") settle(f === "life" ? (r.sat?.verdict ?? r.ruled.verdict) : r.verdict, intent, plot);
   }
 
   async function send() {

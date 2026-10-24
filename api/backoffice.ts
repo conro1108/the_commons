@@ -5,7 +5,7 @@
 import * as gary from "./gary.js";
 
 type Body = {
-  what: string; id?: number; plot?: number; intent?: string; label?: string; stock?: gary.Condition; writeIn?: boolean; condition?: string;
+  what: string; id?: number; plot?: number; intent?: string; label?: string;
   bylaw?: number | null; plea?: string; earlier?: { plea: string; reply: string | null }[]; against?: { finding: string; plea: string };
 };
 
@@ -26,10 +26,6 @@ async function run(db: gary.Db, { what, ...b }: Body): Promise<unknown> {
   const filing = { id: b.id ?? 9999, intent: b.intent ?? "" };
   const plot = gary.plotOf(b.plot ?? 1);
   switch (what) {
-    case "rule":
-      return gary.rule(filing, plot, await gary.precedentFor(db, filing.id, plot));
-    case "condition":
-      return gary.writeCondition(filing, b.stock ?? "local", { plot, writeIn: b.writeIn });
     case "committee":
       return gary.sit(filing, plot);
     case "life": {
