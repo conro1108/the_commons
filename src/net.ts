@@ -138,21 +138,33 @@ export async function fileClaim(plot: number, intent: string): Promise<string | 
   return said(error);
 }
 
+/** One rung up from a denial: to Gary, or to the committee (see db/tables.sql). */
 export interface Appeal {
   id: number;
   filing: number;
-  n: number; // 1 to APPEALS
-  plea: string;
+  n: number; // 1 to 5, in order up the ladder
+  court: "gary" | "committee";
+  plea: string | null; // none when Gary's third dismissal sent it up by itself
   heard_at: string | null;
   allowed: boolean | null;
   bylaw: number | null; // dismissed: what the denial still stands under
-  reply: string | null;
+  reply: string | null; // Gary's, or the committee's finding
+  minutes: Filing["minutes"];
 }
 
-/** A denied filing gets this many goes at making its case. The database counts too. */
+/** A denied filing gets this many goes at Gary before it goes up to the committee. The database counts too. */
 export const APPEALS = 3;
 
-const APPEAL_COLUMNS = "id, filing, n, plea, heard_at, allowed, bylaw, reply";
+/** Which court would hear the next appeal, as the database's next_appeal() reckons it (bar the plot being free). */
+export function nextCourt(status: string, made: Appeal[]): Appeal["court"] | null {
+  const toGary = made.filter((a) => a.court === "gary").length;
+  const upstairs = made.filter((a) => a.court === "committee").length;
+  if (status === "denied" && toGary < APPEALS) return "gary";
+  if ((status === "refused" && upstairs === 0) || upstairs === 1) return "committee";
+  return null;
+}
+
+const APPEAL_COLUMNS = "id, filing, n, court, plea, heard_at, allowed, bylaw, reply, minutes";
 
 export async function loadAppeals(): Promise<Appeal[]> {
   const { data, error } = await supabase.from("appeals").select(APPEAL_COLUMNS).order("id");
@@ -160,12 +172,12 @@ export async function loadAppeals(): Promise<Appeal[]> {
   return data;
 }
 
-/** Write back to Gary about a denial; the appeal, or a clerk's explanation if it can't be heard. */
+/** Write back about a denial, to whoever's next to hear it; the appeal, or a clerk's explanation if it can't be heard. */
 export async function fileAppeal(filing: number, plea: string): Promise<Appeal | string> {
   const { data, error } = await supabase.from("appeals").insert({ filing, plea }).select(APPEAL_COLUMNS).single();
   if (!error) return data;
   if (error.code === "23514") return "An appeal must be between 3 and 280 characters.";
-  if (error.code === "42501" || error.code === "23505") return "Gary can't hear an appeal on this filing just now.";
+  if (error.code === "42501" || error.code === "23505" || error.code === "23502") return "This filing can't be appealed just now.";
   return said(error);
 }
 

@@ -6,7 +6,7 @@
 // machine. The access token in ~/projects/.supabase.env (or, in CI, the
 // environment) is the only secret.
 //
-//   node db/push.mjs db/schema.sql
+//   node db/push.mjs db/logic.sql
 //
 // Canonical copy lives in ~/projects/supabase/. Projects keep their own copy so
 // each repo stays self-contained; if you fix a bug here, fix it there too.
@@ -39,7 +39,7 @@ function die(message) {
   process.exit(1);
 }
 
-const file = process.argv[2] ?? "db/schema.sql";
+const file = process.argv[2] ?? "db/logic.sql";
 const sql = readFileSync(file, "utf8");
 const env = loadEnv();
 const ref = env.SUPABASE_PROJECT_REF;

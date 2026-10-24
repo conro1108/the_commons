@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
-    "db:push": "node db/push.mjs db/schema.sql",
+    "db:push": "node db/push.mjs db/logic.sql",
     "runs": "node scripts/runs.mjs",
     "world": "node scripts/world.ts && node scripts/plots-sql.ts",
     "test": "node --test test/*.test.ts"

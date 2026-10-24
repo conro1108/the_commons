@@ -1,34 +1,34 @@
--- The Commons' slice of the shared toybox database.
---
--- Full rebuild, not a migration: dropped and recreated on every push, by hand
--- (`npm run db:push`) or by .github/workflows/db.yml when db/** changes on main.
--- That wipes the commons, which is fine until people are actually living in it
--- (see PLAN.md, "Open questions"). RLS on every table, in the block that creates it.
+-- The Commons' logic: everything in the database that isn't a table. CI
+-- (.github/workflows/db.yml) reruns it in full whenever db/** changes on main,
+-- so it must be safe to run again: it drops every function and policy in the
+-- schema (triggers go with their functions) and makes them afresh, in one
+-- transaction. The tables are db/tables.sql, and nothing here touches their rows
+-- but the plots'.
 --
 -- Queues, cron jobs and Vault secrets are database-wide, so everything here is
--- named the_commons_* and torn down by this file before it's recreated. The one
--- thing this file doesn't own is the Vault secret `the_commons_gary` (the bearer
--- token the database sends to /api/gary, also GARY_SECRET in Vercel env) — it's
--- a secret, so it was created once by hand and survives rebuilds.
+-- named the_commons_*. The one thing not owned here is the Vault secret
+-- `the_commons_gary` (the bearer token the database sends to /api/gary, also
+-- GARY_SECRET in Vercel env), created once by hand.
+
+begin;
 
 create extension if not exists pgmq;
 create extension if not exists pg_net;
 
-drop schema if exists the_commons cascade;
-create schema the_commons;
-grant usage on schema the_commons to anon, authenticated, service_role;
+do $$
+declare r record;
+begin
+  for r in select policyname, tablename from pg_policies where schemaname = 'the_commons' loop
+    execute format('drop policy %I on the_commons.%I', r.policyname, r.tablename);
+  end loop;
+  for r in select p.oid::regprocedure as fn from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+      where n.nspname = 'the_commons' loop
+    execute format('drop function %s cascade', r.fn);
+  end loop;
+end $$;
 
 -- Plots: the commons' land, cut once by scripts/world.ts. Generated from
 -- src/world/plots.json by `npm run world`; edit the script, not this block.
-create table the_commons.plots (
-  id     smallint primary key,
-  name   text not null,
-  region text not null,
-  w      smallint not null,
-  h      smallint not null,
-  mask   text not null check (length(mask) = w * h) -- row-major, '#' is the plot
-);
-alter table the_commons.plots enable row level security;
 create policy "plots are public" on the_commons.plots for select using (true);
 grant select on the_commons.plots to anon, authenticated;
 grant all on the_commons.plots to service_role;
@@ -62,7 +62,8 @@ insert into the_commons.plots (id, name, region, w, h, mask) values
   (26, 'the Far End', 'bank', 43, 32, '.........#################.........................##################........................##################........................###################.......................####################.....................######################....................#######################...................#########################.................##########################.................##########################..................#################################..........##################################..........##################################..........##################################..........#################################...........#################################...........#################################..........##################################..........##################################..........##################################..........#################################...........#################################...........################################...........###############################.............#############################...............###########################.................########################....................######################......................####################.......................###################.........................#################...........................##############...........'),
   (27, 'Streamside', 'green', 21, 32, '.............#####...............######..............########...........##########..........############........#############.......##############......###############.....################....#################...##################..###################.####################..###################..###################...##################...##################....##################...##################....#################....#################.....################......##############.......##############........#############........#############.........############.........############..........###########..........###########...........##########...........##########.'),
   (28, 'Frog Hollow', 'wetend', 28, 23, '...................####......................######...................##########...............#############............################..........###################......######################....########################...##########################..##########################..##########################..###########################..##########################..###########################.###########################..#########################...######################......###################..........################............#############...............##########...................######......................####....................'),
-  (29, 'the Hut Garden', 'green', 23, 15, '#########################################################################################################################################################################################################################################################################################################################################################');
+  (29, 'the Hut Garden', 'green', 23, 15, '#########################################################################################################################################################################################################################################################################################################################################################')
+on conflict (id) do update set name = excluded.name, region = excluded.region, w = excluded.w, h = excluded.h, mask = excluded.mask;
 -- </plots>
 
 -- Whether a build cell (x, y) on a plot is part of it.
@@ -78,36 +79,6 @@ grant execute on function the_commons.in_plot(smallint, int, int) to anon, authe
 -- Filings: the whole map. A plot is held by its one filing in a held status;
 -- denied, refused and lost filings free it again. Clients insert only the three columns
 -- they get to choose; everything else is Gary's, written by /api/gary.
-create table the_commons.filings (
-  id         bigint generated always as identity primary key, -- "Filing 0041"
-  filer      uuid not null default auth.uid() references auth.users on delete cascade,
-  plot       smallint not null references the_commons.plots,
-  intent     text not null check (length(btrim(intent)) between 3 and 120),
-  status     text not null default 'pending'
-             check (status in ('pending', 'approved', 'conditional', 'committee', 'denied', 'refused', 'lost')),
-  condition  text, -- written for this filing by Gary; met when he inspects and says so
-  wants      text, -- the one palette prop Gary thinks would most help meet it
-  bylaw      smallint, -- 1-7 for the bylaws, 0 for the covenant of the plot's region
-  permit     text,
-  verdict    jsonb, -- Jev's raw answers and the models used; stored, never regenerated
-  minutes    jsonb, -- a referral's night in committee: {outcome, finding, members: [{seat, vote, speech}]}
-  -- The holder's ground painting: one char per build cell of the plot's box,
-  -- row-major, '.' for its native ground (src/content/ground.ts). Null until
-  -- painted; its length is checked against the plot by trigger.
-  ground     text check (length(ground) <= 1408 and ground ~ '^[.a-z]*$'),
-  filed_at   timestamptz not null default now(),
-  stamped_at timestamptz,
-  -- Gary's inspections of a condition: the latest, in full in inspections.
-  built_at     timestamptz, -- last change to what's on the plot (trigger-set)
-  inspect_sent timestamptz, -- when Gary was last sent round
-  inspected_at timestamptz,
-  remark       text,
-  met_at       timestamptz,
-  audited_at   timestamptz -- when Gary last came back to audit it (send_auditor)
-);
-create unique index filings_plot_held on the_commons.filings (plot)
-  where status in ('pending', 'approved', 'conditional', 'committee');
-alter table the_commons.filings enable row level security;
 -- Pending text hasn't been past Gary yet; refused text failed moderation; lost
 -- text never reached him. None of it is anyone's business but the filer's.
 create policy "rulings are public; your own filings are yours"
@@ -125,7 +96,6 @@ create policy "paint your own granted plot"
 grant insert (plot, intent) on the_commons.filings to authenticated;
 grant update (ground) on the_commons.filings to authenticated;
 grant all on the_commons.filings to service_role;
-alter publication supabase_realtime add table the_commons.filings;
 
 -- Repainting the ground counts as building. The painting is the plot's box, cell for cell.
 create function the_commons.ground_built() returns trigger
@@ -145,24 +115,6 @@ create trigger filings_ground_built before update of ground on the_commons.filin
 -- are build cells of the plot's box, one per map pixel, and the anchor must be
 -- on the plot itself (in_plot). One prop anchored per cell; uncapped otherwise. The prop is
 -- free text so new art is a client change; RLS can't judge art, only ownership.
-create table the_commons.placements (
-  id        bigint generated always as identity primary key,
-  filing    bigint not null references the_commons.filings on delete cascade,
-  x         smallint not null check (x between 0 and 43),
-  y         smallint not null check (y between 0 and 31),
-  prop      text not null check (prop ~ '^[a-z_]{1,24}$'),
-  size      smallint not null default 1 check (size between 1 and 3), -- drawn this many times over
-  -- A written-in item ('item') carries its own name, shown once Gary has read
-  -- it (label_ok); until then it's a parcel to everyone but its builder.
-  label     text check (label is null or (prop = 'item' and length(btrim(label)) between 1 and 24)),
-  label_ok  boolean,
-  label_check jsonb, -- the decision model's raw answer
-  sprite    jsonb, -- Gary's drawing of it, {rows, palette}; reused for the same name
-  sprite_drafts jsonb, -- every attempt at the drawing
-  placed_at timestamptz not null default now(),
-  unique (filing, x, y)
-);
-alter table the_commons.placements enable row level security;
 create policy "placements are public"
   on the_commons.placements for select using (true);
 create policy "build on your own granted plot"
@@ -183,7 +135,6 @@ create policy "take down what's on your plot"
 grant select on the_commons.placements to anon, authenticated;
 grant insert (filing, x, y, prop, label, size), update (x, y, size), delete on the_commons.placements to authenticated;
 grant all on the_commons.placements to service_role;
-alter publication supabase_realtime add table the_commons.placements;
 
 -- Anything built, moved or taken down marks the plot as changed, for Gary.
 create function the_commons.placement_built() returns trigger
@@ -199,53 +150,37 @@ create trigger placements_built after insert or update or delete on the_commons.
 -- Inspections: every time Gary has come round about a condition, or to audit
 -- a granted plot against its permit. Written only
 -- by /api/gary; the latest is copied onto the filing for the map.
-create table the_commons.inspections (
-  id       bigint generated always as identity primary key,
-  filing   bigint not null references the_commons.filings on delete cascade,
-  at       timestamptz not null default now(),
-  kind     text not null default 'condition' check (kind in ('condition', 'audit')),
-  met      boolean not null, -- for an audit: in order
-  remark   text not null,
-  evidence jsonb not null, -- what he saw: props, ground, neighbours
-  answers  jsonb not null  -- the decision model's raw answers
-);
-alter table the_commons.inspections enable row level security;
 create policy "inspections are public"
   on the_commons.inspections for select using (true);
 grant select on the_commons.inspections to anon, authenticated;
 grant all on the_commons.inspections to service_role;
 
--- Appeals: a denied filer may write back to make their case, up to three
--- times, one at a time, while the plot is still free. Gary reads the plea and
--- rules again (/api/gary); allowed, the filing is granted, its original denial
--- kept for the record. Clients insert only the plea; the rest is Gary's.
-create table the_commons.appeals (
-  id       bigint generated always as identity primary key,
-  filing   bigint not null references the_commons.filings on delete cascade,
-  n        smallint not null check (n between 1 and 3), -- set by trigger
-  plea     text not null check (length(btrim(plea)) between 3 and 280),
-  filed_at timestamptz not null default now(),
-  heard_at timestamptz,
-  ok       boolean, -- fit for anyone else to read
-  allowed  boolean,
-  bylaw    smallint, -- dismissed: what the denial still stands under (0 the covenant)
-  reply    text,
-  record   jsonb, -- the decision model's answers and the drafts; stored, never regenerated
-  unique (filing, n)
-);
-alter table the_commons.appeals enable row level security;
+-- Appeals: the ladder up from a denial (db/tables.sql has how it goes). Gary
+-- hears his rungs as they come in; the committee hears its own at its nightly
+-- sitting (convene). Both through /api/gary.
 
--- Whether the caller may appeal this filing now.
-create function the_commons.can_appeal(bigint) returns boolean
-language sql stable security definer set search_path = '' as $$
-  select exists (select 1 from the_commons.filings f
-    where f.id = $1 and f.filer = auth.uid() and f.status = 'denied'
-      and not exists (select 1 from the_commons.filings g where g.plot = f.plot
-        and g.status in ('pending', 'approved', 'conditional', 'committee'))
-      and not exists (select 1 from the_commons.appeals a where a.filing = f.id and a.heard_at is null)
-      and (select count(*) from the_commons.appeals a where a.filing = f.id) < 3)
-$$;
-grant execute on function the_commons.can_appeal(bigint) to authenticated;
+-- Which court would hear this filing's next appeal, if it may have one now: the
+-- filing denied or refused, its plot still free, nothing on it still being heard.
+create function the_commons.next_appeal(bigint) returns text
+language plpgsql stable security definer set search_path = '' as $$
+declare
+  f the_commons.filings;
+  to_gary int;
+  upstairs int;
+begin
+  select * into f from the_commons.filings where id = $1;
+  if f.id is null or f.status not in ('denied', 'refused') then return null; end if;
+  if exists (select 1 from the_commons.filings g where g.plot = f.plot
+      and g.status in ('pending', 'approved', 'conditional', 'committee')) then return null; end if;
+  if exists (select 1 from the_commons.appeals a where a.filing = f.id and a.heard_at is null) then return null; end if;
+  select count(*) filter (where court = 'gary'), count(*) filter (where court = 'committee')
+    into to_gary, upstairs from the_commons.appeals where filing = f.id;
+  if f.status = 'denied' and to_gary < 3 then return 'gary'; end if;
+  -- A refusal goes straight up; a denial got there by itself after Gary's third. Then one last plea.
+  if f.status = 'refused' and upstairs = 0 or upstairs = 1 then return 'committee'; end if;
+  return null;
+end $$;
+grant execute on function the_commons.next_appeal(bigint) to authenticated;
 
 -- Heard appeals are public with their filing; unheard or unfit ones are the filer's.
 create policy "heard appeals are public; your own are yours"
@@ -253,75 +188,69 @@ create policy "heard appeals are public; your own are yours"
   using (ok or exists (select 1 from the_commons.filings f where f.id = filing and f.filer = auth.uid()));
 create policy "appeal a denial"
   on the_commons.appeals for insert to authenticated
-  with check (the_commons.can_appeal(filing));
+  with check (court = the_commons.next_appeal(filing)
+    and exists (select 1 from the_commons.filings f where f.id = filing and f.filer = auth.uid()));
 grant select on the_commons.appeals to anon, authenticated;
 grant insert (filing, plea) on the_commons.appeals to authenticated;
 grant all on the_commons.appeals to service_role;
-alter publication supabase_realtime add table the_commons.appeals;
 
--- Numbered in order; two at once collide on (filing, n) rather than make a fourth.
+-- Numbered in order, and sent to whichever court is next; two at once collide
+-- on (filing, n) rather than both being heard.
 create function the_commons.number_appeal() returns trigger
 language plpgsql security definer set search_path = '' as $$
 begin
   new.n := (select count(*) + 1 from the_commons.appeals where filing = new.filing);
+  new.court := coalesce(new.court, the_commons.next_appeal(new.filing));
   return new;
 end $$;
 revoke execute on function the_commons.number_appeal() from public, anon, authenticated;
 create trigger appeals_number before insert on the_commons.appeals
   for each row execute function the_commons.number_appeal();
 
--- Gary's hearing, written down in one go: the appeal is heard only once, and
--- allowed only if the plot is still free. /api/gary's alone.
+-- A hearing, written down in one go: heard only once, and allowed only if the
+-- plot is still free. Gary's third dismissal sends it up to the committee.
+-- /api/gary's alone.
 create function the_commons.apply_appeal(
   p_id bigint, p_ok boolean, p_allowed boolean, p_bylaw smallint, p_reply text, p_record jsonb,
-  p_status text, p_condition text, p_wants text, p_claimed text
+  p_status text, p_condition text, p_wants text, p_claimed text, p_minutes jsonb
 ) returns boolean
 language plpgsql security definer set search_path = '' as $$
 declare
   f bigint;
 begin
   update the_commons.appeals
-    set heard_at = now(), ok = p_ok, allowed = p_allowed, bylaw = p_bylaw, reply = p_reply, record = p_record
+    set heard_at = now(), ok = p_ok, allowed = p_allowed, bylaw = p_bylaw, reply = p_reply, record = p_record, minutes = p_minutes
     where id = p_id and heard_at is null
     returning filing into f;
-  if f is null or not p_allowed then return false; end if;
+  if f is null then return false; end if;
+  if not p_allowed then
+    if (select count(*) from the_commons.appeals where filing = f and court = 'gary') = 3
+        and not exists (select 1 from the_commons.appeals where filing = f and court = 'committee') then
+      insert into the_commons.appeals (filing, court) values (f, 'committee');
+    end if;
+    return false;
+  end if;
   begin
     update the_commons.filings
       set status = p_status, condition = p_condition, wants = p_wants, stamped_at = now()
-      where id = f and status = 'denied';
+      where id = f and status in ('denied', 'refused');
   exception when unique_violation then
     update the_commons.appeals set allowed = false, reply = p_claimed where id = p_id;
     return false;
   end;
   return true;
 end $$;
-revoke execute on function the_commons.apply_appeal(bigint, boolean, boolean, smallint, text, jsonb, text, text, text, text)
+revoke execute on function the_commons.apply_appeal(bigint, boolean, boolean, smallint, text, jsonb, text, text, text, text, jsonb)
   from public, anon, authenticated;
-grant execute on function the_commons.apply_appeal(bigint, boolean, boolean, smallint, text, jsonb, text, text, text, text)
+grant execute on function the_commons.apply_appeal(bigint, boolean, boolean, smallint, text, jsonb, text, text, text, text, jsonb)
   to service_role;
 
--- The back office's runs, kept so what's seen there can be talked over afterwards
--- (scripts/runs.mjs). A session is one case, from filing it to its last appeal.
--- Written only by api/backoffice.ts; nobody else reads it.
-create table the_commons.backoffice_runs (
-  id      bigint generated always as identity primary key,
-  session uuid not null,
-  at      timestamptz not null default now(),
-  what    text not null,
-  body    jsonb not null, -- what the back office sent
-  result  jsonb,
-  error   text,
-  calls   jsonb not null, -- every model call, as transcript() wrote it down
-  ms      int not null
-);
-create index backoffice_runs_session on the_commons.backoffice_runs (session, id);
-alter table the_commons.backoffice_runs enable row level security;
+-- The back office's runs: api/backoffice.ts's alone.
 grant all on the_commons.backoffice_runs to service_role;
 
 -- Gary's in-tray.
-select pgmq.drop_queue('the_commons_gary')
-  where exists (select 1 from pgmq.list_queues() where queue_name = 'the_commons_gary');
-select pgmq.create('the_commons_gary');
+select pgmq.create('the_commons_gary')
+  where not exists (select 1 from pgmq.list_queues() where queue_name = 'the_commons_gary');
 
 create function the_commons.enqueue_filing() returns trigger
 language plpgsql security definer set search_path = '' as $$
@@ -360,7 +289,7 @@ create trigger placements_known before insert on the_commons.placements
 create trigger placements_enqueue after insert on the_commons.placements
   for each row when (new.label is not null and new.label_ok is null) execute function the_commons.enqueue_item();
 
--- And so does an appeal.
+-- And so does an appeal to Gary. One to the committee waits for its sitting.
 create function the_commons.enqueue_appeal() returns trigger
 language plpgsql security definer set search_path = '' as $$
 begin
@@ -369,7 +298,7 @@ begin
 end $$;
 revoke execute on function the_commons.enqueue_appeal() from public, anon, authenticated;
 create trigger appeals_enqueue after insert on the_commons.appeals
-  for each row execute function the_commons.enqueue_appeal();
+  for each row when (new.court = 'gary') execute function the_commons.enqueue_appeal();
 
 -- Every five seconds: hand each queued filing to /api/gary. A message stays in the
 -- queue (invisible for two minutes, then retried) until its filing is no longer
@@ -525,14 +454,46 @@ select cron.unschedule(jobname) from cron.job where jobname like 'the_commons_%'
 select cron.schedule('the_commons_gary', '5 seconds', 'select the_commons.drain_gary()');
 select cron.schedule('the_commons_inspector', '30 seconds', 'select the_commons.send_inspector(null)');
 select cron.schedule('the_commons_auditor', '0 15 * * *', 'select the_commons.send_auditor()');
--- The committee meets at 4am: each referral is sent to /api/gary to be
--- debated. One that can't make quorum stays referred until the next night.
-select cron.schedule('the_commons_committee', '0 4 * * *', $$
-  select net.http_post(
-    url := 'https://the-commons-eosin.vercel.app/api/gary',
-    body := jsonb_build_object('committee', f.id),
-    headers := jsonb_build_object('Content-Type', 'application/json',
-      'Authorization', 'Bearer ' || (select decrypted_secret from vault.decrypted_secrets where name = 'the_commons_gary')),
-    timeout_milliseconds := 30000)
-  from the_commons.filings f where f.status = 'committee'
-$$);
+-- The committee meets at 4am: each referral, and each appeal that's come up to
+-- it, is sent to /api/gary to be debated. One that can't make quorum waits for
+-- the next night. Returns how many it sat on; run it by hand to sit now.
+create function the_commons.convene() returns int
+language plpgsql security definer set search_path = '' as $$
+declare
+  secret text;
+  item jsonb;
+  n int := 0;
+begin
+  select decrypted_secret into secret from vault.decrypted_secrets where name = 'the_commons_gary';
+  if secret is null then return 0; end if;
+  for item in
+    select jsonb_build_object('committee', id) from the_commons.filings where status = 'committee'
+    union all
+    select jsonb_build_object('committee_appeal', id) from the_commons.appeals where court = 'committee' and heard_at is null
+  loop
+    n := n + 1;
+    perform net.http_post(
+      url := 'https://the-commons-eosin.vercel.app/api/gary',
+      body := item,
+      headers := jsonb_build_object('Content-Type', 'application/json',
+                                    'Authorization', 'Bearer ' || secret),
+      timeout_milliseconds := 30000);
+  end loop;
+  return n;
+end $$;
+revoke execute on function the_commons.convene() from public, anon, authenticated;
+select cron.schedule('the_commons_committee', '0 4 * * *', 'select the_commons.convene()');
+
+-- Realtime, for the tables the map watches.
+do $$
+declare t text;
+begin
+  foreach t in array array['filings', 'placements', 'appeals'] loop
+    if not exists (select 1 from pg_publication_tables
+        where pubname = 'supabase_realtime' and schemaname = 'the_commons' and tablename = t) then
+      execute format('alter publication supabase_realtime add table the_commons.%I', t);
+    end if;
+  end loop;
+end $$;
+
+commit;

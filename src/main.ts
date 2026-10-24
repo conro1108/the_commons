@@ -5,7 +5,7 @@ import {
   LANDMARKS, MAP_H, MAP_W, REGIONS, ZOOM, plotAt, plotById, plotLabel, route, slide, walkable, type PlotDef, type Point,
 } from "./world/index.ts";
 import {
-  APPEALS, HELD, afterGoogle, avatarOf, fileAppeal, fileClaim, handlesFor, keepPapers, loadAppeals, loadFilings, loadPlacements, move, paint,
+  APPEALS, HELD, afterGoogle, nextCourt, avatarOf, fileAppeal, fileClaim, handlesFor, keepPapers, loadAppeals, loadFilings, loadPlacements, move, paint,
   pencilled, place, rehandle, saveProfile, signIn, summonGary, supabase, unplace,
   type Appeal, type Filing, type Placement,
 } from "./net.ts";
@@ -28,7 +28,7 @@ const STAMP: Record<Filing["status"], string> = {
   conditional: "Approved with conditions",
   committee: "Referred to committee",
   denied: "Denied",
-  refused: "Denied", // crude: private, and not appealable, but a denial all the same
+  refused: "Denied", // crude: private, and appealed only to the committee, but a denial all the same
   lost: "Lost in the post",
 };
 
@@ -113,7 +113,7 @@ function ruling(f: Filing, fresh = false) {
   if (unread.has(f.id)) return `<p class="stamp pending">In the post</p><p class="meta">Gary's reply is on its way.</p>`;
   // Appealed, the filing reads as first denied, whatever came of it after.
   const heard = appeals.get(f.id) ?? [];
-  if (heard.length) return stamped({ ...f, status: "denied" }) + heard.map((a, i) => appealHtml(a, fresh && i === heard.length - 1)).join("");
+  if (heard.length) return stamped({ ...f, status: "denied" }) + heard.map((a, i) => appealHtml(a, f, heard, fresh && i === heard.length - 1)).join("");
   return stamped(f, fresh);
 }
 
@@ -128,26 +128,34 @@ function stamped(f: Filing, fresh = false) {
     ${minutesHtml(f)}`;
 }
 
-/** One appeal: the plea, and what Gary made of it. */
-function appealHtml(a: Appeal, fresh: boolean) {
+/** One appeal: the plea, and what Gary (or the committee) made of it. */
+function appealHtml(a: Appeal, f: Filing, all: Appeal[], fresh: boolean) {
   const under = a.bylaw === null ? "" : ` (${a.bylaw ? `Bylaw ${a.bylaw}` : "covenant"})`;
-  return `<div class="condition"><p><b>Appeal ${a.n}.</b> <q>${esc(a.plea)}</q></p>
+  const title = a.court === "gary" ? `Appeal ${a.n}.`
+    : all.some((b) => b.court === "committee" && b.n < a.n) ? "Final appeal, to the committee."
+    : a.plea ? "Appeal to the committee." : "Gone up to the committee.";
+  return `<div class="condition"><p><b>${title}</b>${a.plea ? ` <q>${esc(a.plea)}</q>` : ""}</p>
     ${a.heard_at
       ? `<p class="stamp ${a.allowed ? "approved" : "denied"}${fresh ? " thunk" : ""}">${a.allowed ? "Allowed" : `Dismissed${under}`}</p>
-        <p class="permit">${esc(a.reply ?? "")}</p>`
-      : `<p class="stamp pending">In Gary's in-tray</p>`}</div>`;
+        <p class="permit">${esc(a.reply ?? "")}</p>${a.minutes ? membersHtml(a.minutes, f) : ""}`
+      : `<p class="stamp pending">${a.court === "gary" ? "In Gary's in-tray" : "Before the committee tonight"}</p>`}</div>`;
 }
 
-/** Room to write back about one of our denials, if there's any left. */
+/** Room to write back about one of our denials, to whoever's next to hear it, if there's anyone left. */
 function appealForm(f: Filing) {
-  if (f.filer !== me || f.status !== "denied" || unread.has(f.id)) return "";
+  if (f.filer !== me || (f.status !== "denied" && f.status !== "refused") || unread.has(f.id)) return "";
   const made = appeals.get(f.id) ?? [];
   if (made.some((a) => !a.heard_at)) return "";
-  if (made.length >= APPEALS) return `<p class="meta">No further appeals. The matter is closed.</p>`;
+  const next = nextCourt(f.status, made);
+  if (!next) return `<p class="meta">No further appeals. The matter is closed.</p>`;
   if (heldPlots().has(f.plot)) return `<p class="meta">The plot has been claimed since, so there is nothing left to appeal.</p>`;
-  return `<form class="appeal"><label class="intent">Not quite understood? Make your case
+  const toGary = made.filter((a) => a.court === "gary").length;
+  const [label, note] = next === "gary" ? ["Not quite understood? Make your case", `${APPEALS - toGary} of ${APPEALS} left`]
+    : made.some((a) => a.court === "committee") ? ["One last plea, against the committee's finding", "This one's final."]
+    : ["Gary won't hear an appeal on this himself. Put your case to the committee", "It sits overnight."];
+  return `<form class="appeal"><label class="intent">${label}
       <textarea rows="3" maxlength="280" placeholder="it isn't a business: the lemonade is free" required></textarea></label>
-      <button>Appeal</button> <span class="meta">${APPEALS - made.length} of ${APPEALS} left</span><p class="problem"></p></form>`;
+      <button>Appeal</button> <span class="meta">${note}</span><p class="problem"></p></form>`;
 }
 
 /** Our latest denial on a free plot that could still be appealed, to point to from its card. */
@@ -156,15 +164,18 @@ const appealableOn = (plot: number) =>
 
 const VOTED = (v: string | null, f: Filing) =>
   !v ? "remarks struck from the record" : v === "approved" ? "in favour" : v === "conditional" ? "in favour, on a condition"
+  : v === "refused" ? "against, as still unfit"
   : v === "covenant" ? `against, under the covenant of ${REGIONS[plotOf(f).region].name}` : `against, under Bylaw ${v.slice(1)}`;
 
 /** A referral's night in committee: the clerk's finding, then each member in turn. */
 function minutesHtml(f: Filing) {
   const m = f.minutes;
   if (!m) return "";
-  return `<div class="condition"><p><b>Minutes of the committee.</b> ${esc(m.finding ?? m.outcome)}</p>
-    ${m.members.map((x) => `<p class="meta"><b>${esc(x.seat)}</b>, ${VOTED(x.vote, f)}.${x.speech ? ` <q>${esc(x.speech)}</q>` : ""}</p>`).join("")}</div>`;
+  return `<div class="condition"><p><b>Minutes of the committee.</b> ${esc(m.finding ?? m.outcome)}</p>${membersHtml(m, f)}</div>`;
 }
+
+const membersHtml = (m: NonNullable<Filing["minutes"]>, f: Filing) =>
+  m.members.map((x) => `<p class="meta"><b>${esc(x.seat)}</b>, ${VOTED(x.vote, f)}.${x.speech ? ` <q>${esc(x.speech)}</q>` : ""}</p>`).join("");
 
 const when = (iso: string) => new Date(iso).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
 
@@ -1355,7 +1366,7 @@ function post(now: number) {
 async function arrive(f: Filing) {
   // Gary's ruling on one of ours, or an appeal allowed: it comes by post.
   const was = filings.get(f.id);
-  if (f.filer === me && (was?.status === "pending" || was?.status === "committee" || was?.status === "denied") && f.status !== was.status) {
+  if (f.filer === me && (was?.status === "pending" || was?.status === "committee" || was?.status === "denied" || was?.status === "refused") && f.status !== was.status) {
     unread.add(f.id);
     letters.push({ plot: f.plot, out: false, status: f.status, filing: f.id });
   }
@@ -1434,11 +1445,12 @@ async function start() {
     .on("postgres_changes", { event: "*", schema: "the_commons", table: "filings" }, ({ new: row }) => {
       if (row && "id" in row) void arrive(row as Filing);
     })
-    .on("postgres_changes", { event: "UPDATE", schema: "the_commons", table: "appeals" }, ({ new: row }) => {
+    .on("postgres_changes", { event: "*", schema: "the_commons", table: "appeals" }, ({ new: row }) => {
+      if (!row || !("id" in row)) return;
       const a = row as Appeal;
       const f = filings.get(a.filing);
       const was = appeals.get(a.filing)?.find((x) => x.id === a.id);
-      // Gary's dismissal of one of ours comes by post (one allowed came with the filing, in arrive()).
+      // A dismissal of one of ours comes by post (one allowed came with the filing, in arrive()).
       if (f?.filer === me && a.heard_at && !was?.heard_at && !a.allowed) {
         unread.add(f.id);
         letters.push({ plot: f.plot, out: false, status: "denied", filing: f.id });

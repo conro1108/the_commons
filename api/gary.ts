@@ -1,10 +1,11 @@
 // Gary's desk. The database POSTs a filing id here (see drain_gary() in
-// db/schema.sql); Gary rules on it and writes the result back with the secret
+// db/logic.sql); Gary rules on it and writes the result back with the secret
 // key, so nobody forges a permit. A written-in item's name comes as
 // { item: id }, to be read before anyone else sees it, then drawn. It also POSTs { inspect: id } when a plot
 // with an outstanding condition has been built on (send_inspector()), and
 // Gary goes round to see whether the condition's been met, and { committee: id }
-// nightly for each referral, which five members debate (see sit()), and { audit: id } on his
+// nightly for each referral, which five members debate (see sit()), and { committee_appeal: id } for each
+// appeal that's come up to them (sitAppeal()), and { audit: id } on his
 // daily round of plots built on since he last came (send_auditor(), audit()), and { appeal: id } when a
 // denied filer writes back to make their case (hear()). A decision model rules from enums; the scribe only
 // writes the prose, and the decision model checks it before it goes out. The write is conditional on the filing still being
@@ -738,18 +739,52 @@ export async function hear(
 /** An appeal from the in-tray. Allowed, the filing is granted, keeping its original denial for the record. */
 async function hearAppeal(db: Db, id: number): Promise<Response> {
   const { data: a } = await db.from("appeals").select("*").eq("id", id).maybeSingle();
-  if (!a || a.heard_at) return Response.json({ skipped: true });
+  if (!a || a.heard_at || a.court !== "gary") return Response.json({ skipped: true });
   const { data: f } = await db.from("filings").select("*").eq("id", a.filing).single();
   if (!f || f.status !== "denied") return Response.json({ skipped: true });
   const { data: earlier } = await db.from("appeals").select("plea, reply").eq("filing", f.id).lt("n", a.n).not("ok", "is", false).order("n");
   const plot = plotOf(f.plot);
   const h = await hear(f, a.plea, earlier ?? [], plot);
   const allowed = !!h.verdict && h.verdict.status !== "denied";
-  // One transaction (apply_appeal() in db/schema.sql), so a slow hearing retried alongside can't grant what the other dismissed.
+  // One transaction (apply_appeal() in db/logic.sql), so a slow hearing retried alongside can't grant what the other dismissed.
   const { data, error } = await db.rpc("apply_appeal", {
     p_id: id, p_ok: h.ok, p_allowed: allowed, p_bylaw: allowed ? null : (h.verdict?.bylaw ?? null), p_reply: h.reply, p_record: h.record,
     p_status: allowed ? h.verdict!.status : null, p_condition: h.written?.condition ?? null, p_wants: h.written?.wants ?? null,
-    p_claimed: "Sorry, someone else claimed the plot while I was reading your appeal.",
+    p_claimed: "Sorry, someone else claimed the plot while I was reading your appeal.", p_minutes: null,
+  });
+  if (error) throw error;
+  return Response.json({ allowed: data });
+}
+
+/** An appeal that's come up to the committee, at its nightly sitting: after Gary's third dismissal (no plea),
+ * straight from a refusal, or one last plea against the committee's own finding. Null quorum: it waits a night. */
+async function sitAppeal(db: Db, id: number): Promise<Response> {
+  const { data: a } = await db.from("appeals").select("*").eq("id", id).maybeSingle();
+  if (!a || a.heard_at || a.court !== "committee") return Response.json({ skipped: true });
+  const { data: f } = await db.from("filings").select("*").eq("id", a.filing).single();
+  if (!f || (f.status !== "denied" && f.status !== "refused")) return Response.json({ skipped: true });
+  const { data: before } = await db.from("appeals").select("court, plea, reply, bylaw, ok").eq("filing", f.id).lt("n", a.n).order("n");
+  const refused = f.status === "refused";
+  const up = (before ?? []).find((b) => b.court === "committee"); // there already: this is the last plea, against its finding
+  const toGary = (before ?? []).filter((b) => b.court === "gary");
+  const exchange = refused ? [{ plea: (up ?? a).plea as string, reply: null }] : toGary.filter((b) => b.ok !== false).map(({ plea, reply }) => ({ plea, reply }));
+  const plot = plotOf(f.plot);
+  const sat = await sit(f, plot, {
+    bylaw: refused ? null : (up?.bylaw ?? toGary.at(-1)?.bylaw ?? f.bylaw),
+    refused,
+    exchange,
+    ...(up && { against: { finding: up.reply, plea: a.plea } }),
+  });
+  if (!sat) return Response.json({ quorum: false });
+  const { verdict, written, minutes, record } = sat;
+  const allowed = verdict.status === "approved" || verdict.status === "conditional";
+  // Pleas to the committee haven't been past Gary: read before anyone else may. A refusal's stay its filer's.
+  const fit = !refused && (!a.plea || (await ask("plea", { plea: a.plea }, { unacceptable: { type: "boolean", instructions: UNFIT("appeal") } }))
+    .answers.unacceptable.probability <= 0.5);
+  const { data, error } = await db.rpc("apply_appeal", {
+    p_id: id, p_ok: fit, p_allowed: allowed, p_bylaw: allowed ? null : verdict.bylaw, p_reply: minutes.finding ?? minutes.outcome,
+    p_record: record, p_status: allowed ? verdict.status : null, p_condition: written?.condition ?? null, p_wants: written?.wants ?? null,
+    p_claimed: "The plot was claimed by another filing before the committee could sit. It can only apologise.", p_minutes: minutes,
   });
   if (error) throw error;
   return Response.json({ allowed: data });
@@ -1086,9 +1121,13 @@ export async function POST(req: Request): Promise<Response> {
 }
 
 /** Whatever's landed in the in-tray. */
-export async function desk(db: Db, body: { id?: number; inspect?: number; item?: number; committee?: number; audit?: number; appeal?: number }): Promise<Response> {
+export async function desk(
+  db: Db,
+  body: { id?: number; inspect?: number; item?: number; committee?: number; committee_appeal?: number; audit?: number; appeal?: number },
+): Promise<Response> {
   if (body.inspect) return inspectPlot(db, body.inspect);
   if (body.appeal) return hearAppeal(db, body.appeal);
+  if (body.committee_appeal) return sitAppeal(db, body.committee_appeal);
   if (body.audit) return auditPlot(db, body.audit);
   if (body.item) return readLabel(db, body.item);
   if (body.committee) return convene(db, body.committee);

@@ -44,5 +44,5 @@ test("Gary knows every prop on the palette, at the size it's drawn", () => {
 });
 
 test("the database's plots are the baked ones: rerun `npm run world` if not", () => {
-  assert.ok(readFileSync(new URL("../db/schema.sql", import.meta.url), "utf8").includes(plotsBlock(world as never)));
+  assert.ok(readFileSync(new URL("../db/logic.sql", import.meta.url), "utf8").includes(plotsBlock(world as never)));
 });
