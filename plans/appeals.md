@@ -20,9 +20,9 @@ appeal ladder the back office proved out becomes the game's.
   which is next (`next_appeal`), so the client only sends the plea.
 
 ## Checklist
-- [ ] tables.sql / logic.sql, push.mjs, CI, plots generator, test, docs
-- [ ] appeals: court, nullable plea, minutes; next_appeal; escalation in apply_appeal; nightly sitting
-- [ ] api: sitAppeal, with the plea checked for fitness
-- [ ] client: the form at each rung, committee rows with their minutes, realtime inserts
-- [ ] one-time rebuild, live check (back office can't reach the real flow: run a sitting by hand)
-- [ ] PLAN.md: phase 4 done, deeper building + ongoing compliance before the world tick
+- [x] tables.sql / logic.sql, push.mjs, CI, plots generator, test, docs
+- [x] appeals: court, nullable plea, minutes; next_appeal; escalation in apply_appeal; nightly sitting
+- [x] api: sitAppeal, with the plea checked for fitness
+- [x] client: the form at each rung, committee rows with their minutes, realtime inserts
+- [x] one-time rebuild, live check: both ladders run to the end as anonymous players through RLS, sittings run by hand (`select the_commons.convene()`); a sixth plea refused. Not seen: the committee allowing one, or the cards in a browser
+- [x] PLAN.md: phase 4 done, deeper building + ongoing compliance before the world tick

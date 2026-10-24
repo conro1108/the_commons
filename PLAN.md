@@ -128,9 +128,11 @@ later `petitions`/`signatures`. Users are `auth.users` ids; names come from
 - **Frontend, Functions, crons:** Vercel Git integration; every push to `main`
   deploys. `SUPABASE_SECRET_KEY` goes in Vercel env when the first Function
   lands. `.env` holds only the publishable URL/key and is committed.
-- **Database:** `.github/workflows/db.yml` runs `db/push.mjs` on any `db/**`
-  change. Repo secrets are set. `schema.sql` owns everything in-database —
-  tables, RLS, queues, cron schedules, triggers — so it's the IaC.
+- **Database:** `.github/workflows/db.yml` reruns `db/logic.sql` (functions,
+  triggers, policies, queue, cron, the plots' rows) on any `db/**` change.
+  Repo secrets are set. `db/tables.sql` is the tables; it's never rerun, and
+  a change to one is a hand-run `alter table` folded back in, so a push never
+  wipes the commons.
 - **Edge Functions:** to be decided — deploy from the same workflow via the
   Management API, if the tick ever leaves SQL.
 - Schema `the_commons` is created and exposed to PostgREST.
@@ -145,11 +147,16 @@ phase starts and kept current while building, so work can resume mid-phase.
 2. **Build it** — in progress ([plans/phase-2.md](plans/phase-2.md)). Place
    props on your plot, free and uncapped, in a focused view of the plot.
 3. **Give it some life** — done ([plans/phase-3.md](plans/phase-3.md)).
-4. **Somewhere, not a grid** — in progress ([plans/phase-4.md](plans/phase-4.md)).
+4. **Somewhere, not a grid** — done ([plans/phase-4.md](plans/phase-4.md)).
    A composed map of five kinds of ground; plot site and climate feed the loop.
-5. **The field changes while you're away** — the world tick: hedges spread,
+   After it: the appeal ladder up to the committee, and a schema split so a
+   push stops wiping the commons ([plans/appeals.md](plans/appeals.md)).
+5. **Building, in depth, and keeping to it** — more to building a plot than
+   placing props, and a permit that's held to over time: Gary comes back now
+   and then to see a plot is still what was filed for, and amends it if not.
+6. **The field changes while you're away** — the world tick: hedges spread,
    paths wear in, the cast notices what got built.
-6. **The daily newspaper** — the nightly Gazette, with an OG front page.
+7. **The daily newspaper** — the nightly Gazette, with an OG front page.
 
 Later: petitions and the council, mail, public works, identity (see Open
 questions).
@@ -161,18 +168,9 @@ questions).
   draw a sprite for each approved label (generated once, stored, reused by
   name) so the umbrella looks like one. Hold off until a generator can match
   the canon art; a bad sprite is worse than a parcel.
-- The schema rebuild wipes the commons — and its cron jobs and queue, which
-  live in the schema too. Fine while prototyping; once people live here, the
-  commons is the one toy whose data isn't disposable. **Needed soon, before
-  real players:** CI rebuilds on any `db/**` push, so even a one-line cron
-  tweak wipes every filing. Plan: split into `db/tables.sql` (`create table if
-  not exists`, never auto-run; changes are hand-run `alter table`s folded back
-  in) and `db/logic.sql` (functions, triggers, RLS, cron, queue — rerunnable,
-  pushed by CI).
 - pg_cron jobs, pgmq queues, and Vault secrets are database-wide, not
   per-schema — name them `the_commons_*` so they don't collide with siblings,
-  and have `schema.sql` unschedule its own jobs before rescheduling.
-- Avatar: hatch a form, or import a Meadow export like the_farm does?
+  and have `logic.sql` unschedule its own jobs before rescheduling.
 - One commons for everyone, or several (a "parish" per N players)?
 - How big is a plot, and does the map grow as people arrive?
 - **Identity: persistent accounts via Google** (and maybe GitHub), so a plot

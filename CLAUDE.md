@@ -7,8 +7,12 @@ Tone follows the_farm's DESIGN.md — deadpan institutional absurdism, no fail
 states, no stamina.
 
 Vite + TypeScript + canvas, no framework. Vercel Functions in `api/`, Supabase
-schema `the_commons` in `db/schema.sql`. `npm run dev` / `npm run build` /
-`npm run db:push`.
+schema `the_commons`. `npm run dev` / `npm run build` / `npm run db:push`.
+
+- The commons' data is kept, unlike the other toys': no `drop schema`.
+  `db/tables.sql` is the tables, never rerun; change one with a hand-run
+  `alter table` and fold it back in. `db/logic.sql` is everything else, rerun
+  in full by CI (and `npm run db:push`), so it must stay safe to run twice.
 
 - cozy_sprites is canon and finished: copy content from it into
   `src/content/canon/`, never import from or modify it.
