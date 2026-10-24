@@ -66,9 +66,9 @@ No fail states: spread is never damage, a dispute is never a loss.
   It never mutates state directly.
 - Every result is stored and never regenerated for the same input.
 - Players' text is public and sign-in is anonymous. Gary's stamp doubles as
-  moderation: a crude or nasty filing is *refused* (status `refused`, shown to
-  nobody else). Gary still writes back, flustered,
-  then indignant, then too shocked to finish, in proportion, and never repeats what was filed.
+  moderation: a crude or nasty filing is denied (status `refused`, shown to
+  nobody else, never appealed). Gary loses his patience over it — withering,
+  then incredulous, then snapping outright — in proportion, and never repeats what was filed.
   *Lost in the post* is only for filings Gary never received.
 - Gary's ruling is one choice — approve, conditional, committee, or denied
   under a specific bylaw — so a denial always cites one. GLM writes the

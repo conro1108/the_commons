@@ -28,7 +28,7 @@ const STAMP: Record<Filing["status"], string> = {
   conditional: "Approved with conditions",
   committee: "Referred to committee",
   denied: "Denied",
-  refused: "Refused",
+  refused: "Denied", // crude: private, and not appealable, but a denial all the same
   lost: "Lost in the post",
 };
 

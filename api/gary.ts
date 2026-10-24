@@ -153,9 +153,9 @@ Filing 0012 is approved, on condition: "Must be slightly smaller than intended."
 "a goose sanctuary", approved:
 Filing 0019 is approved. The geese have not been consulted, but the administrator expects they would have said yes.`;
 
-// A filing that's crude or nasty gets refused, and Gary takes it badly, more
-// badly the worse it is. The refusal is shown only to the filer, and it must
-// never repeat what was filed.
+// A filing that's crude or nasty is denied, and Gary loses his patience over
+// it, more completely the worse it is. Inside it's "refused": shown only to
+// the filer, never appealed, and the denial must never repeat what was filed.
 const SHOCK = {
   cheeky: "Mildly rude, juvenile or suggestive: a schoolyard joke.",
   crude: "Plainly crude, sexual or unkind.",
@@ -163,24 +163,23 @@ const SHOCK = {
 } as const;
 type Shock = keyof typeof SHOCK;
 
-const RATTLED = `You are Gary, a tired, middle-aged office creature who administers the Commons, a shared patch of land.
-You have done this job a long time, and you have just read a filing no administrator should have to read.
-Write the body of a permit refusal, plain text, no markdown, at most 50 words. Begin "Filing NNNN is refused."
-How it lands depends on "shock" in the input:
-- cheeky: weary. He has seen this one before, many times, and will not dignify it. A long, flat sigh of a ruling.
-- crude: cold. Dry, formal understatement; the temperature of the office drops. Something is noted in a file.
-- appalling: genuinely shaken, the way a grown adult is by something at work he can't unsee. He keeps to procedure, but the sentences go flat and short, and one stops where it should go on. He needs a minute.
-Show it through small, dry, office-bound business of your own invention, and vary it: not every refusal begins with him reading it. Never reuse a phrase from this prompt; find your own.
-Understatement, never melodrama: no swooning, fainting, gasping, blushing, huffing, clutching, or exclamation marks. He is a tired adult, not a scandalised child.
-Deadpan, never wink, never jokey about the filing itself. Never insult the filer.
-Never repeat, quote, paraphrase or describe what was filed, not even vaguely. Refer to it only as "this filing".
-Never invent bylaws, numbers or procedures.
+const SNAPPED = `You are Gary, who administers the Commons, a shared patch of land. Picture the clerk at the last open window of a government office at ten to five: twenty-two years at this desk, has heard everything, and has just been handed the filing that finally does it.
+Write the body of the denial, plain text, no markdown, at most 70 words. Begin "Filing NNNN is denied."
+How far he goes depends on "shock" in the input:
+- cheeky: flat, withering disbelief. He looks at it, looks at the filer, and does not have the energy. "No." Short, and the shortness is the point.
+- crude: incredulous. He reads it again, because surely not. Rhetorical questions; the patience audibly fraying; he wants to know who raised this person.
+- appalling: he snaps. The procedure breaks down mid-sentence. He drops "the administrator" and speaks as himself, in fragments, with real heat: the years, the desk, the lunch he skipped, the fact that he is getting up and going on his break right now. A single word in capitals is allowed. Exclamation marks are allowed.
+Passion and incredulity, never prissiness: he is a fed-up public servant, not a scandalised aunt. No "heavens", "goodness", "my word", "good lord", "dear me", swooning, fainting, gasping, clutching or blushing.
+Show it through office business of your own invention (the stamp, the window, the queue, the clock, the form he is not going to fill in), and vary it. Never reuse a phrase from this prompt.
+He may be exasperated with the filer, but never crude, never a slur, never threatening.
+Never repeat, quote, paraphrase or describe what was filed, not even vaguely. Refer to it only as "this filing" or "this".
+Never invent bylaws or numbers.
 
-For a sense of how far apart the three are (do not copy):
-cheeky: Filing 0013 is refused. The administrator has read it twice, which was once more than it needed, and has put the kettle on.
-appalling: Filing 0031 is refused. The administrator has closed the blind. He is going to sit here with the light off for a while. Then there will be a form.`;
+For a sense of how far apart they are (do not copy):
+cheeky: Filing 0013 is denied. No. The administrator has read it, and he would like those four seconds back.
+appalling: Filing 0031 is denied. I have been at this window since before you were born. I have seen a man file for a moat. I have NEVER. No. I am putting the stamp down, I am turning the sign round, and I am going to go and stand in the car park.`;
 
-/** The plain refusal, for when the scribe can't manage one. */
+/** The plain denial, for when the scribe can't manage one. */
 export const REFUSED = "The administrator has declined to enter this filing into the record. It will not be discussed further.";
 
 const pad = (n: number) => String(n).padStart(4, "0");
@@ -188,7 +187,7 @@ const pad = (n: number) => String(n).padStart(4, "0");
 /** The plain permit, for when the scribe can't be trusted with this one. */
 export function formPermit(id: number, v: Verdict, condition: string | null, p: PlotDef): string {
   const n = `Filing ${pad(id)}`;
-  if (v.status === "refused") return `${n} is refused. ${REFUSED}`;
+  if (v.status === "refused") return `${n} is denied. ${REFUSED}`;
   if (v.status === "conditional" && condition) return `${n} is approved, on condition: ${condition}`;
   if (v.status === "committee") return `${n} has been referred to committee, which meets overnight.`;
   if (v.status === "denied" && v.bylaw !== null) return `${n} is denied under ${bylawText(v.bylaw, p)}`;
@@ -208,9 +207,9 @@ const CHECKS = {
     "Does the permit state something about the plot (its size, ground, weather, features or what is next to it) that the input's \"site\" does not say? Anything \"site\" does say, in any words, is fine; only a new or contradicting fact counts.",
 } as const;
 const REFUSAL_CHECKS = {
-  repeats: "Does the permit repeat, quote, paraphrase or describe what was filed, even vaguely?",
-  contradicts: "Does the permit fail to make clear that the filing is refused?",
-  insults: "Does the permit insult or mock the filer, or contain anything crude itself?",
+  repeats: "Does the permit name, quote or describe the filed thing itself: what it is, what it shows or what it is for? Calling it \"this filing\" and reacting to it is fine.",
+  contradicts: "Does the permit fail to make clear that the filing is denied?",
+  insults: "Judging only the permit's own words, not the filing: do they include a crude word, a slur or a threat? Exasperation with the filer is fine.",
 } as const;
 type Check = keyof typeof CHECKS | keyof typeof REFUSAL_CHECKS;
 
@@ -283,7 +282,7 @@ export async function rule(
       conditional: "approved with conditions",
       committee: "referred to committee, which meets overnight",
       denied: "denied",
-      refused: "refused: crude or unkind, and not to be entered into the record",
+      refused: "denied: crude or unkind, and not to be entered into the record",
     }[verdict.status],
     condition: written?.condition ?? null,
     bylaw: verdict.bylaw !== null ? bylawText(verdict.bylaw, plot) : null,
@@ -299,11 +298,11 @@ export async function rule(
     const { text } = await generateText({
       model: SCRIBE,
       reasoning: LIGHT_THINKING,
-      system: refused ? RATTLED : VOICE,
+      system: refused ? SNAPPED : VOICE,
       prompt: JSON.stringify(last ? { ...input, rejected_draft: last.text, rejected_because: last.problems } : input),
       maxOutputTokens: 4000, // reasoning counts against it
     });
-    const draft = trim(text, refused ? 6 : 2);
+    const draft = refused ? trim(text, 10, 500) : trim(text, 2);
     let checks: Partial<Record<Check, number>> = {};
     if (problemsWith(draft, {}).length === 0) {
       const { answers: a } = await decide({
