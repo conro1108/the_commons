@@ -44,7 +44,11 @@ const ruled = (r: any) => `${stamp(r.verdict)}${said(r.permit)}${conditionOf(r.w
 const sat = (r: any) => !r ? `<p>No quorum: fewer than three speeches stood. It sits again tomorrow night.</p>`
   : `${stamp(r.verdict, r.verdict.count)}${said(r.minutes.finding ?? r.minutes.outcome)}${conditionOf(r.written)}
     <ul class="votes">${r.minutes.members.map((m: any) => `<li><b>${esc(m.seat)}</b> ${VOTE(m.vote)}</li>`).join("")}</ul>`;
-const pleaded = (plea: string) => `<p class="plea"><span class="k">You wrote</span> <q>${esc(plea)}</q></p>`;
+const pleaded = (plea: string) => `<p class="said-by-you"><span class="k">You wrote</span> <q>${esc(plea)}</q></p>`;
+const filed = (intent: string, plot?: number) => {
+  const p = plot !== undefined ? plotById(plot) : null;
+  return `<p class="said-by-you"><span class="k">You filed</span> <q>${esc(intent)}</q>${p ? ` <span class="dim">on Plot ${p.id}, ${esc(p.name)}, ${esc(REGIONS[p.region].name)}</span>` : ""}</p>`;
+};
 const heard = (h: any) => `${!h.verdict ? `<span class="stamp refused">Not heard</span>` : h.verdict.status === "denied"
   ? `<span class="stamp denied">Dismissed</span> <span class="dim">still under ${bylawName(h.verdict.bylaw)}</span>`
   : `<span class="stamp approved">Allowed</span> ${stamp(h.verdict)}`}${said(h.reply)}${conditionOf(h.written)}`;
@@ -177,7 +181,6 @@ const STYLE = `
   #dev .picker .card { min-height: 9em; margin-top: 10px; }
   #dev .picker .card h3 { margin: 0; text-transform: none; letter-spacing: 0; font-size: 14px; color: inherit; }
   #dev .picker .card ul { margin: 6px 0 0; padding-left: 18px; }
-  #dev .row { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; margin-top: 12px; }
   #dev .flows { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 10px; }
   #dev .flow { position: relative; border: 2px solid #c9b88f; padding: 8px 12px; cursor: pointer; }
   #dev .flow:has(input:checked) { border-color: #402e3a; background: #ffe9a8; box-shadow: 2px 2px 0 #402e3a; }
@@ -190,8 +193,9 @@ const STYLE = `
   #dev .stamp.approved, #dev .stamp.conditional { color: #3d7a3a; }
   #dev .stamp.denied, #dev .stamp.refused { color: #b5404f; }
   #dev .stamp.committee { color: #b07a1e; }
-  #dev .stage { margin-top: 32px; padding-top: 20px; border-top: 2px dashed #c9b88f; }
-  #dev .stage:first-child { margin-top: 0; padding-top: 0; border-top: 0; }
+  #dev .step { margin-top: 32px; padding-top: 20px; border-top: 2px dashed #c9b88f; }
+  #dev .step:first-child { margin-top: 0; padding-top: 0; border-top: 0; }
+  #dev .said-by-you { margin: 0 0 12px; font-size: 15px; }
   #dev .reply { margin-top: 32px; padding: 16px 18px; border: 2px solid #402e3a; background: #fff4c9; }
   #dev .reply textarea { margin-top: 8px; background: #fffdf3; }
   #dev .closed { margin-top: 28px; font-style: italic; }
@@ -263,7 +267,7 @@ function mount(first: number): HTMLElement {
   async function stage(title: string, what: Step, input: Record<string, unknown>, before = ""): Promise<any> {
     panel.querySelectorAll<HTMLDetailsElement>(".talk").forEach((d) => (d.open = false));
     const el = document.createElement("div");
-    el.className = "stage";
+    el.className = "step";
     el.innerHTML = `<h2>${title} <span class="took dim"></span></h2>${before}<div class="outcome"></div>
       <details class="talk" open><summary>The conversation</summary><div class="calls"></div></details>`;
     $(".stages").append(el);
@@ -318,7 +322,8 @@ function mount(first: number): HTMLElement {
     if (!intent) return standing("Write a filing first.");
 
     busy = true;
-    const r = await stage({ life: "Gary rules", committee: "The committee", draw: "Drawn" }[f], f, { intent, label: intent, plot });
+    const r = await stage({ life: "Gary rules", committee: "The committee", draw: "Drawn" }[f], f, { intent, label: intent, plot },
+      filed(intent, f === "draw" ? undefined : plot));
     busy = false;
     if (r && f !== "draw") settle(f === "life" ? (r.sat?.verdict ?? r.ruled.verdict) : r.verdict, intent, plot);
   }
