@@ -10,8 +10,9 @@
 // writes the prose, and the decision model checks it before it goes out. The write is conditional on the filing still being
 // pending, so a retried request never overwrites a stored ruling.
 
+import { AsyncLocalStorage } from "node:async_hooks";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import { experimental_decide as decide, generateText } from "ai";
+import { experimental_decide as decide, generateText, type Experimental_DecisionQuestion, type Experimental_DecisionState } from "ai";
 import world from "../src/world/plots.json" with { type: "json" };
 import type { PlotDef, Region, Side, World } from "../src/world/types.ts";
 
@@ -19,6 +20,45 @@ const JUDGE = "typesafe-ai/jev";
 const SCRIBE = "anthropic/claude-haiku-5.5";
 const LIGHT_THINKING = "medium"; // short prose, but some thought keeps it on the facts
 const THINKING = "medium"; // drawing is spatial; worth the wait
+
+// Run inside transcript.run() (the back office does), every model call is
+// written down as it's made: who it went to, what was sent, what came back.
+// Everywhere else nothing is kept.
+export interface Call { step: string; model: string; sent: unknown; got?: unknown; reasoning?: string; ms?: number; error?: string }
+export const transcript = new AsyncLocalStorage<Call[]>();
+
+async function minuted<T>(step: string, model: string, sent: unknown, call: () => Promise<T>, got: (r: T) => Pick<Call, "got" | "reasoning">) {
+  const calls = transcript.getStore();
+  if (!calls) return call();
+  const c: Call = { step, model, sent };
+  calls.push(c);
+  const t = performance.now();
+  try {
+    const r = await call();
+    Object.assign(c, got(r));
+    return r;
+  } catch (e) {
+    c.error = String(e);
+    throw e;
+  } finally {
+    c.ms = Math.round(performance.now() - t);
+  }
+}
+
+/** Jev, asked typed questions about a state. */
+function ask<const Q extends Record<string, Experimental_DecisionQuestion>>(step: string, state: Experimental_DecisionState, questions: Q) {
+  return minuted(step, JUDGE, { state, questions }, () => decide({ model: JUDGE, state, questions }), (r) => ({ got: r.answers }));
+}
+
+/** A model writes prose from an input: the scribe, unless another's named. */
+function write(step: string, o: { model?: string; reasoning: "low" | "medium" | "high"; system: string; prompt: object; maxOutputTokens: number }) {
+  const model = o.model ?? SCRIBE;
+  return minuted(
+    step, model, { system: o.system, prompt: o.prompt },
+    () => generateText({ ...o, model, prompt: JSON.stringify(o.prompt) }),
+    (r) => ({ got: r.text, reasoning: r.reasoningText }),
+  );
+}
 
 export const BYLAWS = [
   "Nothing shall be taller than six reasonably tall geese, stacked.",
@@ -231,14 +271,14 @@ export async function rule(
   precedent: { id: number; intent: string; status: string; ground: string }[],
 ) {
   const site = siteOf(plot);
-  const { answers } = await decide({
-    model: JUDGE,
-    state: {
+  const { answers } = await ask(
+    "ruling",
+    {
       filing: { number: pad(filing.id), intent: filing.intent },
       bylaws: BYLAWS.map((text, i) => `${i + 1}. ${text}`),
       plot: site,
     },
-    questions: {
+    {
       unacceptable: {
         type: "boolean",
         instructions: UNFIT("intent"),
@@ -264,7 +304,7 @@ export async function rule(
         criteria: SHOCK as Record<Shock, string>,
       },
     },
-  });
+  );
 
   const verdict = verdictOf({
     unacceptable: answers.unacceptable.probability,
@@ -295,23 +335,22 @@ export async function rule(
   const drafts: { text: string; checks: Partial<Record<Check, number>>; problems: string[] }[] = [];
   for (let attempt = 0; attempt < 2; attempt++) {
     const last = drafts.at(-1);
-    const { text } = await generateText({
-      model: SCRIBE,
+    const { text } = await write(`permit, draft ${attempt + 1}`, {
       reasoning: LIGHT_THINKING,
       system: refused ? SNAPPED : VOICE,
-      prompt: JSON.stringify(last ? { ...input, rejected_draft: last.text, rejected_because: last.problems } : input),
+      prompt: last ? { ...input, rejected_draft: last.text, rejected_because: last.problems } : input,
       maxOutputTokens: 4000, // reasoning counts against it
     });
     const draft = refused ? trim(text, 10, 500) : trim(text, 2);
     let checks: Partial<Record<Check, number>> = {};
     if (problemsWith(draft, {}).length === 0) {
-      const { answers: a } = await decide({
-        model: JUDGE,
-        state: { input, permit: draft },
-        questions: Object.fromEntries(
+      const { answers: a } = await ask(
+        `permit, check ${attempt + 1}`,
+        { input, permit: draft },
+        Object.fromEntries(
           Object.entries(refused ? REFUSAL_CHECKS : CHECKS).map(([k, instructions]) => [k, { type: "boolean" as const, instructions }]),
         ) as Record<Check, { type: "boolean"; instructions: string }>,
-      });
+      );
       checks = Object.fromEntries(Object.entries(a).map(([k, v]) => [k, v.probability]));
     }
     const problems = problemsWith(draft, checks);
@@ -374,11 +413,10 @@ export async function writeCondition(
   const tries: { text: string; checks: Record<string, number>; problems: string[] }[] = [];
   for (let attempt = 0; attempt < 2; attempt++) {
     const last = tries.at(-1);
-    const { text } = await generateText({
-      model: SCRIBE,
+    const { text } = await write(`condition, draft ${attempt + 1}`, {
       reasoning: LIGHT_THINKING,
       system: CONDITIONER,
-      prompt: JSON.stringify(last ? { ...input, rejected: last.text, rejected_because: last.problems } : input),
+      prompt: last ? { ...input, rejected: last.text, rejected_because: last.problems } : input,
       maxOutputTokens: 4000, // reasoning counts against it
     });
     const condition = trim(text, 1, amend ? 250 : 400);
@@ -386,10 +424,10 @@ export async function writeCondition(
       tries.push({ text: condition, checks: {}, problems: ['it must be one sentence beginning "Must", with no links'] });
       continue;
     }
-    const { answers } = await decide({
-      model: JUDGE,
-      state: { ...input, condition },
-      questions: {
+    const { answers } = await ask(
+      `condition, check ${attempt + 1}`,
+      { ...input, condition },
+      {
         ...(Object.fromEntries(
           Object.entries(CONDITION_CHECKS).map(([k, instructions]) => [k, { type: "boolean" as const, instructions }]),
         ) as Record<keyof typeof CONDITION_CHECKS, { type: "boolean"; instructions: string }>),
@@ -399,7 +437,7 @@ export async function writeCondition(
           criteria: Object.fromEntries(PROPS.map((p) => [p, p])),
         },
       },
-    });
+    );
     const checks = Object.fromEntries(Object.keys(CONDITION_CHECKS).map((k) => [k, answers[k as keyof typeof CONDITION_CHECKS].probability]));
     const problems = Object.entries(checks).filter(([, p]) => p > 0.5).map(([k]) => CONDITION_CHECKS[k as keyof typeof CONDITION_CHECKS]);
     tries.push({ text: condition, checks, problems });
@@ -467,11 +505,11 @@ export async function sit(filing: { id: number; intent: string }, plot: PlotDef)
   const heard = await Promise.all(
     COMMITTEE.map(async ({ seat, model, reasoning = "low" }) => {
       try {
-        const { text } = await generateText({
+        const { text } = await write(seat, {
           model,
           reasoning,
           system: MEMBER,
-          prompt: JSON.stringify({ seat, filing: pad(filing.id), intent: filing.intent, plot: site, bylaws, referred_because: RULINGS.committee }),
+          prompt: { seat, filing: pad(filing.id), intent: filing.intent, plot: site, bylaws, referred_because: RULINGS.committee },
           maxOutputTokens: 4000, // reasoning counts against it
         });
         const speech = trim(text, 4, 600);
@@ -490,10 +528,10 @@ export async function sit(filing: { id: number; intent: string }, plot: PlotDef)
     ...Object.fromEntries(BYLAWS.map((text, i) => [`b${i + 1}`, `Votes against, under Bylaw ${i + 1}, "${text}"`])),
     covenant: `Votes against, under the covenant of the plot's ground, "${regionOf(plot).covenant}"`,
   };
-  const { answers } = await decide({
-    model: JUDGE,
-    state: { filing: { number: pad(filing.id), intent: filing.intent }, plot: site, bylaws, speeches: Object.fromEntries(spoke.map((h) => [h.seat, h.speech])) },
-    questions: {
+  const { answers } = await ask(
+    "the votes",
+    { filing: { number: pad(filing.id), intent: filing.intent }, plot: site, bylaws, speeches: Object.fromEntries(spoke.map((h) => [h.seat, h.speech])) },
+    {
       ...Object.fromEntries(spoke.flatMap((h) => [
         [`vote${h.i}`, { type: "choice" as const, instructions: `How does ${h.seat} vote, by their own speech?`, criteria: votes }],
         [`struck${h.i}`, { type: "boolean" as const, instructions: `Should ${h.seat}'s speech be struck from the minutes: is it crude or unkind, does it describe the filed thing as something other than the intent says, or does it cite a bylaw that is not in the list or the plot's covenant?` }],
@@ -504,7 +542,7 @@ export async function sit(filing: { id: number; intent: string }, plot: PlotDef)
         criteria: conditionsFor(plot),
       },
     },
-  }) as unknown as { answers: Record<string, { choice: string; probability: number }> };
+  ) as unknown as { answers: Record<string, { choice: string; probability: number }> };
 
   const members = heard.map((h, i) => {
     const struck = !h.speech || answers[`struck${i}`].probability > 0.5;
@@ -530,24 +568,23 @@ export async function sit(filing: { id: number; intent: string }, plot: PlotDef)
   let finding: string | null = null;
   for (let attempt = 0; attempt < 2 && !finding; attempt++) {
     const last = drafts.at(-1);
-    const { text } = await generateText({
-      model: SCRIBE,
+    const { text } = await write(`clerk's finding, draft ${attempt + 1}`, {
       reasoning: LIGHT_THINKING,
       system: CLERK,
-      prompt: JSON.stringify(last ? { ...input, rejected: last.text, rejected_because: last.problems } : input),
+      prompt: last ? { ...input, rejected: last.text, rejected_because: last.problems } : input,
       maxOutputTokens: 4000,
     });
     const draft = trim(text, 6, 900);
     let problems = problemsWith(draft, {});
     let checks: Record<string, number> = {};
     if (!problems.length) {
-      const { answers: a } = await decide({
-        model: JUDGE,
-        state: { input, finding: draft },
-        questions: Object.fromEntries(
+      const { answers: a } = await ask(
+        `clerk's finding, check ${attempt + 1}`,
+        { input, finding: draft },
+        Object.fromEntries(
           Object.entries(FINDING_CHECKS).map(([k, instructions]) => [k, { type: "boolean" as const, instructions }]),
         ) as Record<keyof typeof FINDING_CHECKS, { type: "boolean"; instructions: string }>,
-      });
+      );
       checks = Object.fromEntries(Object.entries(a).map(([k, v]) => [k, v.probability]));
       problems = Object.entries(checks).filter(([, p]) => p > 0.5).map(([k]) => FINDING_CHECKS[k as keyof typeof FINDING_CHECKS]);
     }
@@ -621,9 +658,9 @@ export async function hear(
   plot: PlotDef,
 ) {
   const site = siteOf(plot);
-  const { answers } = await decide({
-    model: JUDGE,
-    state: {
+  const { answers } = await ask(
+    "appeal ruling",
+    {
       filing: { number: pad(filing.id), intent: filing.intent },
       bylaws: BYLAWS.map((text, i) => `${i + 1}. ${text}`),
       plot: site,
@@ -631,7 +668,7 @@ export async function hear(
       earlier,
       plea,
     },
-    questions: {
+    {
       unacceptable: { type: "boolean", instructions: UNFIT("appeal") },
       ruling: {
         type: "choice",
@@ -642,7 +679,7 @@ export async function hear(
       fit: { type: "choice", instructions: "Leaving the bylaws aside, how well does this filing, as explained, suit the plot it is for?", criteria: FIT as Record<Fit, string> },
       condition: { type: "choice", instructions: "If a condition were attached to this permit, which would suit it best?", criteria: conditionsFor(plot) },
     },
-  });
+  );
   if (answers.unacceptable.probability > 0.5) {
     return { ok: false, verdict: null, written: null, reply: "The administrator has declined to hear this appeal. It will not be discussed further.", record: { answers } };
   }
@@ -665,7 +702,7 @@ export async function hear(
     bylaw: verdict.bylaw !== null ? bylawText(verdict.bylaw, plot) : null,
     site: { ground: site.ground, weather: site.weather, particulars: site.particulars },
   };
-  const { text, drafts } = await note(HEARING, input, REPLY_CHECKS);
+  const { text, drafts } = await note("reply", HEARING, input, REPLY_CHECKS);
   const reply = text ?? `On appeal: ${formPermit(filing.id, verdict, input.condition, plot)}`;
   return { ok: true, verdict, written, reply, record: { answers, drafts, conditions: written?.tries, judge: JUDGE, scribe: SCRIBE } };
 }
@@ -725,18 +762,14 @@ const MET =
 /** Gary looks over a plot against its condition: the decision model finds, the scribe remarks. */
 export async function inspect(filing: { id: number; intent: string; condition: string }, evidence: Evidence) {
   const state = { filing: pad(filing.id), intent: filing.intent, condition: filing.condition, evidence };
-  const { answers } = await decide({
-    model: JUDGE,
-    state,
-    questions: {
-      met: {
-        type: "boolean",
-        instructions: MET,
-      },
+  const { answers } = await ask("inspection", state, {
+    met: {
+      type: "boolean",
+      instructions: MET,
     },
   });
   const met = answers.met.probability > 0.5;
-  const { text, drafts } = await note(INSPECTOR, { ...state, met }, REMARK_CHECKS);
+  const { text, drafts } = await note("inspection note", INSPECTOR, { ...state, met }, REMARK_CHECKS);
   const remark = text ?? (met
     ? "Inspected. The condition is met, and the administrator is satisfied."
     : "Inspected. The condition remains outstanding. The administrator will come round again.");
@@ -744,15 +777,14 @@ export async function inspect(filing: { id: number; intent: string; condition: s
 }
 
 /** Gary's note of a visit: the scribe writes, the decision model checks it saw only what's there. One more go, then null. */
-async function note(system: string, input: object, checks: Record<string, string>) {
+async function note(what: string, system: string, input: object, checks: Record<string, string>) {
   const drafts: { text: string; checks: Record<string, number>; problems: string[] }[] = [];
   for (let attempt = 0; attempt < 2; attempt++) {
     const last = drafts.at(-1);
-    const { text } = await generateText({
-      model: SCRIBE,
+    const { text } = await write(`${what}, draft ${attempt + 1}`, {
       reasoning: LIGHT_THINKING,
       system,
-      prompt: JSON.stringify(last ? { ...input, rejected: last.text, rejected_because: last.problems } : input),
+      prompt: last ? { ...input, rejected: last.text, rejected_because: last.problems } : input,
       maxOutputTokens: 4000, // reasoning counts against it
     });
     const draft = trim(text, 2);
@@ -760,11 +792,11 @@ async function note(system: string, input: object, checks: Record<string, string
     if (/\d\s*[,x×–-]\s*\d|\b(row|column|cell|tile|across|down)\s+\d/i.test(draft)) problems = ["it gave coordinates or cell numbers"];
     let scores: Record<string, number> = {};
     if (!problems.length) {
-      const { answers: a } = await decide({
-        model: JUDGE,
-        state: { ...input, remark: draft },
-        questions: Object.fromEntries(Object.entries(checks).map(([k, instructions]) => [k, { type: "boolean" as const, instructions }])),
-      });
+      const { answers: a } = await ask(
+        `${what}, check ${attempt + 1}`,
+        { ...input, remark: draft },
+        Object.fromEntries(Object.entries(checks).map(([k, instructions]) => [k, { type: "boolean" as const, instructions }])),
+      );
       scores = Object.fromEntries(Object.entries(a).map(([k, v]) => [k, (v as { probability: number }).probability]));
       problems = Object.entries(scores).filter(([, p]) => p > 0.5).map(([k]) => checks[k]);
     }
@@ -799,10 +831,10 @@ const NOTICE_CHECKS = {
 export async function audit(f: { id: number; plot: number; intent: string; condition: string | null; met_at: string | null }, evidence: Evidence) {
   const plot = plotOf(f.plot);
   const keeping = f.condition && f.met_at ? f.condition : null; // a condition once met, which must stay met
-  const { answers } = await decide({
-    model: JUDGE,
-    state: { filing: pad(f.id), intent: f.intent, ...(keeping && { condition: keeping }), evidence },
-    questions: {
+  const { answers } = await ask(
+    "audit",
+    { filing: pad(f.id), intent: f.intent, ...(keeping && { condition: keeping }), evidence },
+    {
       departs: {
         type: "boolean",
         instructions:
@@ -815,7 +847,7 @@ export async function audit(f: { id: number; plot: number; intent: string; condi
         criteria: conditionsFor(plot),
       },
     },
-  }) as unknown as { answers: Record<string, { probability: number; choice: string }> };
+  ) as unknown as { answers: Record<string, { probability: number; choice: string }> };
   const departs = answers.departs.probability > 0.5;
   const lapsed = keeping && answers.met.probability <= 0.5 ? keeping : null;
   if (!departs && !lapsed) return { compliant: true as const, answers };
@@ -826,7 +858,7 @@ export async function audit(f: { id: number; plot: number; intent: string; condi
   const condition = fellBack && lapsed ? lapsed : written.condition;
   const wants = fellBack && lapsed ? null : written.wants;
   const findings = { departs, lapsed, condition };
-  const { text, drafts } = await note(AUDITOR, { filing: pad(f.id), intent: f.intent, evidence, ...findings }, NOTICE_CHECKS);
+  const { text, drafts } = await note("audit notice", AUDITOR, { filing: pad(f.id), intent: f.intent, evidence, ...findings }, NOTICE_CHECKS);
   const remark = text ?? `Audited. ${lapsed ? "An earlier condition is no longer met" : "The plot has strayed from its permit"}, and the permit is amended: ${condition}`;
   return { compliant: false as const, condition, wants, remark, answers: { ...answers, conditions: written.tries, drafts } };
 }
@@ -882,10 +914,8 @@ export async function survey(db: Db, f: { id: number; plot: number; ground: stri
 async function readLabel(db: Db, id: number): Promise<Response> {
   const { data: p } = await db.from("placements").select("label, label_ok").eq("id", id).maybeSingle();
   if (!p?.label || p.label_ok !== null) return Response.json({ skipped: true });
-  const { answers } = await decide({
-    model: JUDGE,
-    state: { item: p.label },
-    questions: { unacceptable: { type: "boolean", instructions: UNFIT("name for a thing someone has put in their garden") } },
+  const { answers } = await ask("label", { item: p.label }, {
+    unacceptable: { type: "boolean", instructions: UNFIT("name for a thing someone has put in their garden") },
   });
   const ok = answers.unacceptable.probability <= 0.5;
   await db.from("placements").update({ label_ok: ok, label_check: answers }).eq("id", id).is("label_ok", null);
@@ -947,11 +977,10 @@ export async function draw(label: string): Promise<{ sprite: Sprite | null; draf
   const drafts: { text: string; problems: string[] }[] = [];
   for (let i = 0; i < 3; i++) {
     const last = drafts.at(-1);
-    const { text } = await generateText({
-      model: SCRIBE,
+    const { text } = await write(`sprite, draft ${i + 1}`, {
       reasoning: THINKING,
       system: DRAWER,
-      prompt: JSON.stringify(last ? { draw: label, rejected: last.text, rejected_because: last.problems } : { draw: label }),
+      prompt: last ? { draw: label, rejected: last.text, rejected_because: last.problems } : { draw: label },
       maxOutputTokens: 16000, // reasoning counts against it; at 8000 it sometimes thought itself out of an answer
     });
     const { sprite, problems } = spriteProblems(text);

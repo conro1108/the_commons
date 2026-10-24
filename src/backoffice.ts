@@ -1,6 +1,8 @@
 // The back office, behind a 5s hold on the notice board: dry runs of Gary's
 // pipeline (api/backoffice.ts runs them), the live in-tray on demand, and
-// local-only fakes for testing how things arrive. Loaded only when opened.
+// local-only fakes for testing how things arrive. Every run comes back with its
+// transcript: each model call in turn, what was sent and what came back.
+// Loaded only when opened.
 
 import type { Filing, Status } from "./net.ts";
 
@@ -19,11 +21,15 @@ const STOCK = ["local", "north", "flag", "plaque", "tuesdays", "dignified", "nei
 const STATUSES: Status[] = ["approved", "conditional", "committee", "denied", "refused", "lost"];
 const KEPT = "the_commons.dev.runs";
 
+// Mirrors Call in api/gary.ts.
+interface Call { step: string; model: string; sent: any; got?: any; reasoning?: string; ms?: number; error?: string }
+
 interface Run {
   n: number;
   kind: string;
   input: Record<string, unknown>;
   result?: any;
+  calls?: Call[];
   error?: string;
   ms?: number;
 }
@@ -65,6 +71,35 @@ function sprite(rows: string[], palette: Record<string, string>) {
   return `<img class="sprite" src="${c.toDataURL()}" width="${c.width * 6}" height="${c.height * 6}">`;
 }
 
+const json = (v: unknown) => `<div class="txt">${esc(JSON.stringify(v, null, 2))}</div>`;
+
+/** A call's answer at a glance: the reply's opening, or each of Jev's picks. */
+function brief(got: unknown): string {
+  if (typeof got === "string") return esc(got.length > 90 ? `${got.slice(0, 90)}…` : got);
+  return Object.entries((got ?? {}) as Record<string, any>)
+    .map(([k, a]) => `${esc(k)}: ${a?.type === "boolean" ? (a.probability > 0.5 ? "yes" : "no") : esc(String(a?.choice))}`).join(" · ");
+}
+
+/** The conversation, call by call: who was asked what, and what they said. */
+function transcriptOf(calls: Call[]): string {
+  if (!calls.length) return "";
+  return `<details class="calls" open><summary>transcript: ${calls.length} call${calls.length > 1 ? "s" : ""}</summary>${calls.map((c, i) => {
+    const writes = typeof c.sent?.system === "string";
+    const sent = writes
+      ? `<details><summary>system</summary><div class="txt">${esc(c.sent.system)}</div></details><div class="k">prompt</div>${json(c.sent.prompt)}`
+      : `<div class="k">state</div>${json(c.sent.state)}<details><summary>questions</summary>${json(c.sent.questions)}</details>`;
+    const got = c.error ? `<p class="problem">${esc(c.error)}</p>`
+      : c.got === undefined ? `<span class="dim">waiting…</span>`
+      : writes ? `<div class="txt">${esc(c.got)}</div>` : show(c.got);
+    return `<details class="call ${writes ? "writes" : "asks"}"><summary><b>${i + 1}. ${esc(c.step)}</b> → ${esc(c.model)}
+        <span class="dim">${c.ms !== undefined ? `${(c.ms / 1000).toFixed(1)}s` : ""}</span><br><span class="said">${c.error ? "failed" : brief(c.got)}</span></summary>
+      <div class="k">sent</div>${sent}
+      ${c.reasoning ? `<details><summary>reasoning</summary><div class="txt">${esc(c.reasoning)}</div></details>` : ""}
+      <div class="k">came back</div>${got}
+    </details>`;
+  }).join("")}</details>`;
+}
+
 let panel: HTMLElement | null = null;
 
 /** Open the back office, or close it if it's open. */
@@ -100,6 +135,10 @@ function mount(hooks: DevHooks): HTMLElement {
     #dev .odds i { display: inline-block; height: 6px; background: #b07a1e; margin-right: 4px; }
     #dev .dim { color: #b8a8c0; }
     #dev .sprite { image-rendering: pixelated; background: #8ec572; padding: 6px; }
+    #dev .call { margin: 4px 0; padding: 2px 6px; border-left: 4px solid #c9b88f; }
+    #dev .call.asks { border-color: #b07a1e; } #dev .call.writes { border-color: #7a6a8a; }
+    #dev .call > summary { cursor: pointer; } #dev .call .said { color: #7a6a8a; }
+    #dev .call .txt { max-height: 320px; }
 `;
   document.head.append(style);
 
@@ -112,8 +151,11 @@ function mount(hooks: DevHooks): HTMLElement {
     <label>Filing <input type="number" name="id" placeholder="9999"></label><button data-do="filing">Look up</button>
     <label>Plot <input type="number" name="plot" placeholder="1"></label>
     <textarea name="intent" rows="2" maxlength="120" placeholder="an intent, or the name of a thing to draw"></textarea>
+    <textarea name="pleas" rows="2" placeholder="pleas on appeal, one per line, up to three"></textarea>
     <h2>Dry run <span class="meta">nothing is written; current prompts</span></h2>
-    <button data-do="rule">Rule</button><button data-do="committee">Committee</button><button data-do="draw">Draw</button><br>
+    <button data-do="life">Whole life</button><span class="meta">ruled, then the committee if referred, then the pleas if denied</span><br>
+    <button data-do="rule">Rule</button><button data-do="committee">Committee</button><button data-do="draw">Draw</button>
+    <button data-do="appeal">Appeal</button><label>against <select name="bylaw">${["covenant", 1, 2, 3, 4, 5, 6, 7].map((b, i) => `<option value="${i}"${i === 1 ? " selected" : ""}>${b === "covenant" ? b : `bylaw ${b}`}</option>`).join("")}</select></label><br>
     <label><select name="stock">${STOCK.map((c) => `<option>${c}</option>`).join("")}</select></label>
     <label><input type="checkbox" name="writeIn"> write-in</label><button data-do="condition">Write condition</button><br>
     <label><input name="condition" placeholder="condition (else the filing's)"></label><button data-do="inspect">Inspect</button><button data-do="audit">Audit</button>
@@ -130,15 +172,18 @@ function mount(hooks: DevHooks): HTMLElement {
   const id = () => (field("id").value ? Number(field("id").value) : null);
   const intent = () => field<HTMLTextAreaElement>("intent").value.trim();
   const plotId = () => Number(field("plot").value) || 1;
+  const pleas = () => field<HTMLTextAreaElement>("pleas").value.split("\n").map((p) => p.trim()).filter(Boolean);
 
   let runs: Run[] = JSON.parse(localStorage.getItem(KEPT) ?? "[]");
   let n = runs.reduce((m, r) => Math.max(m, r.n), 0);
   const keep = () => {
-    try {
-      localStorage.setItem(KEPT, JSON.stringify(runs.slice(0, 12)));
-    } catch {
-      localStorage.removeItem(KEPT); // draws are big; past the quota, forget rather than hang
+    // Draws and transcripts are big; past the quota keep fewer, then forget rather than hang.
+    for (const k of [12, 3]) {
+      try {
+        return localStorage.setItem(KEPT, JSON.stringify(runs.slice(0, k)));
+      } catch {}
     }
+    localStorage.removeItem(KEPT);
   };
 
   function render() {
@@ -147,6 +192,7 @@ function mount(hooks: DevHooks): HTMLElement {
         <span>${r.ms !== undefined ? `${(r.ms / 1000).toFixed(1)}s` : "running…"}</span>
         ${r.result?.verdict || (r.kind === "filing" && r.result) ? `<button data-preview="${r.n}">as a letter</button>` : ""}</div>
       ${r.error ? `<p class="problem">${esc(r.error)}</p>` : r.result !== undefined ? `${show(r.result)}<details><summary>raw</summary><div class="txt">${esc(JSON.stringify(r.result, null, 2))}</div></details>` : ""}
+      ${transcriptOf(r.calls ?? [])}
     </div>`).join("");
   }
 
@@ -157,7 +203,7 @@ function mount(hooks: DevHooks): HTMLElement {
     try {
       const res = await fetch("/api/backoffice", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ what: path, ...input }) });
       const body = await res.json();
-      Object.assign(run, body.error ? { error: body.error, ms: body.ms } : { result: body.result, ms: body.ms });
+      Object.assign(run, body.error ? { error: body.error } : { result: body.result }, { calls: body.calls, ms: body.ms });
       if (kind === "filing" && run.result) field<HTMLTextAreaElement>("intent").value = run.result.intent;
     } catch (e) {
       run.error = String(e);
@@ -198,6 +244,10 @@ function mount(hooks: DevHooks): HTMLElement {
     filing: () => id() && call("filing", "filing", { id: id() }),
     rule: () => call("rule", "rule", { id: id() ?? 9999, plot: plotId(), intent: intent() }),
     committee: () => call("committee", "committee", { id: id() ?? 9999, plot: plotId(), intent: intent() }),
+    appeal: () => call("appeal", "appeal", {
+      id: id() ?? 9999, plot: plotId(), intent: intent(), bylaw: Number(field<HTMLSelectElement>("bylaw").value), pleas: pleas(),
+    }),
+    life: () => call("life", "life", { id: id() ?? 9999, plot: plotId(), intent: intent(), pleas: pleas() }),
     draw: () => call("draw", "draw", { label: intent() }),
     condition: () => call("condition", "condition", {
       id: id() ?? 9999, plot: plotId(), intent: intent(), stock: field<HTMLSelectElement>("stock").value, writeIn: field("writeIn").checked,
