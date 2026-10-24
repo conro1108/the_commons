@@ -1,6 +1,6 @@
 // The back office, behind a 3s hold on the notice board: write a filing, pick
 // what happens to it, and read the whole exchange between the models. Denied,
-// you can write back: three appeals to Gary, then the committee, then one plea
+// or refused, you can write back: three appeals to Gary (a refusal skips him), then the committee, then one plea
 // against them (the escalation is a proposal, not yet in the game). A dry run;
 // api/backoffice.ts runs it and nothing is written. Loaded only when opened.
 
@@ -38,7 +38,7 @@ const conditionOf = (w: { condition: string; wants: string | null } | null) =>
   w ? `<p><span class="k">Condition</span> ${esc(w.condition)}${w.wants ? ` <span class="dim">(met with: ${esc(w.wants)})</span>` : ""}</p>` : "";
 
 const VOTE = (v: string | null) =>
-  v === null ? "struck" : v === "approved" ? "in favour" : v === "conditional" ? "in favour, on condition" : `against, under ${v === "covenant" ? "the covenant" : `Bylaw ${v.slice(1)}`}`;
+  v === null ? "struck" : v === "approved" ? "in favour" : v === "conditional" ? "in favour, on condition" : v === "refused" ? "against, as unfit" : `against, under ${v === "covenant" ? "the covenant" : `Bylaw ${v.slice(1)}`}`;
 
 const ruled = (r: any) => `${stamp(r.verdict)}${said(r.permit)}${conditionOf(r.written)}`;
 const sat = (r: any) => !r ? `<p>No quorum: fewer than three speeches stood. It sits again tomorrow night.</p>`
@@ -259,8 +259,11 @@ function mount(first: number): HTMLElement {
   panel.querySelectorAll("[name=flow]").forEach((r) => r.addEventListener("change", refit));
   const chosen = picker($(".picker"), first, $(".picker .card"));
 
-  // The case, while it's open to appeal: what it's denied under, and what's been said.
-  let open: { intent: string; plot: number; bylaw: number | null; exchange: { plea: string; reply: string | null }[]; finding?: string } | null = null;
+  // The case, while it's open to appeal: what it's denied under (or that it was refused), and what's been said.
+  // Denied, it's three pleas to Gary, then the committee; refused, Gary won't hear it, so straight to the committee.
+  let open: {
+    intent: string; plot: number; bylaw: number | null; refused: boolean; exchange: { plea: string; reply: string | null }[]; finding?: string;
+  } | null = null;
   let busy = false;
 
   /** One step of the case: a stage with its outcome and the conversation that produced it. */
@@ -298,16 +301,18 @@ function mount(first: number): HTMLElement {
     $(".closed").hidden = !!open || !why;
     $(".closed").textContent = why ?? "";
     if (!open) return;
-    $(".to").textContent = open.finding ? "Final appeal, against the committee" : `Appeal ${n + 1} of 3, to Gary`;
+    $(".to").textContent = open.finding ? "Final appeal, against the committee" : open.refused ? "Appeal, to the committee" : `Appeal ${n + 1} of 3, to Gary`;
     $(".why").textContent = open.finding ? "The committee has ruled on appeal. One last plea, and that's final."
+      : open.refused ? "Refused as unfit. Gary won't hear an appeal himself, so this goes straight to the committee."
       : `Denied under ${bylawName(open.bylaw)}. Write back to make your case.${n === 2 ? " If this is dismissed too, it goes up to the committee." : ""}`;
     field<HTMLTextAreaElement>("plea").focus({ preventScroll: true });
   }
 
-  /** Denied: open to appeal, unless it's done with appeals. */
+  /** Denied or refused: open to appeal. */
   const settle = (v: { status: string; bylaw: number | null } | undefined, intent: string, plot: number) => {
-    open = v?.status === "denied" ? { intent, plot, bylaw: v.bylaw, exchange: [] } : null;
-    standing(v?.status === "refused" ? "Refused filings are never appealed." : undefined);
+    const against = v?.status === "denied" || v?.status === "refused";
+    open = against ? { intent, plot, bylaw: v.bylaw, refused: v.status === "refused", exchange: [] } : null;
+    standing();
   };
 
   async function run() {
@@ -335,31 +340,34 @@ function mount(first: number): HTMLElement {
     busy = true;
     field<HTMLTextAreaElement>("plea").value = "";
     $(".reply").hidden = true;
-    const base = { intent: c.intent, plot: c.plot, bylaw: c.bylaw, earlier: c.exchange };
+    const base = () => ({ intent: c.intent, plot: c.plot, bylaw: c.bylaw, refused: c.refused, earlier: c.exchange });
+    const close = (why: string) => ((open = null), standing(why));
+
+    /** The committee hears it on appeal; against them, one plea more. */
+    async function upstairs(before = "") {
+      const sat = await stage("The committee, on appeal", "escalate", base(), before);
+      if (!sat) return close("No quorum, so it'd sit again tomorrow night. The case is closed here.");
+      if (sat.verdict.status !== "denied" && sat.verdict.status !== "refused") return close("Allowed on appeal. The case is closed.");
+      c.finding = sat.minutes.finding ?? sat.minutes.outcome;
+      standing();
+    }
 
     if (c.finding) {
-      await stage("Final appeal, to the committee", "escalate", { ...base, against: { finding: c.finding, plea } }, pleaded(plea));
-      open = null;
-      standing("That was final.");
+      await stage("Final appeal, to the committee", "escalate", { ...base(), against: { finding: c.finding, plea } }, pleaded(plea));
+      close("That was final.");
+    } else if (c.refused) {
+      c.exchange.push({ plea, reply: null });
+      await upstairs(pleaded(plea));
     } else {
-      const h = await stage(`Appeal ${c.exchange.length + 1} to Gary`, "appeal", { ...base, plea }, pleaded(plea));
-      if (!h || !h.ok || h.verdict.status !== "denied") {
-        open = null;
-        standing(!h ? "Something went wrong at the desk." : !h.ok ? "Gary won't hear it. That's the end of it." : "Allowed. The case is closed.");
-      } else {
+      const h = await stage(`Appeal ${c.exchange.length + 1} to Gary`, "appeal", { ...base(), plea }, pleaded(plea));
+      if (!h) close("Something went wrong at the desk.");
+      else if (!h.ok) close("Gary won't hear it. That's the end of it.");
+      else if (h.verdict.status !== "denied") close("Allowed. The case is closed.");
+      else {
         c.exchange.push({ plea, reply: h.reply });
         c.bylaw = h.verdict.bylaw;
         if (c.exchange.length < 3) standing();
-        else {
-          const sat = await stage("The committee, on appeal", "escalate", { ...base, bylaw: c.bylaw, earlier: c.exchange });
-          if (sat?.verdict.status === "denied") {
-            c.finding = sat.minutes.finding ?? sat.minutes.outcome;
-            standing();
-          } else {
-            open = null;
-            standing(!sat ? "No quorum, so it'd sit again tomorrow night. The case is closed here." : "Allowed on appeal. The case is closed.");
-          }
-        }
+        else await upstairs();
       }
     }
     busy = false;
