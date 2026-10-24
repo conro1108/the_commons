@@ -1,4 +1,4 @@
-// The back office, behind a 5s hold on the notice board: write a filing, pick
+// The back office, behind a 3s hold on the notice board: write a filing, pick
 // what happens to it, and read the whole exchange between the models. Denied,
 // you can write back: three appeals to Gary, then the committee, then one plea
 // against them (the escalation is a proposal, not yet in the game). A dry run;

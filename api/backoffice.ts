@@ -1,6 +1,6 @@
 // Gary's back office (src/backoffice.ts): dry runs of his pipeline, nothing
 // written, each with the transcript of every model call it made. Open to
-// anyone who finds the door (a 5s hold on the notice board); deliberately, for now.
+// anyone who finds the door (a 3s hold on the notice board); deliberately, for now.
 
 import * as gary from "./gary.js";
 

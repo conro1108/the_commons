@@ -1165,7 +1165,7 @@ async function summon() {
   speak(n === null ? "Not now. The kettle." : n ? "Right. I'll come round now." : "Nothing outstanding that I haven't already seen.");
 }
 
-// Hold the notice board for five seconds and the back office opens (src/backoffice.ts).
+// Hold the notice board for three seconds and the back office opens (src/backoffice.ts).
 let holding: number | undefined;
 let heldOpen = false; // the click that ends a hold that opened it isn't a click
 let panned = false; // nor is the one that ends a drag
@@ -1178,7 +1178,7 @@ canvas.addEventListener("pointerdown", (e) => {
     heldOpen = true;
     const { backoffice } = await import("./backoffice.ts");
     backoffice(selected ?? 1);
-  }, 5000);
+  }, 3000);
 });
 for (const ev of ["pointerup", "pointercancel", "pointerleave"]) {
   canvas.addEventListener(ev, () => {
