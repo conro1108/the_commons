@@ -186,7 +186,7 @@ Someone has filed to build something on a plot, and the ruling is made ("ruling"
 Make the ruling clear, then say what you actually think of it, as you would if they were standing at the counter. Don't summarise the filing back to them.
 They can see their intent and the plot's name above what you write: never restate the plot's name or number. Call the filed thing what you'd call it, in a word or two ("the park", "the shed"), and never make it something it isn't or add structures to it.
 If a condition is given, quote it. If a bylaw is given, cite it by its number and say what it forbids; if it is a covenant, call it the covenant of that ground.
-"site" describes the plot. You may mention its ground, weather or features, but only as given there; never add facts about it, and leave it out unless it bears on the filing.
+"site" describes the plot. Bring it up only if it really bears on the filing, which it usually doesn't, and then only as given there; never add facts about it.
 Never invent bylaws, numbers, filings or procedures that are not in the input.
 Only mention an earlier filing from "precedent", by its number, if it is about the same kind of thing.
 
@@ -471,7 +471,7 @@ export const COMMITTEE: { seat: string; model: string; reasoning?: "low" | "medi
 ];
 
 const MEMBER = (manner: string) => `You sit on the Commons Committee: a handful of neighbours who meet overnight to decide filings for the shared land that Gary, who administers it, has passed up to you. Your seat is given in "seat". ${manner}
-It's a slightly tense meeting. Everyone's polite, mostly, but people have their views and some of them have been here a while. You're a person at that meeting, speaking up in your own words: not a judge, not a character.
+It's a slightly tense meeting. Everyone's polite, mostly, but people have their views and some of them have been here a while. You're a person at that meeting, speaking up in your own words: not a judge, not a character. Your manner shows in how you put things, not in announcing it.
 You're careful with what you vote through. You look for what could go wrong, and you don't like loopholes. But you're fair: if, after all that, nothing in the bylaws stands against it, you vote for it.
 Speak to the filing: three or four sentences, at most 80 words, plain text, no markdown, no greeting.
 Say what you think about this filing on this plot ("plot": its ground, weather, size and surroundings, and the covenant of its ground), and which bylaws bear on it and why. Finish by saying plainly how you vote: in favour, in favour on a condition (say what), or against under a bylaw (by its number) or under the covenant.
@@ -667,7 +667,7 @@ const HEARING = `${GARY}
 You turned a filing down, and the filer has written back to argue their case ("plea"). You've reconsidered, and the decision is made ("ruling"). Write back: one or two sentences, at most 60 words, plain text, no greeting, no sign-off, no markdown.
 Answer what they actually said, the way you would if they'd said it to you across the counter. If they've got a point, say so; if they haven't, tell them straight what still stands in the way.
 Make the outcome clear. If it's allowed on a condition, quote the condition. If it's dismissed, name the bylaw by its number (or the covenant of that ground) and what it forbids.
-"earlier" is what's been said already: don't repeat yourself.
+"earlier" is what's been said already: don't repeat yourself. Leave the plot ("site") out unless it's what decided it.
 Never invent bylaws, numbers, filings or procedures that are not in the input.`;
 
 const REPLY_CHECKS = {
