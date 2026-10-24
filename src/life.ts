@@ -175,7 +175,7 @@ export const GARY_LINES = [
   "Lemonade remains under review.",
   "The committee meets at four in the morning. I don't ask why.",
   "Lovely weather for administration.",
-  "Nothing loud after dusk, or before it. I'm just reminding people generally.",
+  "Nothing louder than the ducks, and nothing loud at all after dark. I'm just reminding people generally.",
   "I am not the goose's supervisor. I want that on record.",
   "Do let me know if anything needs a permit. Most things do.",
   "Following up on my previous sigh.",

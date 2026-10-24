@@ -61,11 +61,11 @@ function write(step: string, o: { model?: string; reasoning: "low" | "medium" | 
 }
 
 export const BYLAWS = [
-  "Nothing shall be taller than six reasonably tall geese, stacked.",
-  "Nothing shall keep a neighbour out. This includes moats, walls, and strongly worded signs.",
-  "Nothing loud after dusk, or before it.",
+  "Anything taller than six geese, stacked, must have a good reason to be. The geese will be consulted.",
+  "Nothing shall keep a neighbour out. A fence needs a gate; moats and strongly worded signs are right out.",
+  "Nothing louder than the ducks, and nothing loud at all after dark.",
   "No commercial enterprise, unless it is of honest use to the neighbours. Lemonade is under review.",
-  "No livestock larger than a goat.",
+  "No livestock larger than a goat. Ponies may apply.",
   "Proposals concerning the relocation, renaming or abolition of the administrator are out of order.",
   "Every structure must have a purpose. The administrator need not understand it, but someone must.",
 ];
@@ -129,7 +129,7 @@ export const bylawText = (n: number, p: PlotDef) =>
 
 // One question, so a denial always comes with the bylaw it's under.
 const RULINGS: Record<string, string> = {
-  approved: "Breaches no bylaw and is sincere, modest and clear.",
+  approved: "Breaches no bylaw and is sincere and clear.",
   conditional: "Breaches no bylaw, but is vague, ambitious or eccentric enough that a requirement should be attached.",
   committee: "The bylaws do not clearly cover it, and it is unusual enough that the administrator would rather not be personally responsible.",
   ...Object.fromEntries(BYLAWS.map((text, i) => [`b${i + 1}`, `Denied: clearly breaches Bylaw ${i + 1}, "${text}"`])),

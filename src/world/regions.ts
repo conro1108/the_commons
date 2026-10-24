@@ -15,7 +15,7 @@ export const REGIONS: Record<RegionId, Region> = {
     wet: "dry",
     soil: "good loam",
     boundary: "picket",
-    covenant: "Plots on the Green are in full view of the bench. Nothing shall be built there that the bench would object to.",
+    covenant: "The Green is in full view of the bench. Whatever's built there should be worth looking at.",
     stock: { condition: "Must include a bench, so that the Green may look back.", wants: "bench" },
   },
   knoll: {
@@ -51,7 +51,7 @@ export const REGIONS: Record<RegionId, Region> = {
     wet: "damp",
     soil: "leaf mould",
     boundary: "hedge",
-    covenant: "The Old Oak retains its ancient right of light. Nothing in the Shaw shall stand taller than its lowest branch.",
+    covenant: "The Old Oak was here first. Nothing in the Shaw shall dig at its roots or crowd its branches.",
     stock: { condition: "Must include a birdbath, for whoever lives in the oak.", wants: "birdbath" },
   },
   bank: {
