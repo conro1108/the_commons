@@ -2,7 +2,7 @@ import { BRUSHES, empty, groundLabel, paintGround } from "./content/ground.ts";
 import { drawnAs, look, PALETTE, propCanvas, propSize, SCALES, sized } from "./content/props.ts";
 import { BYLAWS } from "./rulebook.ts";
 import {
-  LANDMARKS, MAP_H, MAP_W, PLOTS, REGIONS, ZOOM, plotAt, plotById, plotLabel, route, slide, walkable, type PlotDef, type Point,
+  LANDMARKS, MAP_H, MAP_W, REGIONS, ZOOM, plotAt, plotById, plotLabel, route, slide, walkable, type PlotDef, type Point,
 } from "./world/index.ts";
 import {
   APPEALS, HELD, afterGoogle, avatarOf, fileAppeal, fileClaim, handlesFor, keepPapers, loadAppeals, loadFilings, loadPlacements, move, paint,
@@ -1177,15 +1177,7 @@ canvas.addEventListener("pointerdown", (e) => {
   holding = window.setTimeout(async () => {
     heldOpen = true;
     const { backoffice } = await import("./backoffice.ts");
-    backoffice({
-      me, filings, arrive, papers, speak,
-      selected: () => (selected !== null ? (heldPlots().get(selected)?.id ?? null) : null),
-      freePlot: () => {
-        const held = heldPlots();
-        if (selected !== null && !held.has(selected)) return selected;
-        return PLOTS.find((p) => !held.has(p.id))?.id ?? null;
-      },
-    });
+    backoffice(selected ?? 1);
   }, 5000);
 });
 for (const ev of ["pointerup", "pointercancel", "pointerleave"]) {

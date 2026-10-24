@@ -1,64 +1,72 @@
-// The back office, behind a 5s hold on the notice board: dry runs of Gary's
-// pipeline (api/backoffice.ts runs them), the live in-tray on demand, and
-// local-only fakes for testing how things arrive. Every run comes back with its
-// transcript: each model call in turn, what was sent and what came back.
-// Loaded only when opened.
+// The back office, behind a 5s hold on the notice board: write a filing, pick
+// what happens to it, and read the whole exchange between the models. Denied,
+// you can write back: three appeals to Gary, then the committee, then one plea
+// against them (the escalation is a proposal, not yet in the game). A dry run;
+// api/backoffice.ts runs it and nothing is written. Loaded only when opened.
 
-import type { Filing, Status } from "./net.ts";
-
-export interface DevHooks {
-  me: string;
-  filings: Map<number, Filing>;
-  arrive: (f: Filing) => Promise<void>;
-  papers: () => void;
-  speak: (line?: string) => void;
-  selected: () => number | null; // the filing on the selected plot
-  freePlot: () => number | null; // the selected plot if it's free, else any free one
-}
-
-// Mirrors CONDITIONS in api/gary.ts; "local" is the plot's own ground's.
-const STOCK = ["local", "north", "flag", "plaque", "tuesdays", "dignified", "neighbour", "goose", "smaller"];
-const STATUSES: Status[] = ["approved", "conditional", "committee", "denied", "refused", "lost"];
-const KEPT = "the_commons.dev.runs";
+import { PLOTS, REGIONS } from "./world/index.ts";
 
 // Mirrors Call in api/gary.ts.
 interface Call { step: string; model: string; sent: any; got?: any; reasoning?: string; ms?: number; error?: string }
 
-interface Run {
-  n: number;
-  kind: string;
-  input: Record<string, unknown>;
-  result?: any;
-  calls?: Call[];
-  error?: string;
-  ms?: number;
+const FLOWS = {
+  rule: ["Rule", "Jev rules. Haiku writes the permit, Jev checks it."],
+  life: ["Whole life", "Ruled, then the committee if referred. Denied, you write back."],
+  committee: ["Committee", "Five councillors speak to it, Jev hears the votes, the clerk writes it up."],
+  appeal: ["Appeal", "Start from a denial, and write back to Gary."],
+  condition: ["Condition", "Gary writes a condition for it."],
+  draw: ["Draw", "Haiku draws it as a sprite, taking the filing as the thing's name."],
+} as const;
+type Flow = keyof typeof FLOWS;
+
+// Mirrors CONDITIONS in api/gary.ts; "local" is the plot's own ground's.
+const STOCK = ["local", "north", "flag", "plaque", "tuesdays", "dignified", "neighbour", "goose", "smaller"];
+const STATUS: Record<string, string> = {
+  approved: "Approved", conditional: "Approved on condition", committee: "Referred to committee", denied: "Denied", refused: "Refused",
+};
+const WHO: Record<string, string> = { "typesafe-ai/jev": "Jev", "anthropic/claude-haiku-5.5": "Haiku" };
+
+const esc = (s: unknown) => String(s).replace(/[&<>"]/g, (c) => `&${{ "&": "amp", "<": "lt", ">": "gt", '"': "quot" }[c]};`);
+const pre = (v: unknown) => `<pre>${esc(typeof v === "string" ? v : JSON.stringify(v, null, 2))}</pre>`;
+const pct = (p: number) => `${Math.round(p * 100)}%`;
+const secs = (ms?: number) => (ms === undefined ? "" : `${(ms / 1000).toFixed(1)}s`);
+const bylawName = (n: number | null) => (n === 0 ? "the covenant" : `Bylaw ${n}`);
+
+// --- what came of it ----------------------------------------------------------
+
+function stamp(v: { status: string; bylaw: number | null; concern?: string | null }, count?: string) {
+  const under = v.status === "denied" ? ` under ${bylawName(v.bylaw)}` : "";
+  return `<span class="stamp ${v.status}">${STATUS[v.status]}${under}</span>${v.concern ? ` <span class="dim">(${esc(v.concern)})</span>` : ""}${count ? ` <span class="dim">${esc(count)}</span>` : ""}`;
+}
+const said = (text: string | null | undefined) => `<blockquote>${esc(text ?? "")}</blockquote>`;
+const conditionOf = (w: { condition: string; wants: string | null } | null) =>
+  w ? `<p><span class="k">Condition</span> ${esc(w.condition)}${w.wants ? ` <span class="dim">(met with: ${esc(w.wants)})</span>` : ""}</p>` : "";
+
+const VOTE = (v: string | null) =>
+  v === null ? "struck" : v === "approved" ? "in favour" : v === "conditional" ? "in favour, on condition" : `against, under ${v === "covenant" ? "the covenant" : `Bylaw ${v.slice(1)}`}`;
+
+const ruled = (r: any) => `${stamp(r.verdict)}${said(r.permit)}${conditionOf(r.written)}`;
+const sat = (r: any) => !r ? `<p>No quorum: fewer than three speeches stood. It sits again tomorrow night.</p>`
+  : `${stamp(r.verdict, r.verdict.count)}${said(r.minutes.finding ?? r.minutes.outcome)}${conditionOf(r.written)}
+    <ul class="votes">${r.minutes.members.map((m: any) => `<li><b>${esc(m.seat)}</b> ${VOTE(m.vote)}</li>`).join("")}</ul>`;
+const pleaded = (plea: string) => `<p class="plea"><span class="k">You wrote</span> <q>${esc(plea)}</q></p>`;
+const heard = (h: any) => `${!h.verdict ? `<span class="stamp refused">Not heard</span>` : h.verdict.status === "denied"
+  ? `<span class="stamp denied">Dismissed</span> <span class="dim">still under ${bylawName(h.verdict.bylaw)}</span>`
+  : `<span class="stamp approved">Allowed</span> ${stamp(h.verdict)}`}${said(h.reply)}${conditionOf(h.written)}`;
+
+type Step = "rule" | "life" | "committee" | "condition" | "draw" | "appeal" | "escalate";
+function outcome(what: Step, r: any): string {
+  switch (what) {
+    case "rule": return ruled(r);
+    case "committee": case "escalate": return sat(r);
+    case "appeal": return heard(r);
+    case "condition": return said(r.condition) + (r.wants ? `<p class="dim">Met with: ${esc(r.wants)}</p>` : `<p class="dim">Asks for something written in.</p>`);
+    case "draw": return r.sprite ? sprite(r.sprite) : `<p>No usable sprite after three tries.</p>`;
+    case "life": return ruled(r.ruled) + (r.ruled.verdict.status === "committee" ? `<h3>The committee</h3>${sat(r.sat)}` : "");
+  }
 }
 
-const esc = (s: string) => s.replace(/[&<>"]/g, (c) => `&${{ "&": "amp", "<": "lt", ">": "gt", '"': "quot" }[c]};`);
-const pct = (p: number) => `<span class="${p > 0.5 ? "yes" : "no"}">${p > 0.5 ? "yes" : "no"} ${Math.round(p * 100)}%</span>`;
-
-/** Any result, readably: decisions as choices with odds, drafts as text, sprites drawn. */
-function show(v: unknown, key = "", depth = 0): string {
-  if (v === null || v === undefined) return `<span class="dim">—</span>`;
-  if (typeof v === "number") return key === "checks" ? pct(v) : String(v);
-  if (typeof v === "boolean") return String(v);
-  if (typeof v === "string") return v.length > 50 || v.includes("\n") ? `<div class="txt">${esc(v)}</div>` : esc(v);
-  if (Array.isArray(v)) {
-    if (!v.length) return `<span class="dim">${key === "problems" ? "✓ none" : "none"}</span>`;
-    return `<ol>${v.map((x) => `<li>${show(x, key, depth + 1)}</li>`).join("")}</ol>`;
-  }
-  const o = v as Record<string, any>;
-  if (Array.isArray(o.rows) && o.palette && typeof o.palette === "object") return sprite(o.rows, o.palette);
-  if (o.type === "boolean" && typeof o.probability === "number") return pct(o.probability);
-  if (o.type === "choice" && typeof o.choice === "string") {
-    const odds = Object.entries((o.probabilities ?? {}) as Record<string, number>).sort((a, b) => b[1] - a[1]).slice(0, 4);
-    return `<b>${esc(o.choice)}</b>${odds.map(([c, p]) => `<span class="odds"><i style="width:${p * 60}px"></i>${esc(c)} ${Math.round(p * 100)}%</span>`).join("")}`;
-  }
-  const rows = Object.entries(o).map(([k, x]) => `<div class="kv"><span class="k">${esc(k)}</span> ${show(x, k === "checks" ? k : key === "checks" ? "" : k, depth + 1)}</div>`).join("");
-  return depth >= 2 ? `<details><summary>${Object.keys(o).length} fields</summary>${rows}</details>` : rows;
-}
-
-function sprite(rows: string[], palette: Record<string, string>) {
+function sprite({ rows, palette }: { rows: string[]; palette: Record<string, string> }) {
   const c = document.createElement("canvas");
   c.width = Math.max(...rows.map((r) => r.length));
   c.height = rows.length;
@@ -68,78 +76,108 @@ function sprite(rows: string[], palette: Record<string, string>) {
     g.fillStyle = palette[ch];
     g.fillRect(x, y, 1, 1);
   }));
-  return `<img class="sprite" src="${c.toDataURL()}" width="${c.width * 6}" height="${c.height * 6}">`;
+  return `<img class="sprite" src="${c.toDataURL()}" width="${c.width * 8}" height="${c.height * 8}">`;
 }
 
-const json = (v: unknown) => `<div class="txt">${esc(JSON.stringify(v, null, 2))}</div>`;
+// --- the conversation ---------------------------------------------------------
 
-/** A call's answer at a glance: the reply's opening, or each of Jev's picks. */
-function brief(got: unknown): string {
-  if (typeof got === "string") return esc(got.length > 90 ? `${got.slice(0, 90)}…` : got);
-  return Object.entries((got ?? {}) as Record<string, any>)
-    .map(([k, a]) => `${esc(k)}: ${a?.type === "boolean" ? (a.probability > 0.5 ? "yes" : "no") : esc(String(a?.choice))}`).join(" · ");
+/** Jev's picks: each choice with its runners-up, each yes/no with its odds. */
+function picks(got: Record<string, any>) {
+  return `<ul class="picks">${Object.entries(got).map(([k, a]) => {
+    if (a?.type === "boolean") return `<li><span class="k">${esc(k)}</span> ${a.probability > 0.5 ? "<b>yes</b>" : "no"} <span class="dim">${pct(a.probability)}</span></li>`;
+    const rest = Object.entries((a?.probabilities ?? {}) as Record<string, number>)
+      .filter(([c, p]) => c !== a.choice && p >= 0.05).sort((x, y) => y[1] - x[1]).map(([c, p]) => `${esc(c)} ${pct(p)}`);
+    const p = a?.probabilities?.[a.choice];
+    return `<li><span class="k">${esc(k)}</span> <b>${esc(a?.choice)}</b>${p !== undefined ? ` <span class="dim">${pct(p)}${rest.length ? `, ${rest.join(", ")}` : ""}</span>` : ""}</li>`;
+  }).join("")}</ul>`;
 }
 
-/** The conversation, call by call: who was asked what, and what they said. */
-function transcriptOf(calls: Call[]): string {
-  if (!calls.length) return "";
-  return `<details class="calls" open><summary>transcript: ${calls.length} call${calls.length > 1 ? "s" : ""}</summary>${calls.map((c, i) => {
-    const writes = typeof c.sent?.system === "string";
-    const sent = writes
-      ? `<details><summary>system</summary><div class="txt">${esc(c.sent.system)}</div></details><div class="k">prompt</div>${json(c.sent.prompt)}`
-      : `<div class="k">state</div>${json(c.sent.state)}<details><summary>questions</summary>${json(c.sent.questions)}</details>`;
-    const got = c.error ? `<p class="problem">${esc(c.error)}</p>`
-      : c.got === undefined ? `<span class="dim">waiting…</span>`
-      : writes ? `<div class="txt">${esc(c.got)}</div>` : show(c.got);
-    return `<details class="call ${writes ? "writes" : "asks"}"><summary><b>${i + 1}. ${esc(c.step)}</b> → ${esc(c.model)}
-        <span class="dim">${c.ms !== undefined ? `${(c.ms / 1000).toFixed(1)}s` : ""}</span><br><span class="said">${c.error ? "failed" : brief(c.got)}</span></summary>
-      <div class="k">sent</div>${sent}
-      ${c.reasoning ? `<details><summary>reasoning</summary><div class="txt">${esc(c.reasoning)}</div></details>` : ""}
-      <div class="k">came back</div>${got}
-    </details>`;
-  }).join("")}</details>`;
+function questions(qs: Record<string, any>) {
+  return `<dl>${Object.entries(qs).map(([k, q]) => `<dt>${esc(k)} <span class="dim">${esc(q.type)}</span></dt>
+    <dd>${esc(q.instructions)}${q.criteria ? `<ul>${Object.entries(q.criteria).map(([c, d]) => `<li><b>${esc(c)}</b> ${c === d ? "" : esc(d)}</li>`).join("")}</ul>` : ""}</dd>`).join("")}</dl>`;
 }
+
+function message(c: Call) {
+  const writes = typeof c.sent?.system === "string";
+  const short = c.model.split("/").pop();
+  const who = c.step.startsWith("Councillor")
+    ? `${esc(c.step)} <span class="dim">${esc(short)}</span>`
+    : `${esc(WHO[c.model] ?? short)} <span class="dim">· ${esc(c.step)}</span>`;
+  const body = c.error ? `<p class="problem">${esc(c.error)}</p>`
+    : c.got === undefined ? `<p class="dim">No answer.</p>`
+    : writes ? `<p class="said">${esc(c.got)}</p>` : picks(c.got);
+  const given = writes
+    ? `<h3>System</h3>${pre(c.sent.system)}<h3>Prompt</h3>${pre(c.sent.prompt)}`
+    : `<h3>State</h3>${pre(c.sent.state)}<h3>Questions</h3>${questions(c.sent.questions)}`;
+  return `<div class="msg ${writes ? "writes" : "asks"}">
+    <div class="who"><span>${who}</span><span class="dim">${secs(c.ms)}</span></div>
+    ${body}
+    ${c.reasoning ? `<details><summary>Its reasoning</summary>${pre(c.reasoning)}</details>` : ""}
+    <details><summary>What it was given</summary>${given}</details>
+  </div>`;
+}
+
+// --- the panel ----------------------------------------------------------------
 
 let panel: HTMLElement | null = null;
 
-/** Open the back office, or close it if it's open. */
-export function backoffice(hooks: DevHooks) {
-  if (!panel) panel = mount(hooks);
+/** Open the back office, or close it if it's open. Starts on the given plot. */
+export function backoffice(plot: number) {
+  if (!panel) panel = mount();
   panel.hidden = !panel.hidden;
-  const id = panel.querySelector<HTMLInputElement>("[name=id]")!;
-  const sel = hooks.selected();
-  if (!panel.hidden && sel !== null && !id.value) id.value = String(sel);
-  const plot = panel.querySelector<HTMLInputElement>("[name=plot]")!;
-  if (!panel.hidden && !plot.value) plot.value = String(hooks.freePlot() ?? 1);
+  const field = panel.querySelector<HTMLInputElement>("[name=plot]")!;
+  if (!panel.hidden && !field.value) {
+    field.value = String(plot);
+    field.dispatchEvent(new Event("input"));
+  }
 }
 
-function mount(hooks: DevHooks): HTMLElement {
-  const style = document.createElement("style");
-  style.textContent = `
-    #dev { position: fixed; top: 8px; right: 8px; bottom: 8px; width: min(460px, 96vw); overflow-y: auto; z-index: 50; font-size: 12px; }
-    #dev h2 { margin: 10px 0 4px; }
-    #dev label { display: inline-flex; gap: 4px; align-items: center; margin-right: 8px; }
-    #dev input, #dev select { font: inherit; border: 2px solid #402e3a; background: #fbf4dc; padding: 1px 4px; }
-    #dev input[type=number] { width: 70px; }
-    #dev button { margin: 4px 4px 0 0; padding: 2px 8px; }
-    #dev .live button { background: #f6c3b4; }
-    #dev .run { border-top: 2px dashed #c9b88f; margin-top: 8px; padding-top: 6px; }
-    #dev .run > .meta { display: flex; gap: 8px; align-items: baseline; }
-    #dev .run > .meta button { margin: 0; padding: 0 6px; box-shadow: none; }
-    #dev .kv { margin: 2px 0 2px 8px; }
-    #dev .k { color: #7a6a8a; }
-    #dev .txt { white-space: pre-wrap; background: #fbf4dc; border: 1px dashed #c9b88f; padding: 2px 6px; max-height: 160px; overflow-y: auto; }
-    #dev ol { margin: 2px 0; padding-left: 20px; }
-    #dev .yes { color: #b5404f; font-weight: bold; } #dev .no { color: #3d7a3a; }
-    #dev .odds { display: block; margin-left: 8px; color: #7a6a8a; }
-    #dev .odds i { display: inline-block; height: 6px; background: #b07a1e; margin-right: 4px; }
-    #dev .dim { color: #b8a8c0; }
-    #dev .sprite { image-rendering: pixelated; background: #8ec572; padding: 6px; }
-    #dev .call { margin: 4px 0; padding: 2px 6px; border-left: 4px solid #c9b88f; }
-    #dev .call.asks { border-color: #b07a1e; } #dev .call.writes { border-color: #7a6a8a; }
-    #dev .call > summary { cursor: pointer; } #dev .call .said { color: #7a6a8a; }
-    #dev .call .txt { max-height: 320px; }
+const STYLE = `
+  #dev { position: fixed; top: 12px; right: 12px; bottom: 12px; width: min(720px, calc(100vw - 24px)); box-sizing: border-box;
+         overflow-y: auto; z-index: 50; padding: 22px 28px 48px; font-size: 14px; line-height: 1.5; }
+  #dev h1 { font-size: 18px; } #dev h1 + p { margin: 2px 0 0; }
+  #dev section { margin-top: 28px; }
+  #dev h2 { margin-bottom: 10px; }
+  #dev h3 { margin: 12px 0 4px; }
+  #dev textarea, #dev input, #dev select { font: inherit; border: 2px solid #402e3a; background: #fbf4dc; padding: 4px 8px; }
+  #dev textarea { display: block; width: 100%; box-sizing: border-box; padding: 8px 10px; resize: vertical; }
+  #dev input[type=number] { width: 64px; }
+  #dev .row { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; margin-top: 12px; }
+  #dev .flows { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 10px; }
+  #dev .flow { position: relative; border: 2px solid #c9b88f; padding: 8px 12px; cursor: pointer; }
+  #dev .flow:has(input:checked) { border-color: #402e3a; background: #ffe9a8; box-shadow: 2px 2px 0 #402e3a; }
+  #dev .flow input { position: absolute; opacity: 0; pointer-events: none; }
+  #dev .flow b { display: block; } #dev .flow span { display: block; font-size: 12px; color: #7a6a8a; line-height: 1.35; }
+  #dev .opts { margin-top: 16px; display: grid; gap: 12px; }
+  #dev .opts label { display: block; }
+  #dev .go { margin-top: 20px; padding: 8px 26px; font-size: 15px; }
+  #dev .dim, #dev .k { color: #8a7a98; } #dev .k { margin-right: 6px; }
+  #dev blockquote { margin: 10px 0 14px; padding: 10px 14px; background: #fbf4dc; border: 1px dashed #c9b88f; white-space: pre-wrap; }
+  #dev .stamp { display: inline-block; padding: 1px 8px; border: 2px solid; font-weight: bold; font-size: 12px; text-transform: uppercase; letter-spacing: .06em; }
+  #dev .stamp.approved, #dev .stamp.conditional { color: #3d7a3a; }
+  #dev .stamp.denied, #dev .stamp.refused { color: #b5404f; }
+  #dev .stamp.committee { color: #b07a1e; }
+  #dev .stage { margin-top: 32px; padding-top: 20px; border-top: 2px dashed #c9b88f; }
+  #dev .stage:first-child { margin-top: 0; padding-top: 0; border-top: 0; }
+  #dev .reply { margin-top: 32px; padding: 16px 18px; border: 2px solid #402e3a; background: #fff4c9; }
+  #dev .reply textarea { margin-top: 8px; background: #fffdf3; }
+  #dev .closed { margin-top: 28px; font-style: italic; }
+  #dev .votes { margin: 0; padding-left: 18px; }
+  #dev .msg { margin: 14px 0; padding: 10px 14px; border-left: 4px solid; background: #fffaf0; }
+  #dev .msg.asks { border-color: #b07a1e; } #dev .msg.writes { border-color: #7a6a8a; }
+  #dev .msg .who { display: flex; justify-content: space-between; gap: 12px; font-weight: bold; margin-bottom: 6px; }
+  #dev .msg .said { white-space: pre-wrap; margin: 0; }
+  #dev .picks { list-style: none; padding: 0; margin: 0; display: flex; flex-wrap: wrap; gap: 2px 18px; }
+  #dev details { margin-top: 8px; } #dev summary { cursor: pointer; color: #8a7a98; }
+  #dev pre { white-space: pre-wrap; word-break: break-word; font-size: 12px; background: #fbf4dc; border: 1px dashed #c9b88f;
+             padding: 8px 10px; margin: 4px 0; max-height: 360px; overflow-y: auto; }
+  #dev dt { font-weight: bold; margin-top: 8px; } #dev dd { margin: 0 0 0 12px; } #dev dd ul { margin: 2px 0; padding-left: 18px; }
+  #dev .sprite { image-rendering: pixelated; background: #8ec572; padding: 8px; margin: 10px 0; }
 `;
+
+function mount(): HTMLElement {
+  const style = document.createElement("style");
+  style.textContent = STYLE;
   document.head.append(style);
 
   const panel = document.createElement("div");
@@ -147,137 +185,167 @@ function mount(hooks: DevHooks): HTMLElement {
   panel.className = "paper";
   panel.hidden = true;
   panel.innerHTML = `<button class="close" aria-label="Close">×</button>
-    <h2>Back office</h2>
-    <label>Filing <input type="number" name="id" placeholder="9999"></label><button data-do="filing">Look up</button>
-    <label>Plot <input type="number" name="plot" placeholder="1"></label>
-    <textarea name="intent" rows="2" maxlength="120" placeholder="an intent, or the name of a thing to draw"></textarea>
-    <textarea name="pleas" rows="2" placeholder="pleas on appeal, one per line, up to three"></textarea>
-    <h2>Dry run <span class="meta">nothing is written; current prompts</span></h2>
-    <button data-do="life">Whole life</button><span class="meta">ruled, then the committee if referred, then the pleas if denied</span><br>
-    <button data-do="rule">Rule</button><button data-do="committee">Committee</button><button data-do="draw">Draw</button>
-    <button data-do="appeal">Appeal</button><label>against <select name="bylaw">${["covenant", 1, 2, 3, 4, 5, 6, 7].map((b, i) => `<option value="${i}"${i === 1 ? " selected" : ""}>${b === "covenant" ? b : `bylaw ${b}`}</option>`).join("")}</select></label><br>
-    <label><select name="stock">${STOCK.map((c) => `<option>${c}</option>`).join("")}</select></label>
-    <label><input type="checkbox" name="writeIn"> write-in</label><button data-do="condition">Write condition</button><br>
-    <label><input name="condition" placeholder="condition (else the filing's)"></label><button data-do="inspect">Inspect</button><button data-do="audit">Audit</button>
-    <h2>The live in-tray <span class="meta">writes to the shared commons</span></h2>
-    <div class="live"><button data-desk="id">Rule now</button><button data-desk="committee">Convene now</button><button data-desk="inspect">Inspect now</button><button data-desk="audit">Audit now</button></div>
-    <h2>Only here <span class="meta">gone on reload</span></h2>
-    <label><select name="status">${STATUSES.map((s) => `<option>${s}</option>`).join("")}</select></label><button data-do="fake">A letter arrives</button>
-    <button data-do="papers">Form R-1</button><button data-do="speak">Gary speaks</button>
-    <h2>Runs <button data-do="clear">clear</button></h2>
-    <div class="runs"></div>`;
+    <h1>Back office</h1>
+    <p class="dim">A dry run: nothing is written to the commons.</p>
+    <section>
+      <h2>The filing</h2>
+      <textarea name="intent" rows="3" maxlength="120" placeholder="a bench, for looking at the pond with"></textarea>
+      <div class="row" data-for="rule life committee appeal condition">
+        <label>On plot <input type="number" name="plot" min="1" max="${PLOTS.length}"></label><span class="where dim"></span>
+      </div>
+    </section>
+    <section>
+      <h2>What happens to it</h2>
+      <div class="flows">${Object.entries(FLOWS).map(([k, [name, blurb]], i) =>
+        `<label class="flow"><input type="radio" name="flow" value="${k}"${i ? "" : " checked"}><b>${name}</b><span>${blurb}</span></label>`).join("")}</div>
+      <div class="opts">
+        <label data-for="appeal">Denied under <select name="bylaw">${["the covenant", ...[1, 2, 3, 4, 5, 6, 7].map((n) => `Bylaw ${n}`)]
+          .map((b, i) => `<option value="${i}"${i === 2 ? " selected" : ""}>${b}</option>`).join("")}</select></label>
+        <div class="row" data-for="condition">
+          <label>Falling back on <select name="stock">${STOCK.map((c) => `<option>${c}</option>`).join("")}</select></label>
+          <label><input type="checkbox" name="writeIn"> Ask for something written in</label>
+        </div>
+      </div>
+      <button class="go">Run</button>
+    </section>
+    <section class="out" hidden>
+      <div class="stages"></div>
+      <div class="reply" hidden>
+        <h2 class="to"></h2>
+        <p class="why dim"></p>
+        <textarea name="plea" rows="3" placeholder="it's a very small moat, more of a puddle really"></textarea>
+        <button class="send">Send</button>
+      </div>
+      <p class="closed dim" hidden></p>
+    </section>`;
   document.body.append(panel);
 
   const field = <T extends HTMLElement = HTMLInputElement>(name: string) => panel.querySelector<T>(`[name=${name}]`)!;
-  const id = () => (field("id").value ? Number(field("id").value) : null);
-  const intent = () => field<HTMLTextAreaElement>("intent").value.trim();
-  const plotId = () => Number(field("plot").value) || 1;
-  const pleas = () => field<HTMLTextAreaElement>("pleas").value.split("\n").map((p) => p.trim()).filter(Boolean);
+  const $ = (sel: string) => panel.querySelector<HTMLElement>(sel)!;
+  const flow = () => panel.querySelector<HTMLInputElement>("[name=flow]:checked")!.value as Flow;
 
-  let runs: Run[] = JSON.parse(localStorage.getItem(KEPT) ?? "[]");
-  let n = runs.reduce((m, r) => Math.max(m, r.n), 0);
-  const keep = () => {
-    // Draws and transcripts are big; past the quota keep fewer, then forget rather than hang.
-    for (const k of [12, 3]) {
-      try {
-        return localStorage.setItem(KEPT, JSON.stringify(runs.slice(0, k)));
-      } catch {}
-    }
-    localStorage.removeItem(KEPT);
-  };
-
-  function render() {
-    panel.querySelector(".runs")!.innerHTML = runs.map((r) => `<div class="run" data-n="${r.n}">
-      <div class="meta"><b>${esc(r.kind)}</b><span>${esc(JSON.stringify(r.input))}</span>
-        <span>${r.ms !== undefined ? `${(r.ms / 1000).toFixed(1)}s` : "running…"}</span>
-        ${r.result?.verdict || (r.kind === "filing" && r.result) ? `<button data-preview="${r.n}">as a letter</button>` : ""}</div>
-      ${r.error ? `<p class="problem">${esc(r.error)}</p>` : r.result !== undefined ? `${show(r.result)}<details><summary>raw</summary><div class="txt">${esc(JSON.stringify(r.result, null, 2))}</div></details>` : ""}
-      ${transcriptOf(r.calls ?? [])}
-    </div>`).join("");
-  }
-
-  async function call(kind: string, path: string, input: Record<string, unknown>) {
-    const run: Run = { n: ++n, kind, input };
-    runs.unshift(run);
-    render();
-    try {
-      const res = await fetch("/api/backoffice", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ what: path, ...input }) });
-      const body = await res.json();
-      Object.assign(run, body.error ? { error: body.error } : { result: body.result }, { calls: body.calls, ms: body.ms });
-      if (kind === "filing" && run.result) field<HTMLTextAreaElement>("intent").value = run.result.intent;
-    } catch (e) {
-      run.error = String(e);
-    }
-    keep();
-    render();
-  }
-
-  // A ruling sent by post to a plot that isn't really ours: the client's own
-  // path for a stamp (arrive), with nothing written anywhere.
-  let fakes = 90000;
-  async function letter(from: Status, stamped: Partial<Filing>, wanted?: number | null) {
-    const plot = hooks.freePlot();
-    if (!plot) return hooks.speak("No free plot to send it to.");
-    const fid = wanted && !hooks.filings.has(wanted) ? wanted : ++fakes;
-    const now = new Date().toISOString();
-    const base: Filing = {
-      id: fid, filer: hooks.me, plot, intent: intent() || "a bench, for looking at the pond with",
-      status: from, condition: null, wants: null, bylaw: null, permit: null, minutes: null, filed_at: now, stamped_at: null,
-      built_at: null, inspected_at: null, remark: null, met_at: null, ground: null,
-    };
-    await hooks.arrive(base);
-    await hooks.arrive({ ...base, stamped_at: now, ...stamped, id: fid, filer: hooks.me, plot });
-  }
-
-  function preview(r: Run) {
-    const res = r.result;
-    if (r.kind === "filing") return letter(res.minutes ? "committee" : "pending", res);
-    const stamped = {
-      intent: String(r.input.intent), status: res.verdict.status, bylaw: res.verdict.bylaw,
-      condition: res.written?.condition ?? null, wants: res.written?.wants ?? null,
-    };
-    if (r.kind === "committee") return letter("committee", { ...stamped, permit: res.minutes.outcome, minutes: res.minutes });
-    return letter("pending", { ...stamped, permit: res.permit }, r.input.id as number);
-  }
-
-  const DO: Record<string, () => unknown> = {
-    filing: () => id() && call("filing", "filing", { id: id() }),
-    rule: () => call("rule", "rule", { id: id() ?? 9999, plot: plotId(), intent: intent() }),
-    committee: () => call("committee", "committee", { id: id() ?? 9999, plot: plotId(), intent: intent() }),
-    appeal: () => call("appeal", "appeal", {
-      id: id() ?? 9999, plot: plotId(), intent: intent(), bylaw: Number(field<HTMLSelectElement>("bylaw").value), pleas: pleas(),
-    }),
-    life: () => call("life", "life", { id: id() ?? 9999, plot: plotId(), intent: intent(), pleas: pleas() }),
-    draw: () => call("draw", "draw", { label: intent() }),
-    condition: () => call("condition", "condition", {
-      id: id() ?? 9999, plot: plotId(), intent: intent(), stock: field<HTMLSelectElement>("stock").value, writeIn: field("writeIn").checked,
-    }),
-    inspect: () => id() && call("inspect", "inspect", { id: id(), condition: field("condition").value.trim() || undefined }),
-    audit: () => id() && call("audit", "audit", { id: id() }),
-    fake: () => {
-      const status = field<HTMLSelectElement>("status").value as Status;
-      return letter("pending", { status, permit: `A ${status} letter, from the back office.`, bylaw: status === "denied" ? 1 : null });
-    },
-    papers: hooks.papers,
-    speak: () => hooks.speak(),
-    clear: () => {
-      runs = [];
-      keep();
-      render();
-    },
-  };
-
-  panel.addEventListener("click", (e) => {
-    const b = (e.target as HTMLElement).closest("button");
-    if (!b) return;
-    if (b.classList.contains("close")) panel.hidden = true;
-    else if (b.dataset.do) void DO[b.dataset.do]();
-    else if (b.dataset.preview) void preview(runs.find((r) => r.n === Number(b.dataset.preview))!);
-    else if (b.dataset.desk && id() && confirm(`${b.textContent}: Filing ${id()}, on the live commons?`)) {
-      void call(`desk ${b.dataset.desk}`, "desk", { [b.dataset.desk]: id() });
-    }
+  const refit = () => panel.querySelectorAll<HTMLElement>("[data-for]").forEach((el) => (el.hidden = !el.dataset.for!.split(" ").includes(flow())));
+  refit();
+  panel.querySelectorAll("[name=flow]").forEach((r) => r.addEventListener("change", refit));
+  field("plot").addEventListener("input", () => {
+    const p = PLOTS.find((q) => q.id === Number(field("plot").value));
+    $(".where").textContent = p ? `${p.name}, on ${REGIONS[p.region].name}` : "no such plot";
   });
 
-  render();
+  // The case, while it's open to appeal: what it's denied under, and what's been said.
+  let open: { intent: string; plot: number; bylaw: number | null; exchange: { plea: string; reply: string | null }[]; finding?: string } | null = null;
+  let busy = false;
+
+  /** One step of the case: a stage with its outcome and the conversation that produced it. */
+  async function stage(title: string, what: Step, input: Record<string, unknown>, before = ""): Promise<any> {
+    panel.querySelectorAll<HTMLDetailsElement>(".talk").forEach((d) => (d.open = false));
+    const el = document.createElement("div");
+    el.className = "stage";
+    el.innerHTML = `<h2>${title} <span class="took dim"></span></h2>${before}<div class="outcome"></div>
+      <details class="talk" open><summary>The conversation</summary><div class="calls"></div></details>`;
+    $(".stages").append(el);
+    const at = (sel: string) => el.querySelector<HTMLElement>(sel)!;
+    const t = Date.now();
+    const wait = () => (at(".outcome").innerHTML = `<p class="dim">At his desk… ${Math.round((Date.now() - t) / 1000)}s</p>`);
+    wait();
+    const tick = setInterval(wait, 1000);
+    el.scrollIntoView({ behavior: "smooth", block: "start" });
+    try {
+      const res = await fetch("/api/backoffice", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ what, id: 9999, ...input }) });
+      const body = await res.json();
+      at(".outcome").innerHTML = body.error ? `<p class="problem">${esc(body.error)}</p>` : outcome(what, body.result);
+      at(".took").textContent = `${secs(body.ms)}, ${body.calls?.length ?? 0} calls`;
+      at(".calls").innerHTML = (body.calls ?? []).map(message).join("") || `<p class="dim">No models were asked.</p>`;
+      return body.error ? undefined : body.result;
+    } catch (e) {
+      at(".outcome").innerHTML = `<p class="problem">${esc(e)}</p>`;
+    } finally {
+      clearInterval(tick);
+    }
+  }
+
+  /** Where the case stands: open to a plea (to Gary, or against the committee), or closed. */
+  function standing(why?: string) {
+    const n = open?.exchange.length ?? 0;
+    $(".reply").hidden = !open;
+    $(".closed").hidden = !!open || !why;
+    $(".closed").textContent = why ?? "";
+    if (!open) return;
+    $(".to").textContent = open.finding ? "Final appeal, against the committee" : `Appeal ${n + 1} of 3, to Gary`;
+    $(".why").textContent = open.finding ? "The committee has ruled on appeal. One last plea, and that's final."
+      : `Denied under ${bylawName(open.bylaw)}. Write back to make your case.${n === 2 ? " If this is dismissed too, it goes up to the committee." : ""}`;
+    field<HTMLTextAreaElement>("plea").focus({ preventScroll: true });
+  }
+
+  /** Denied: open to appeal, unless it's done with appeals. */
+  const settle = (v: { status: string; bylaw: number | null } | undefined, intent: string, plot: number) => {
+    open = v?.status === "denied" ? { intent, plot, bylaw: v.bylaw, exchange: [] } : null;
+    standing(v?.status === "refused" ? "Refused filings are never appealed." : undefined);
+  };
+
+  async function run() {
+    if (busy) return;
+    const f = flow();
+    const intent = field<HTMLTextAreaElement>("intent").value.trim();
+    const plot = Number(field("plot").value) || 1;
+    $(".out").hidden = false;
+    $(".stages").innerHTML = "";
+    open = null;
+    standing();
+    if (!intent) return standing("Write a filing first.");
+    if (f === "appeal") return settle({ status: "denied", bylaw: Number(field<HTMLSelectElement>("bylaw").value) }, intent, plot);
+
+    busy = true;
+    const r = await stage(FLOWS[f][0], f, {
+      intent, label: intent, plot, stock: field<HTMLSelectElement>("stock").value, writeIn: field("writeIn").checked,
+    });
+    busy = false;
+    if (f === "life" && r) settle(r.sat?.verdict ?? r.ruled.verdict, intent, plot);
+  }
+
+  async function send() {
+    const plea = field<HTMLTextAreaElement>("plea").value.trim();
+    if (busy || !open || !plea) return;
+    const c = open;
+    busy = true;
+    field<HTMLTextAreaElement>("plea").value = "";
+    $(".reply").hidden = true;
+    const base = { intent: c.intent, plot: c.plot, bylaw: c.bylaw, earlier: c.exchange };
+
+    if (c.finding) {
+      await stage("Final appeal, to the committee", "escalate", { ...base, against: { finding: c.finding, plea } }, pleaded(plea));
+      open = null;
+      standing("That was final.");
+    } else {
+      const h = await stage(`Appeal ${c.exchange.length + 1} to Gary`, "appeal", { ...base, plea }, pleaded(plea));
+      if (!h || !h.ok || h.verdict.status !== "denied") {
+        open = null;
+        standing(!h ? "Something went wrong at the desk." : !h.ok ? "Gary won't hear it. That's the end of it." : "Allowed. The case is closed.");
+      } else {
+        c.exchange.push({ plea, reply: h.reply });
+        c.bylaw = h.verdict.bylaw;
+        if (c.exchange.length < 3) standing();
+        else {
+          const sat = await stage("The committee, on appeal", "escalate", { ...base, bylaw: c.bylaw, earlier: c.exchange });
+          if (sat?.verdict.status === "denied") {
+            c.finding = sat.minutes.finding ?? sat.minutes.outcome;
+            standing();
+          } else {
+            open = null;
+            standing(!sat ? "No quorum, so it'd sit again tomorrow night. The case is closed here." : "Allowed on appeal. The case is closed.");
+          }
+        }
+      }
+    }
+    busy = false;
+  }
+
+  $(".go").addEventListener("click", run);
+  $(".send").addEventListener("click", send);
+  panel.addEventListener("keydown", (e) => {
+    if (e.key !== "Enter" || !(e.metaKey || e.ctrlKey)) return;
+    void ((e.target as HTMLElement).getAttribute("name") === "plea" ? send() : run());
+  });
+  $(".close").addEventListener("click", () => (panel.hidden = true));
   return panel;
 }
