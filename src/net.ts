@@ -1,12 +1,28 @@
-import { createClient, type PostgrestError } from "@supabase/supabase-js";
+import { createClient, isAuthRetryableFetchError, type PostgrestError } from "@supabase/supabase-js";
 import type { PropDef } from "./content/canon/props.ts";
 import { parseAvatar, type Avatar } from "./avatar.ts";
 
 export const supabase = createClient(
   import.meta.env.VITE_SUPABASE_URL,
   import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
-  { db: { schema: "the_commons" } },
+  { db: { schema: "the_commons" }, global: { fetch: refreshing } },
 );
+
+/**
+ * The database refuses papers it thinks have expired, though this device
+ * thinks they're fine (a slow clock, a phone that slept through the refresh).
+ * Get fresh ones and ask again, once.
+ */
+async function refreshing(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  const res = await fetch(input, init);
+  const url = input instanceof Request ? input.url : String(input);
+  if (res.status !== 401 || !url.includes("/rest/v1/")) return res;
+  const { data } = await supabase.auth.refreshSession();
+  if (!data.session) return res;
+  const headers = new Headers(init?.headers);
+  headers.set("Authorization", `Bearer ${data.session.access_token}`);
+  return fetch(input, { ...init, headers });
+}
 
 // A session that can't be refreshed (a tab left asleep too long) is dropped,
 // and every write after it would be refused. Start over as someone new instead.
@@ -44,10 +60,12 @@ export interface Filing {
 export const HELD: Status[] = ["pending", "approved", "conditional", "committee"];
 
 export async function signIn(): Promise<string> {
-  const { data } = await supabase.auth.getSession();
+  const { data, error } = await supabase.auth.getSession();
   if (data.session) return data.session.user.id;
-  const { data: signed, error } = await supabase.auth.signInAnonymously();
-  if (error || !signed.user) throw error ?? new Error("no user");
+  // Couldn't reach the counter to renew them: they're still ours, so don't start over as someone new.
+  if (isAuthRetryableFetchError(error)) throw error;
+  const { data: signed, error: refused } = await supabase.auth.signInAnonymously();
+  if (refused || !signed.user) throw refused ?? new Error("no user");
   return signed.user.id;
 }
 

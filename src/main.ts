@@ -1403,11 +1403,23 @@ function removePlacement(id: number) {
   regroup(p.filing);
 }
 
+/** A load that fails is usually a blip (a phone just waking, a network changing): ask twice more before giving up. */
+async function again<T>(load: () => Promise<T>): Promise<T> {
+  for (const wait of [1000, 3000]) {
+    try {
+      return await load();
+    } catch {
+      await new Promise((r) => setTimeout(r, wait));
+    }
+  }
+  return load();
+}
+
 async function start() {
   if (await afterGoogle()) return; // off to Google again, as the resident that account already is
-  me = await signIn();
+  me = await again(signIn);
   kept = !(await pencilled());
-  const [loaded, placed, appealed] = await Promise.all([loadFilings(), loadPlacements(), loadAppeals()]);
+  const [loaded, placed, appealed] = await again(() => Promise.all([loadFilings(), loadPlacements(), loadAppeals()]));
   for (const f of loaded) upsert(f);
   for (const a of appealed) setAppeal(a);
   for (const p of placed) placements.set(p.id, p);
@@ -1481,5 +1493,6 @@ async function start() {
 resize();
 window.addEventListener("resize", resize);
 start().catch((err) => {
-  $("tag").textContent = `The commons is closed: ${err.message ?? err}`;
+  $("tag").textContent = `The commons is closed: ${err.message ?? err}. Tap to try again.`;
+  $("tag").onclick = () => location.reload();
 });
