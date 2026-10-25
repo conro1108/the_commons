@@ -1,3 +1,4 @@
+import { isAuthRetryableFetchError } from "@supabase/supabase-js";
 import { BRUSHES, empty, groundLabel, paintGround } from "./content/ground.ts";
 import { drawnAs, look, PALETTE, propCanvas, propSize, SCALES, sized } from "./content/props.ts";
 import { BYLAWS } from "./rulebook.ts";
@@ -1492,7 +1493,13 @@ async function start() {
 
 resize();
 window.addEventListener("resize", resize);
-start().catch((err) => {
+// auth-js holds on to a failed token refresh for a minute, so asking again in
+// this page won't help: a fresh page will, once.
+start().then(() => sessionStorage.removeItem("reloaded"), (err) => {
+  if (isAuthRetryableFetchError(err) && !sessionStorage.getItem("reloaded")) {
+    sessionStorage.setItem("reloaded", "1");
+    setTimeout(() => location.reload(), 2000);
+  }
   $("tag").textContent = `The commons is closed: ${err.message ?? err}. Tap to try again.`;
   $("tag").onclick = () => location.reload();
 });
