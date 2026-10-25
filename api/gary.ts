@@ -260,6 +260,12 @@ const REFUSAL_CHECKS = {
   insults: "Judging only the permit's own words, not the filing: do they include a crude word, a slur or a threat? Exasperation with the filer is fine.",
 } as const;
 type Check = keyof typeof CHECKS | keyof typeof REFUSAL_CHECKS;
+/** The checks worth asking: with no condition or bylaw to state, nothing can be omitted. */
+const askable = <C extends Record<string, string>>(checks: C, input: { condition: unknown; bylaw: unknown }): Partial<C> => {
+  if (input.condition || input.bylaw) return checks;
+  const { omits: _, ...rest } = checks;
+  return rest as Partial<C>;
+};
 
 /** Why a draft can't go out, or nothing if it can. Links and handles are refused before any model looks. */
 export function problemsWith(draft: string, checks: Partial<Record<Check, number>>): string[] {
@@ -356,7 +362,7 @@ export async function rule(
         `permit, check ${attempt + 1}`,
         { input, permit: draft },
         Object.fromEntries(
-          Object.entries(refused ? REFUSAL_CHECKS : CHECKS).map(([k, instructions]) => [k, { type: "boolean" as const, instructions }]),
+          Object.entries(refused ? REFUSAL_CHECKS : askable(CHECKS, input)).map(([k, instructions]) => [k, { type: "boolean" as const, instructions }]),
         ) as Record<Check, { type: "boolean"; instructions: string }>,
       );
       checks = Object.fromEntries(Object.entries(a).map(([k, v]) => [k, v.probability]));
@@ -731,7 +737,7 @@ export async function hear(
     bylaw: verdict.bylaw !== null ? bylawText(verdict.bylaw, plot) : null,
     site: { ground: site.ground, weather: site.weather, particulars: site.particulars },
   };
-  const { text, drafts } = await note("reply", HEARING, input, REPLY_CHECKS);
+  const { text, drafts } = await note("reply", HEARING, input, askable(REPLY_CHECKS, input) as Record<string, string>);
   const reply = text ?? `On appeal: ${formPermit(filing.id, verdict, input.condition, plot)}`;
   return { ok: true, verdict, written, reply, record: { answers, drafts, conditions: written?.tries, judge: JUDGE, scribe: SCRIBE } };
 }
