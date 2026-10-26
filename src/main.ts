@@ -10,6 +10,8 @@ import {
   place, rehandle, saveProfile, signIn, summonGary, supabase, unplace,
   type Appeal, type Filing, type Placement,
 } from "./net.ts";
+import { askForPlot, fileChangeOfUse, flipSign, loadSpirit, pinNotice, signBook, summonReader, unpinNotice, type Notice, type Visit } from "./net.ts";
+import { spiritCardHtml, spiritHtml, styleSpirit } from "./spirit.ts";
 import type { RealtimeChannel } from "@supabase/supabase-js";
 import { VOID, colourOf, draw, letterPhase, type Letter, type Walker } from "./render.ts";
 import {
@@ -311,7 +313,7 @@ function renderCard() {
   } else if (f) {
     body = `<h2>${esc(plotLabel(def))}</h2><p class="meta where">${esc(REGIONS[def.region].name)}</p>
       <p>Held by ${esc(who(f.filer))}: <q>${esc(f.intent)}</q></p>
-      ${enter}${ruling(f, fresh)}${conditionHtml(f)}<p class="meta">Filing ${pad(f.id)}</p>`;
+      ${enter}${ruling(f, fresh)}${spiritCardHtml(f, me, guest)}${conditionHtml(f)}<p class="meta">Filing ${pad(f.id)}</p>`;
   } else {
     const denial = appealableOn(plot);
     body = `${particulars(def)}
@@ -331,6 +333,7 @@ function renderCard() {
     renderCard();
   });
   if (f) card.querySelector(".enter")?.addEventListener("click", () => walkInto(f));
+  if (f) wireAsk(card, f);
   card.querySelector(".door")?.addEventListener("click", door);
   card.querySelector<HTMLButtonElement>("[data-reply]")?.addEventListener("click", (e) =>
     openCard(plot, Number((e.currentTarget as HTMLButtonElement).dataset.reply)));
@@ -526,12 +529,16 @@ function renderBuildInfo() {
   const f = focus;
   const p = plotOf(f);
   const count = built.get(f.id)?.length ?? 0;
+  const restoreTyping = keepSpiritTyping();
   $("build-info").innerHTML = `<h2>${esc(plotLabel(p))}</h2><p class="meta where">${esc(REGIONS[p.region].name)}, ${Math.round(p.area / 10) * 10} sq. yd.</p>
     <p>${f.filer === me ? "Yours" : `Held by ${esc(who(f.filer))}`}: <q>${esc(f.intent)}</q></p>
     ${foldCondition(f)}
     ${f.filer === me
       ? `<p class="hint">Building on a granted plot needs no further paperwork. Gary finds this difficult.</p>`
-      : `<p class="meta">${count ? `${count} thing${count === 1 ? "" : "s"} built.` : "Nothing built yet."}</p>`}`;
+      : `<p class="meta">${count ? `${count} thing${count === 1 ? "" : "s"} built.` : "Nothing built yet."}</p>`}
+    ${spiritUp(f)}`;
+  wireSpirit(f);
+  restoreTyping();
   $("tool-hint").textContent = HINTS[tool.split(":")[0]];
   if (f.filer === me) {
     if (drawnHere(f).map((d) => d.look).join() !== drawnKey) renderPalette();
@@ -673,6 +680,7 @@ function enterFocus(f: Filing) {
   heading = null;
   $("build-problem").textContent = "";
   showPanels();
+  void loadSpiritFor(f);
   renderPalette();
   renderBuildInfo();
   fitFocus();
@@ -696,6 +704,131 @@ function renderAll() {
   renderTag();
   renderCard();
   renderBoard();
+}
+
+// --- the spirit: the sign, the board, the book, Gary's reading ---------------
+// The HTML is src/spirit.ts; this loads a place's board and book when we go up
+// close, keeps them current, and wires the buttons, up close and on the card.
+
+let spirit: { filing: number; notices: Notice[]; visits: Visit[] } | null = null;
+let spiritOpen = false; // on a phone it folds away like the condition
+
+styleSpirit();
+
+async function loadSpiritFor(f: Filing) {
+  spirit = { filing: f.id, notices: [], visits: [] };
+  const got = await loadSpirit(f.id);
+  if (spirit?.filing !== f.id) return;
+  spirit = { filing: f.id, ...got };
+  handles = await handlesFor(got.visits.map((v) => v.visitor));
+  renderBuildInfo();
+}
+
+/** The spirit's part of the build info, for the plot up close. */
+function spiritUp(f: Filing) {
+  const html = spiritHtml({ f, notices: spirit?.filing === f.id ? spirit.notices : [], visits: spirit?.filing === f.id ? spirit.visits : [], me, guest, who });
+  if (!phone.matches) return html;
+  return `<details class="fold spirit-fold"${spiritOpen ? " open" : ""}><summary>${f.open_sign ? "Open" : "Closed"}${f.boarded_at ? ", boarded up" : f.drift ? ", a notice from Gary" : ""}</summary>${html}</details>`;
+}
+
+/** What's being typed into the board or the book, kept across a re-render. */
+function keepSpiritTyping() {
+  const el = document.activeElement;
+  const typing = el instanceof HTMLInputElement && el.closest(".spirit form") ? { form: el.closest("form")!.className, value: el.value } : null;
+  return () => {
+    const fold = $("build-info").querySelector<HTMLDetailsElement>(".spirit-fold");
+    fold?.addEventListener("toggle", () => (spiritOpen = fold.open));
+    if (!typing) return;
+    const box = $("build-info").querySelector<HTMLInputElement>(`form.${typing.form} input`);
+    if (!box) return;
+    box.value = typing.value;
+    box.focus();
+  };
+}
+
+const spiritProblem = (root: HTMLElement, text: string) => {
+  const p = root.querySelector(".spirit-problem");
+  if (p) p.textContent = text;
+};
+
+function wireSpirit(f: Filing) {
+  const root = $("build-info");
+  const s = spirit?.filing === f.id ? spirit : null;
+  root.querySelector(".spirit-sign")?.addEventListener("click", async () => {
+    const problem = await flipSign(f.id, !f.open_sign);
+    if (problem) return spiritProblem(root, problem);
+    f.open_sign = !f.open_sign;
+    renderBuildInfo();
+  });
+  root.querySelector<HTMLFormElement>(".spirit-pin")?.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const box = (e.currentTarget as HTMLFormElement).querySelector("input")!;
+    const got = await pinNotice(f.id, box.value.trim());
+    if (typeof got === "string") return spiritProblem(root, got);
+    box.value = "";
+    if (s && !s.notices.some((n) => n.id === got.id)) s.notices.push(got);
+    renderBuildInfo();
+  });
+  for (const b of root.querySelectorAll<HTMLButtonElement>("[data-unpin]")) {
+    b.addEventListener("click", async () => {
+      const id = Number(b.dataset.unpin);
+      if (!(await unpinNotice(id))) return spiritProblem(root, "It won't come down. Try again in a moment.");
+      if (s) s.notices = s.notices.filter((n) => n.id !== id);
+      renderBuildInfo();
+    });
+  }
+  root.querySelector<HTMLFormElement>(".spirit-sign-book")?.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const box = (e.currentTarget as HTMLFormElement).querySelector("input")!;
+    const got = await signBook(f.id, box.value.trim());
+    if (typeof got === "string") return spiritProblem(root, got);
+    box.value = "";
+    if (s && !s.visits.some((v) => v.id === got.id)) s.visits.unshift(got);
+    renderBuildInfo();
+  });
+  root.querySelector(".spirit-put-back")?.addEventListener("click", async () => {
+    const n = await summonReader();
+    spiritProblem(root, n === null ? "Gary couldn't be reached." : n ? "Gary's on his way to have another look." : "Gary's only just been. Give him a minute.");
+  });
+  root.querySelector(".spirit-change-use")?.addEventListener("click", async () => {
+    // Slice C's change of use goes here (fileChangeOfUse in net.ts is a stub until then).
+    spiritProblem(root, (await fileChangeOfUse(f.id, f.drift ?? "")) ?? "Filed. Gary will rule on the change of use.");
+  });
+  wireAsk(root, f);
+}
+
+/** Ask Gary for a boarded-up plot, from up close or from its card. */
+function wireAsk(root: HTMLElement, f: Filing) {
+  root.querySelector(".spirit-ask")?.addEventListener("click", async () => {
+    const until = await askForPlot(f.plot);
+    if (!until) return spiritProblem(root, "Gary can't give notice on this one.");
+    f.quit_by = until;
+    renderAll();
+  });
+}
+
+/** Lines on the board and in the book as they're written, and as Gary reads them. */
+function spiritChannel(ch: RealtimeChannel) {
+  for (const table of ["notices", "visits"] as const) {
+    ch.on("postgres_changes", { event: "*", schema: "the_commons", table }, async ({ eventType, new: row, old }) => {
+      if (!spirit) return;
+      const list = (table === "notices" ? spirit.notices : spirit.visits) as (Notice | Visit)[];
+      if (eventType === "DELETE") {
+        const id = (old as { id: number }).id;
+        if (table === "notices") spirit.notices = spirit.notices.filter((n) => n.id !== id);
+        else spirit.visits = spirit.visits.filter((v) => v.id !== id);
+      } else {
+        const r = row as Notice | Visit;
+        if (r.filing !== spirit.filing) return;
+        const at = list.findIndex((x) => x.id === r.id);
+        if (at >= 0) list[at] = r;
+        else if (table === "notices") spirit.notices.push(r as Notice);
+        else spirit.visits.unshift(r as Visit);
+        if ("visitor" in r) handles = await handlesFor([r.visitor]);
+      }
+      if (focus) renderBuildInfo();
+    });
+  }
 }
 
 // --- canvas and views --------------------------------------------------------
@@ -1507,6 +1640,7 @@ async function start() {
       }
       renderAll();
     });
+  spiritChannel(channel);
   channel.subscribe((status) => {
     if (status === "SUBSCRIBED") channel.track(spawn);
   });

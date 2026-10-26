@@ -12,7 +12,7 @@ Branch `worktree-agent-a723058c2a972b2bb`. Resume from the first unticked step.
 - [x] 8. `src/schedule.ts`: useOf() (schedule.use or intent)
 - [x] 9. `src/net.ts` section: Filing fields, Notice/Visit types, load/post/sign/flip/ask/summon, fileChangeOfUse stub (C)
 - [x] 10. `src/spirit.ts`: pure HTML for sign/board/book/reading/drift/boarded + CSS + drawBoarded()
-- [ ] 11. `src/main.ts` section: wiring up close (build-info) and on the card; realtime hook
+- [x] 11. `src/main.ts` section: wiring up close (build-info) and on the card; realtime hook
 - [ ] 12. Render hook: boarded plots on the map (`src/render.ts`, one line)
 - [ ] 13. `dev/spirit.html`: every state, no network
 - [ ] 14. `npm run build` + `npm test`, final commit, notes below
@@ -23,3 +23,4 @@ Branch `worktree-agent-a723058c2a972b2bb`. Resume from the first unticked step.
 - 5-8: `// --- the spirit` section in api/gary.ts just above deskDb; desk() gets `& SpiritBody` and a two-line hook (spiritDesk). Reading: Jev picks yes/mostly/drifted; scribe writes two lines (other use / the reading), checked for invents/contradicts/unfit, fallback formReading(). Unchanged evidence (stable()) only bumps read_at. Drift stored on filings.drift (the other use, or 'something else'). `driftOf(db, filing, asOf)` exported for C. survey() isn't filtered to room='out' (B/D's to change); inside things are read separately.
 - 9: optional spirit fields on Filing (so dev pages' made-up filings still compile); section at the end of net.ts. `fileChangeOfUse()` is the STUB for C.
 - 10: src/spirit.ts: spiritHtml (up close), spiritCardHtml (map card), driftLine, styleSpirit (CSS injected, so dev page shares it), drawBoarded(ctx, plot).
+- 11: main.ts section `// --- the spirit` just above `// --- canvas and views`. Hooks: imports (own lines), renderBuildInfo (spiritUp + wireSpirit + keep typing), renderCard held branch (spiritCardHtml + wireAsk), enterFocus (loadSpiritFor), start() (spiritChannel before subscribe). The change-of-use button calls the net.ts stub.
