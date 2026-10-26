@@ -229,7 +229,7 @@ function finishOf(material: string, paint: string): Finish {
   const plaster: C.Ramp = ["#a8988c", "#c8b8a4", "#e0d4bc", "#f0e8d2"];
   switch (material) {
     case "timber": case "wood": case "log":
-      return { wall: C.PLANK.slice(1), top, floor: C.PLANK, boards: true, course: "planks" };
+      return { wall: [C.PLANK[2], C.PLANK[3], C.PLANK[4], "#e0c08a"], top, floor: C.PLANK, boards: true, course: "planks" };
     case "brick":
       return { wall: ["#6e3a36", "#8e4c40", "#ac6450", "#c88468"], top, floor: C.PLANK, boards: true, course: "brick" };
     case "stone": case "flint":
@@ -481,12 +481,17 @@ export function drawRoom(ctx: CanvasRenderingContext2D, scene: RoomScene, now = 
   grade(ctx, art.w, art.h, hour);
   daylightIn(ctx, s, r, hour);
   if (dark(hour)) {
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(PAD, PAD, r.w * ZOOM, r.h * ZOOM);
+    ctx.clip();
     for (const p of things) {
       if (!fitting(p.prop)?.lamp) continue;
       const c = spriteOf(p);
       const { x, y } = artOf(p);
-      glow(ctx, x + c.width / 2, y + 3, 22, 1.4);
+      glow(ctx, x + c.width / 2, y + c.height / 2, 16, 0.9);
     }
+    ctx.restore();
   }
 }
 
