@@ -32,12 +32,14 @@ Most files open with a comment saying what they own; read it before grepping.
 | Policies, triggers, queue, cron, the plots' rows | `db/logic.sql` |
 | Look at the map or a plot with no network | `dev/*.html` |
 
-## Rules
+## Gotchas
 
-- The commons' data is kept: no `drop schema`. `db/tables.sql` is never rerun;
-  change a table with a hand-run `alter table` and fold it back in.
-  `db/logic.sql` is rerun in full by CI, so keep it safe to run twice.
-- AI results are stored, never regenerated: everyone sees the same commons.
-- Art borrowed from cozy_sprites is copied into `src/content/canon/`, not
-  imported; Vercel only has this repo.
-- Never draw sprite art with non-integer `ctx.scale()`/`ctx.rotate()`: it smears.
+- The commons' data is kept, unlike other toys': there's no `drop schema`.
+  `db/tables.sql` never reruns, so a table change is a hand-run `alter table`
+  folded back in. CI reruns `db/logic.sql` in full on every `db/**` push, so
+  it has to survive running twice.
+- AI results are stored rather than regenerated, so everyone sees the same
+  Gary.
+- Vercel only has this repo, so art from cozy_sprites is copied into
+  `src/content/canon/`, not imported.
+- Non-integer `ctx.scale()`/`ctx.rotate()` smears sprite art off the pixel grid.
