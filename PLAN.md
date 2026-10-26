@@ -26,13 +26,6 @@ Deeper building, and permits held to over time. Then a world tick so the
 commons changes while you're away (hedges spread, paths wear in, the cast
 notices). Maybe a nightly gazette, petitions, mail.
 
-## AI rules
-
-- AI picks from enums and writes prose; code applies the result.
-- Every result is stored and never regenerated for the same input.
-- A decision model rules (Jev); a scribe writes the prose and the decision
-  model checks it before it goes out (models at the top of `api/gary.ts`).
-
 ## How it fits together
 
 - **Supabase:** Postgres + RLS holds everything; clients write directly only
