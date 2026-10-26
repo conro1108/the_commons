@@ -61,9 +61,16 @@ export const HELD: Status[] = ["pending", "approved", "conditional", "committee"
 
 export async function signIn(): Promise<string> {
   const { data, error } = await supabase.auth.getSession();
-  if (data.session) return data.session.user.id;
   // Couldn't reach the counter to renew them: they're still ours, so don't start over as someone new.
   if (isAuthRetryableFetchError(error)) throw error;
+  if (data.session) {
+    // Papers for someone no longer on file still look fine to this browser. Ask the counter.
+    const { data: held, error: lost } = await supabase.auth.getUser();
+    if (held.user) return held.user.id;
+    if (isAuthRetryableFetchError(lost)) throw lost;
+    await supabase.auth.signOut({ scope: "local" });
+    return new Promise(() => {}); // signing out reloads the page, which starts over
+  }
   const { data: signed, error: refused } = await supabase.auth.signInAnonymously();
   if (refused || !signed.user) throw refused ?? new Error("no user");
   return signed.user.id;
