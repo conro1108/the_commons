@@ -8,8 +8,8 @@ Slice D of plans/building-and-enforcement-slices.md. Resume from the first untic
 - [x] 4. `src/letter.ts`: Tag type, open/overdue helpers, question wording, red tag + questionnaire pixel art, card HTML.
 - [x] 5. `api/gary.ts` section: the round (`{ letter: filing }`) asks about unscheduled things.
 - [x] 6. `api/gary.ts`: ruling on an answer (`{ tag: id }`): Jev (ancillary/incidental/separate/evasive, generous), scribe reply, checked, stored; ancillary -> schedule.
-- [ ] 7. Retrospective permission stub (C's call site), client and server. (server half done: `retrospective()` in gary.ts, unwired, 501)
-- [ ] 8. `src/net.ts` section: loadTags, answerTag, reclaim, fileRetrospective (stub).
+- [x] 7. Retrospective permission stub (C's call site), client and server. Server: `retrospective()` in gary.ts, unwired (501). Client: `fileRetrospective()` in net.ts returns a "desk isn't open" line.
+- [x] 8. `src/net.ts` section: loadTags, answerTag, reclaim, fileRetrospective (stub).
 - [ ] 9. Render hooks: red tags on the map (`render.ts`), on things up close and questionnaire on the door (`closeup.ts`); impounded things not drawn.
 - [ ] 10. `src/main.ts` section: tags state + realtime, "Gary's here" when present, questionnaire on the door, red tag card, the pound at the hut.
 - [ ] 11. Dev: `dev/letter.html` (cards, no network), `?letter=1` on dev/plot and dev/map.
