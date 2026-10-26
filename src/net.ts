@@ -1,7 +1,7 @@
 import { createClient, isAuthRetryableFetchError, type PostgrestError } from "@supabase/supabase-js";
 import type { PropDef } from "./content/canon/props.ts";
 import { parseAvatar, type Avatar } from "./avatar.ts";
-import type { Schedule, Shell, Where } from "./schedule.ts";
+import type { Room, Schedule, Shell } from "./schedule.ts";
 
 export const supabase = createClient(
   import.meta.env.VITE_SUPABASE_URL,
@@ -220,7 +220,7 @@ export interface Placement {
   label?: string | null; // a written-in item's name
   label_ok?: boolean | null; // Gary's read of it: null while he hasn't
   sprite?: PropDef | null; // and his drawing of it, once he's done one
-  room?: Where; // outdoors on the plot, or inside the shell
+  room?: Room; // outdoors on the plot, inside the shell, or in storage (put away on a change of use)
   parent?: number | null; // held in or on another placement; x is the slot
   impounded_at?: string | null; // in the pound at Gary's hut
 }

@@ -3,7 +3,7 @@
 Branch `worktree-agent-abdf4488549af27a7`. Resume from the first unticked step.
 
 - [x] 1. Progress file.
-- [ ] 2. `src/schedule.ts`: pure helpers (norm names, add a granted variation, apply a change of use, stored room) + `scheduled()` ignoring storage.
+- [x] 2. `src/schedule.ts`: pure helpers (norm names, add a granted variation, apply a change of use, stored room) + `scheduled()` ignoring storage.
 - [ ] 3. `src/library.ts`: the seam onto F's fittings (stand-in list + best match), and shell materials stand-in.
 - [ ] 4. Schema: `db/alters/3-schedule.sql` (pieces, variations, placements room 'store'), folded into `db/tables.sql`.
 - [ ] 5. `db/logic.sql` own section: policies, enqueue, own queue + drain, nightly committee for variations, realtime.
@@ -22,3 +22,4 @@ Branch `worktree-agent-abdf4488549af27a7`. Resume from the first unticked step.
 ## Notes
 
 - 1: plan as above. Storage is a third placement room, 'store' (x is a slot), so a change of use can put misfits away without the pound.
+- 2: `norm`, `isFitting`, `vary` (fitting/room/larger), `changeUse` (fates keep/historic/store) in src/schedule.ts; Schedule gains shell.rooms, shell.larger, stored. `Room` = Where | 'store'; net.ts Placement.room uses it.
