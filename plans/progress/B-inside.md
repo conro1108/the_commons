@@ -16,7 +16,7 @@ Slice B of `plans/building-and-enforcement-slices.md`. Resume from the first unt
 - [x] 12. `src/main.ts` own section: going in (door click, button) and out (door, button, Escape, wheel); visitors read-only.
 - [x] 13. `src/main.ts`: laying out inside: place, move, take down, put in slots.
 - [x] 14. `npm run build`, `npm test`.
-- [ ] 15. Final notes below, commit.
+- [x] 15. Final notes below, commit.
 
 ## Notes
 - Step 2: stand-in is src/interior-fittings.ts (18 pieces). RoomFitting = PropDef + on floor|wall, flat, slots [cx, bottom y], small, lamp, vary. Delete on merge with F.
@@ -27,3 +27,9 @@ Slice B of `plans/building-and-enforcement-slices.md`. Resume from the first unt
 - Step 10: net.ts section at the end: placeInside(filing, x, y, prop, holder|null) and moveInside(id, x, y, parent).
 - Steps 11-13: main.ts section "inside" before "the map". Hooks elsewhere (one line each): imports; regroup() keeps room 'in' and held things off `built` (so off the plot and the mini) and calls regroupInside(); frame() draws the room when indoors; the plot's pointer/click handlers return when indoors, pointerdown tries knock() (door up close) first; wheel/Escape leave the room; resize() fits it; renderBuildInfo() shows the Go inside button. index.html: #go-in in #build, #room section and its CSS. Focus stays on the plot while indoors.
 - Step 14: build and tests pass.
+- Step 15: done. For the merge:
+  - Seam F: `src/interior.ts` imports FITTINGS from `src/interior-fittings.ts` (marked SEAM). Point it at `src/content/fittings.ts`, adapt in `fitting()` (needs rows/palette, on floor|wall, slots [cx, bottom y], small, flat, lamp, vary), delete the stand-in. Placed keys must still match `^[a-z_]{1,24}$`.
+  - Seam A: `doorOutside(shell)` in interior.ts guesses the door is mid-side, 2 cells; swap for A's own door cells. Material keys guessed: timber/wood/log, brick, stone/flint, else plaster (finishOf()). `paint` is the wall-top colour if it's a hex.
+  - Things held by an outdoor holder aren't drawn on the plot yet: closeup.ts (A's) can call `drawHeld()` from interior.ts.
+  - Not tried in the live app (no shell can exist until A lands, and no network here); dev/room.html is the check.
+  - No schema change; policies/grants only (db/logic.sql), nothing to hand-run.
