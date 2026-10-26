@@ -13,7 +13,7 @@ Branch `worktree-agent-abdf4488549af27a7`. Resume from the first unticked step.
 - [x] 9. `api/gary.ts`: change of use (fresh ruling, schedule rewritten, misfits historic or to storage).
 - [x] 10. `api/gary.ts`: committee sitting on variations; desk() routes `variation` / `committee_variation`.
 - [x] 11. `src/net.ts` own section: Variation type, load, fileVariation, fileChangeOfUse.
-- [ ] 12. `src/permit.ts`: schedule + variations HTML (shared by main.ts and the dev page).
+- [x] 12. `src/permit.ts`: schedule + variations HTML (shared by main.ts and the dev page).
 - [ ] 13. `src/main.ts` own section: schedule on the permit card, variation form + list, realtime.
 - [ ] 14. `dev/permit.html`: the permit card with a schedule, no network (?use=, ?v=).
 - [ ] 15. Tests for the pure schedule helpers.
@@ -29,3 +29,4 @@ Branch `worktree-agent-abdf4488549af27a7`. Resume from the first unticked step.
 - 6-7: api/gary.ts section 'the schedule (slice C)' before deskDb: writeSchedule (Jev: shell/material/chief; scribe JSON; Jev odd+key per fitting; fallback = chief piece), drawPieces (pieces table, reuses item sprites), scheduleFor (catches; failure = unscheduled). Hooked into desk, convene, hearAppeal, sitAppeal; readLabel also reuses pieces. NOTE: gary.ts now imports src/library.ts + src/schedule.ts at runtime (first such import; verify on a Vercel preview).
 - 8-10: section 'variations and changes of use (slice C)': variationOf (pure), ruleVariation, fileVariation (server, for D/E), addToSchedule (for D: ancillary/lawful), applyChangeOfUse (writeSchedule keeping shell, Jev fates, changeUse, store()), hearVariation, sitVariation (reuses sit()). desk routes variation / committee_variation.
 - 11: net.ts section: Variation, loadVariations, fileVariation, fileChangeOfUse (E's entry), loadPieces.
+- 12: src/permit.ts (scheduleHtml, variationHtml, variationForm) + '.works' CSS in index.html (the existing '.schedule' class is the unclaimed plot's deed, so not reused).
