@@ -485,6 +485,240 @@ end $$;
 revoke execute on function the_commons.convene() from public, anon, authenticated;
 select cron.schedule('the_commons_committee', '0 4 * * *', 'select the_commons.convene()');
 
+-- --- the spirit ----------------------------------------------------------------
+-- What a place is used for (plans/building-and-enforcement.md, "The spirit").
+-- The holder flips the open sign and pins notices on the what's-on board;
+-- residents who visit sign the book. Lines are read for fitness by /api/gary
+-- before anyone else sees them. Gary reads the use now and then (send_reader),
+-- and a place with nothing going on for a month is boarded up (board_up).
+
+-- The open sign is the holder's, on the same rows as the ground ("paint your own granted plot").
+grant update (open_sign) on the_commons.filings to authenticated;
+
+-- How many notices are on a board, for the insert policy (which can't count its own table under RLS).
+create function the_commons.notices_on(bigint) returns int
+language sql stable security definer set search_path = '' as $$
+  select count(*)::int from the_commons.notices where filing = $1
+$$;
+grant execute on function the_commons.notices_on(bigint) to authenticated;
+
+-- The what's-on board: the holder's notices, a few at a time. Unread or unfit ones are theirs alone.
+create policy "notices are public once read; your own are yours"
+  on the_commons.notices for select
+  using (ok or exists (select 1 from the_commons.filings f where f.id = filing and f.filer = auth.uid()));
+create policy "pin a notice by your own door"
+  on the_commons.notices for insert to authenticated
+  with check (exists (select 1 from the_commons.filings f
+    where f.id = filing and f.filer = auth.uid() and f.status in ('approved', 'conditional'))
+    and the_commons.notices_on(filing) < 8);
+create policy "take down your own notices"
+  on the_commons.notices for delete to authenticated
+  using (exists (select 1 from the_commons.filings f where f.id = filing and f.filer = auth.uid()));
+grant select on the_commons.notices to anon, authenticated;
+grant insert (filing, line), delete on the_commons.notices to authenticated;
+grant all on the_commons.notices to service_role;
+
+-- The visitors' book: a line a day from any resident (not a guest) who isn't
+-- the holder, at a place that's granted and not boarded up.
+create policy "the book is public once read; your own lines are yours"
+  on the_commons.visits for select
+  using (ok or visitor = auth.uid());
+create policy "sign the book"
+  on the_commons.visits for insert to authenticated
+  with check (visitor = auth.uid() and not coalesce((auth.jwt() ->> 'is_anonymous')::boolean, false)
+    and exists (select 1 from the_commons.filings f
+      where f.id = filing and f.filer <> auth.uid() and f.status in ('approved', 'conditional') and f.boarded_at is null));
+grant select on the_commons.visits to anon, authenticated;
+grant insert (filing, line) on the_commons.visits to authenticated;
+grant all on the_commons.visits to service_role;
+
+-- Gary's readings: written only by /api/gary and board_up(); the latest is copied onto the filing.
+create policy "readings are public"
+  on the_commons.readings for select using (true);
+grant select on the_commons.readings to anon, authenticated;
+grant all on the_commons.readings to service_role;
+
+-- Signs of life. The holder flipping the sign stirs the place; and anything
+-- that stirs it or builds on it takes the boards down, notice and all.
+create function the_commons.spirit_stirred() returns trigger
+language plpgsql set search_path = '' as $$
+begin
+  if new.open_sign is distinct from old.open_sign and auth.uid() = new.filer then new.stirred_at := now(); end if;
+  if old.boarded_at is not null and new.boarded_at is not distinct from old.boarded_at
+      and (new.stirred_at is distinct from old.stirred_at or new.built_at is distinct from old.built_at) then
+    new.boarded_at := null;
+    new.quit_by := null;
+    new.quit_for := null;
+  end if;
+  return new;
+end $$;
+-- Named to fire after filings_ground_built, which sets built_at.
+create trigger filings_stirred before update on the_commons.filings
+  for each row execute function the_commons.spirit_stirred();
+
+create function the_commons.spirit_noted() returns trigger
+language plpgsql security definer set search_path = '' as $$
+begin
+  update the_commons.filings set stirred_at = now() where id = coalesce(new.filing, old.filing);
+  return null;
+end $$;
+revoke execute on function the_commons.spirit_noted() from public, anon, authenticated;
+create trigger notices_noted after insert or delete on the_commons.notices
+  for each row execute function the_commons.spirit_noted();
+create trigger visits_noted after insert on the_commons.visits
+  for each row execute function the_commons.spirit_noted();
+
+-- Gary reads the use of a place once it's settled after a change (ten minutes),
+-- or once a week regardless; five at a time. Asked by the holder ("I've put it
+-- back"), he reads theirs now, at most once a minute. Returns how many.
+create function the_commons.send_reader(asked_by uuid) returns int
+language plpgsql security definer set search_path = '' as $$
+declare
+  f record;
+  secret text;
+  n int := 0;
+begin
+  select decrypted_secret into secret from vault.decrypted_secrets where name = 'the_commons_gary';
+  if secret is null then return 0; end if;
+  for f in
+    update the_commons.filings set read_sent = now()
+    where id in (
+      select id from the_commons.filings
+      where status in ('approved', 'conditional') and boarded_at is null
+        and (filer = asked_by and coalesce(read_sent, '-infinity') < now() - interval '1 minute'
+          or asked_by is null and coalesce(read_sent, '-infinity') < now() - interval '10 minutes'
+            and (greatest(built_at, stirred_at) > coalesce(read_at, '-infinity')
+                 and greatest(built_at, stirred_at) < now() - interval '10 minutes'
+              or coalesce(read_at, stamped_at) < now() - interval '7 days'))
+      order by greatest(built_at, stirred_at) desc nulls last limit 5)
+    returning id
+  loop
+    n := n + 1;
+    perform net.http_post(
+      url := 'https://the-commons-eosin.vercel.app/api/gary',
+      body := jsonb_build_object('reading', f.id),
+      headers := jsonb_build_object('Content-Type', 'application/json',
+                                    'Authorization', 'Bearer ' || secret),
+      timeout_milliseconds := 30000);
+  end loop;
+  return n;
+end $$;
+revoke execute on function the_commons.send_reader(uuid) from public, anon, authenticated;
+
+create function the_commons.summon_reader() returns int
+language sql security definer set search_path = '' as $$
+  select the_commons.send_reader(auth.uid())
+$$;
+revoke execute on function the_commons.summon_reader() from public, anon;
+grant execute on function the_commons.summon_reader() to authenticated;
+
+-- Every fifteen seconds: unread notices and book lines to /api/gary (retried
+-- every two minutes, given up after twenty, staying unread and so unseen), then
+-- whatever wants reading.
+create function the_commons.send_spirit() returns void
+language plpgsql security definer set search_path = '' as $$
+declare
+  m record;
+  secret text;
+begin
+  select decrypted_secret into secret from vault.decrypted_secrets where name = 'the_commons_gary';
+  if secret is null then return; end if;
+  for m in
+    with n as (
+      update the_commons.notices set sent_at = now(), tries = tries + 1
+      where id in (select id from the_commons.notices where ok is null and tries < 20
+        and coalesce(sent_at, '-infinity') < now() - interval '2 minutes' order by id limit 10)
+      returning jsonb_build_object('notice', id) as body),
+    v as (
+      update the_commons.visits set sent_at = now(), tries = tries + 1
+      where id in (select id from the_commons.visits where ok is null and tries < 20
+        and coalesce(sent_at, '-infinity') < now() - interval '2 minutes' order by id limit 10)
+      returning jsonb_build_object('visit', id) as body)
+    select body from n union all select body from v
+  loop
+    perform net.http_post(
+      url := 'https://the-commons-eosin.vercel.app/api/gary',
+      body := m.body,
+      headers := jsonb_build_object('Content-Type', 'application/json',
+                                    'Authorization', 'Bearer ' || secret),
+      timeout_milliseconds := 30000);
+  end loop;
+  perform the_commons.send_reader(null);
+end $$;
+revoke execute on function the_commons.send_spirit() from public, anon, authenticated;
+
+-- Disuse, hourly. A granted place with nothing on, nobody in and nothing changed
+-- for thirty days is boarded up, intact. One boarded up whose week's notice has
+-- run out (ask_for_plot) is freed: its filing lost, its plot open to file for,
+-- what was built left on the lost filing. Returns how many of each.
+create function the_commons.board_up() returns jsonb
+language plpgsql security definer set search_path = '' as $$
+declare
+  f record;
+  boarded int := 0;
+  freed int := 0;
+  line text;
+begin
+  line := 'Boarded up. Nothing on, nobody in, and nothing changed in a month. It''s all still there.';
+  for f in
+    update the_commons.filings set boarded_at = now(), open_sign = false, reading = line, read_at = now()
+    where status in ('approved', 'conditional') and boarded_at is null
+      and greatest(stamped_at, built_at, stirred_at) < now() - interval '30 days'
+    returning id, intent, schedule
+  loop
+    boarded := boarded + 1;
+    insert into the_commons.readings (filing, use, verdict, line) values (f.id, coalesce(f.schedule ->> 'use', f.intent), 'boarded', line);
+  end loop;
+  line := 'Freed. Someone asked for the plot, and nobody reopened it in the week''s notice.';
+  for f in
+    update the_commons.filings set status = 'lost', reading = line, read_at = now()
+    where status in ('approved', 'conditional') and boarded_at is not null and quit_by < now()
+    returning id, intent, schedule
+  loop
+    freed := freed + 1;
+    insert into the_commons.readings (filing, use, verdict, line) values (f.id, coalesce(f.schedule ->> 'use', f.intent), 'freed', line);
+  end loop;
+  return jsonb_build_object('boarded', boarded, 'freed', freed);
+end $$;
+revoke execute on function the_commons.board_up() from public, anon, authenticated;
+
+-- A resident asks for a boarded-up plot: its holder gets a week's notice to
+-- reopen it. The plot stays held (filings_plot_held) until board_up() frees it.
+-- Returns when the notice runs out, or null if this plot can't be asked for.
+create function the_commons.ask_for_plot(p_plot smallint) returns timestamptz
+language plpgsql security definer set search_path = '' as $$
+declare
+  due timestamptz;
+begin
+  if auth.uid() is null or coalesce((auth.jwt() ->> 'is_anonymous')::boolean, false) then return null; end if;
+  update the_commons.filings set quit_by = now() + interval '7 days', quit_for = auth.uid()
+    where plot = p_plot and status in ('approved', 'conditional') and boarded_at is not null
+      and quit_by is null and filer <> auth.uid()
+    returning quit_by into due;
+  if due is null then
+    select quit_by into due from the_commons.filings
+      where plot = p_plot and status in ('approved', 'conditional') and boarded_at is not null and filer <> auth.uid();
+  end if;
+  return due;
+end $$;
+revoke execute on function the_commons.ask_for_plot(smallint) from public, anon;
+grant execute on function the_commons.ask_for_plot(smallint) to authenticated;
+
+select cron.schedule('the_commons_spirit', '15 seconds', 'select the_commons.send_spirit()');
+select cron.schedule('the_commons_disuse', '17 * * * *', 'select the_commons.board_up()');
+
+do $$
+declare t text;
+begin
+  foreach t in array array['notices', 'visits'] loop
+    if not exists (select 1 from pg_publication_tables
+        where pubname = 'supabase_realtime' and schemaname = 'the_commons' and tablename = t) then
+      execute format('alter publication supabase_realtime add table the_commons.%I', t);
+    end if;
+  end loop;
+end $$;
+-- --- end of the spirit ---------------------------------------------------------
+
 -- Realtime, for the tables the map watches.
 do $$
 declare t text;
