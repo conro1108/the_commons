@@ -1,12 +1,12 @@
 # The Commons
 
-A shared, persistent patch of land in the world of The Meadow (cozy_sprites)
-and The Farm (the_farm). It belongs to everyone's town at once, so it belongs to
-nobody, so it is administered, with enormous seriousness, by Gary, the Meadow's
-Tired Office Creature.
+A shared, persistent patch of land. It belongs to everyone, so it belongs to
+nobody, so it is administered, with enormous seriousness, by Gary, a tired
+office creature.
 
-Tone is the_farm's DESIGN.md: deadpan institutional absurdism, no fail states,
-no stamina. Mechanics are still open; play them and throw out what's dull.
+Deadpan institutional absurdism, no fail states. The Meadow (cozy_sprites) and
+The Farm were the inspiration, not a canon to stay inside. Mechanics are still
+open; play them and throw out what's dull.
 
 ## What's here
 
