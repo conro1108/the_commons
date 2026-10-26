@@ -12,7 +12,7 @@ Slice D of plans/building-and-enforcement-slices.md. Resume from the first untic
 - [x] 8. `src/net.ts` section: loadTags, answerTag, reclaim, fileRetrospective (stub).
 - [x] 9. Render hooks: red tags on the map (`render.ts`), on things up close and questionnaire on the door (`closeup.ts`); impounded things not drawn. Hooks: render.ts `mapTags()` + `POUND` (Scene.tags, Scene.pound), closeup.ts `letterUpClose()` (FocusScene.tags), one call line each; art in letter.ts. Impounded filtering is in main.ts regroup (step 10).
 - [x] 10. `src/main.ts` section: tags state + realtime, "Gary's here" when present, questionnaire on the door, red tag card, the pound at the hut. Section `// --- the letter` before the field channel. Hooks elsewhere in main.ts: imports, regroup (drops impounded, counts pound), renderCard + renderBuildInfo (letterFor + wireLetter; card form selector now `form:not(.answer)`), focusScene (tags, reclaim ghost), pointerdown/up (`reclaim:` tool), both draw() calls, map click on the hut, channel `.on(tags)`, start (loadLetter), summon (also summonRounds), renderAll (renderPound). CSS block in index.html.
-- [ ] 11. Dev: `dev/letter.html` (cards, no network), `?letter=1` on dev/plot and dev/map.
+- [x] 11. Dev: `dev/letter.html` (cards, no network), `?letter=1` on dev/plot and dev/map. Checked by headless Chrome screenshots: map tags got an ink outline to show; questionnaire is a pinned sheet on a stake left of the plot sign.
 - [ ] 12. Test: decision -> outcome (explained/tagged) if cheap; else none.
 - [ ] 13. `npm run build` + `npm test` pass; CLAUDE.md map row; final commit.
 

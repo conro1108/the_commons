@@ -112,7 +112,7 @@ export function poundHtml(things: Impounded[]) {
 // --- the art -------------------------------------------------------------------
 
 const INK = "#402e3a";
-const COLOURS: Record<string, string> = { k: INK, r: "#c8473c", R: "#e8735e", w: "#fffdf3", s: "#e3c48e" };
+const COLOURS: Record<string, string> = { k: INK, r: "#c8473c", R: "#e8735e", w: "#fffdf3", s: "#e3c48e", g: "#a597b0" };
 
 function pixels(ctx: CanvasRenderingContext2D, rows: string[], left: number, top: number) {
   rows.forEach((row, y) => [...row].forEach((c, x) => {
@@ -124,17 +124,17 @@ function pixels(ctx: CanvasRenderingContext2D, rows: string[], left: number, top
 
 // A luggage tag on a string, up close: the string's top is where it hangs from.
 const RED_TAG = ["..s..", "..s..", ".kkk.", "kRwRk", "krrrk", "krrrk", "krrrk", ".kkk."];
-// The same, one map pixel a cell: a dot of red under a dot of ink.
-const MAP_TAG = ["k.", "rr", "rr"];
-// A questionnaire pinned up: a sheet with lines on.
-const SHEET = ["kkkkkk", "kwwwwk", "kkkkwk", "kwwwwk", "kkkwwk", "kwwwwk", "kkkkkk"];
+// The same, one map pixel a cell: a speck of red, outlined so it shows on any ground.
+const MAP_TAG = [".k.", "kRk", "krk", "kkk"];
+// A questionnaire pinned up on a stake: a sheet with lines of questions on, a red pin at the top.
+const SHEET = ["..r...", "kkkkkk", "kwwwwk", "kwggwk", "kwwwwk", "kwgggk", "kwwwwk", "kwggwk", "kwwwwk", "kkkkkk", "..s...", "..s...", "..s..."];
 
 /** A red tag, hung from (x, y), up close. Swings a pixel now and then. */
 export const drawRedTag = (ctx: CanvasRenderingContext2D, x: number, y: number, t = 0) =>
   pixels(ctx, RED_TAG, x - 2 + (Math.floor(t / 700 + x) % 5 === 0 ? 1 : 0), y);
 
 /** A red tag on the map, at a thing's top corner. */
-export const drawMapTag = (ctx: CanvasRenderingContext2D, x: number, y: number) => pixels(ctx, MAP_TAG, x, y - 2);
+export const drawMapTag = (ctx: CanvasRenderingContext2D, x: number, y: number) => pixels(ctx, MAP_TAG, x - 1, y - 3);
 
 /** Gary's questionnaire pinned up, its top-left at (x, y). */
 export const drawQuestionnaire = (ctx: CanvasRenderingContext2D, x: number, y: number) => pixels(ctx, SHEET, x, y);

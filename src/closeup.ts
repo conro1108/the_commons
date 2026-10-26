@@ -399,7 +399,7 @@ function letterUpClose(ctx: CanvasRenderingContext2D, scene: FocusScene, now: nu
   }
   // The door, until there's a building with one: by the gatepost, left of the sign.
   const post = fenceOf(scene.plot).posts[0];
-  if (post && tags.some(isWaiting)) drawQuestionnaire(ctx, post.x * ZOOM - 6, post.y * ZOOM - 13);
+  if (post && tags.some(isWaiting)) drawQuestionnaire(ctx, post.x * ZOOM - 7, post.y * ZOOM - 15);
 }
 
 /** One plot up close, in focus-space art pixels. */

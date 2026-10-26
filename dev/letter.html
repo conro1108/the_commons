@@ -1,0 +1,32 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>the commons — the letter</title>
+<!-- A copy of index.html's paper styles, enough to judge the letter by. -->
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 16px; background: #1b2622; color: #402e3a; font: 14px/1.45 ui-monospace, monospace; }
+  #out { display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-start; }
+  h2 { font-size: 13px; margin: 0 0 6px; text-transform: uppercase; letter-spacing: .06em; }
+  p { margin: 6px 0; }
+  q { font-style: italic; }
+  .meta { color: #7a6a8a; }
+  .paper { position: relative; width: 300px; background: #fffdf3; border: 2px solid #402e3a; box-shadow: 3px 3px 0 #402e3a; padding: 10px 12px; }
+  .stamp { display: inline-block; font-weight: bold; text-transform: uppercase; font-size: 12px; border: 2px solid currentColor; padding: 0 5px; transform: rotate(-2deg); margin: 4px 0; }
+  .approved { color: #3d7a3a; } .pending { color: #b07a1e; } .denied { color: #b5404f; }
+  .permit { background: #fbf4dc; border: 1px dashed #c9b88f; padding: 6px 8px; }
+  .condition { background: #fbf4dc; border: 1px dashed #c9b88f; padding: 4px 8px; margin: 8px 0; }
+  textarea { width: 100%; font: inherit; padding: 6px; border: 2px solid #402e3a; background: #fbf4dc; }
+  button { font: inherit; font-weight: bold; margin-top: 6px; padding: 4px 10px; border: 2px solid #402e3a; background: #ffe9a8; box-shadow: 2px 2px 0 #402e3a; }
+  .close { position: absolute; top: 2px; right: 4px; margin: 0; padding: 0 6px; border: 0; background: none; box-shadow: none; font-size: 16px; color: #7a6a8a; }
+  .problem { color: #b5404f; }
+  .letter .form-no { margin: 0 0 2px; font-size: 10px; text-transform: uppercase; letter-spacing: .14em; color: #7a6a8a; }
+  .letter .questionnaire.here { border: 2px solid #b07a1e; }
+  .letter .red { border-color: #c8473c; }
+  .pound ul { list-style: none; padding: 0; margin: 8px 0; }
+  .pound li { display: flex; align-items: center; gap: 8px; margin: 6px 0; }
+  .pound li img { image-rendering: pixelated; width: 32px; }
+  .pound li > span { flex: 1; }
+  .pound .reclaim { margin: 0; }
+</style>
+<div id="out"></div>
+<script type="module" src="./letter.ts"></script>
