@@ -16,11 +16,11 @@ its progress file, carry on from the first unticked step.
 |---|---|---|
 | foundation | main @ 5368586 | done, pushed, alter applied |
 | A. Outside | `worktree-agent-a7b5ff9fc6bf3cff7` | running |
-| B. Inside | | not launched |
-| C. Gary's schedule | | not launched |
-| D. The letter | | not launched |
-| E. The spirit | | not launched |
-| F. The library | | not launched |
+| B. Inside | `worktree-agent-abdb5b75c87a75ea4` | running |
+| C. Gary's schedule | `worktree-agent-abdf4488549af27a7` | running |
+| D. The letter | `worktree-agent-a2e4e1a742c385faa` | running |
+| E. The spirit | `worktree-agent-a723058c2a972b2bb` | running |
+| F. The library | `worktree-agent-acc722659ac2419b9` | running |
 
 ## Merge order (planned)
 
@@ -31,4 +31,6 @@ logic.sql), tick it below.
 ## Log
 
 - foundation committed and pushed; `db/alters/0-foundation.sql` applied live.
-- A launched.
+- A launched; told afterwards to keep plans/progress/A-outside.md.
+- B, C, D, E, F launched, each keeping plans/progress/<slice>.md on its branch.
+- Worktrees live in .claude/worktrees/agent-<id>; branches are worktree-agent-<id>.
