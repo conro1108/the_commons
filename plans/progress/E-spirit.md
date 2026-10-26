@@ -13,7 +13,7 @@ Branch `worktree-agent-a723058c2a972b2bb`. Resume from the first unticked step.
 - [x] 9. `src/net.ts` section: Filing fields, Notice/Visit types, load/post/sign/flip/ask/summon, fileChangeOfUse stub (C)
 - [x] 10. `src/spirit.ts`: pure HTML for sign/board/book/reading/drift/boarded + CSS + drawBoarded()
 - [x] 11. `src/main.ts` section: wiring up close (build-info) and on the card; realtime hook
-- [ ] 12. Render hook: boarded plots on the map (`src/render.ts`, one line)
+- [x] 12. Render hook: boarded plots on the map (`src/render.ts`, one line)
 - [ ] 13. `dev/spirit.html`: every state, no network
 - [ ] 14. `npm run build` + `npm test`, final commit, notes below
 
@@ -24,3 +24,4 @@ Branch `worktree-agent-a723058c2a972b2bb`. Resume from the first unticked step.
 - 9: optional spirit fields on Filing (so dev pages' made-up filings still compile); section at the end of net.ts. `fileChangeOfUse()` is the STUB for C.
 - 10: src/spirit.ts: spiritHtml (up close), spiritCardHtml (map card), driftLine, styleSpirit (CSS injected, so dev page shares it), drawBoarded(ctx, plot).
 - 11: main.ts section `// --- the spirit` just above `// --- canvas and views`. Hooks: imports (own lines), renderBuildInfo (spiritUp + wireSpirit + keep typing), renderCard held branch (spiritCardHtml + wireAsk), enterFocus (loadSpiritFor), start() (spiritChannel before subscribe). The change-of-use button calls the net.ts stub.
+- 12: render.ts drawPlot: one line after the mini, `if (f.boarded_at) drawBoarded(ctx, p)`, plus its import. Nothing in closeup.ts (A's); boarding up close isn't drawn.
