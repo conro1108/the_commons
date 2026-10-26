@@ -1,212 +1,178 @@
 # Building in depth, and permits held to
 
-Six proposals, three of each, to dream with rather than build from. Today
-building means stamping about thirty-five sprites at three sizes and painting
-ground with a 2×2 brush. Gary checks conditions and audits now and then, and
-being out of order only means more paperwork.
+Today you file for "a karate studio", and once it's granted you decorate the
+plot with geese and benches. The thing you filed for never gets built. This
+doc proposes that the filing becomes a place, and gives three ways to hold
+that place to its permit.
 
-Two things hold across all six:
+Two things hold throughout:
 
 - **Nothing is destroyed.** Enforcement takes things into custody (the pound,
-  at Gary's hut), and you can always get them back. There's still no fail
-  state, only a form.
-- **Asking first is cheaper than asking after.** Whatever the mechanism,
-  filing to change your permit before Gary notices should be easy and usually
-  granted. Doing it once he has should cost a bit more.
+  at Gary's hut), and you can always get them back. There's no fail state,
+  only a form.
+- **Asking first is cheaper than asking after.** Filing to change your permit
+  before Gary notices is easy and usually granted. Doing it once he has costs
+  a bit more.
 
-## Building
+## Your filing becomes a place
 
-### 1. The Kit: draw it roughly, and it comes out lovely
+### The permit comes with a schedule
 
-Stamps top out fast. Every plot is the same objects rearranged, and a plot
-with a hundred of them looks like a junk drawer. Instead, build with a few
-verbs that draw shapes, and let rules make the shapes handsome. It's
-Townscaper's trick: you say roughly where, and the kit works out how.
+When Gary grants a filing, he writes down what it's made of: the shell it
+lives in, and the fittings that make it this place and not another.
 
-- **Lines:** hedge, wall, fence, path, a row of beans. Drag one out; corners
-  join, ends finish themselves, and a gate appears where it crosses a path.
-- **Areas:** bed, lawn, gravel, pond, orchard. Edges get edging, and the
-  inside fills by kind: a pond gets a bank, reeds at the margin and darker
-  water in the middle.
-- **Footprints:** drag out a rectangle, an L or a T, and walls go up with a
-  roof that fits the shape. Drag upward for another storey. Doors face the
-  nearest path and windows face the sun; there's a chimney if there's a stove
-  inside.
-- **Materials:** one swatch for anything: timber, stone, brick, willow,
-  corrugated tin, whitewash, a few muted paints. The same footprint in tin
-  and in stone gives two different buildings.
-- **Dressing:** today's props become the finishing layer: benches, gnomes,
-  flags.
-- **Life nobody places:** moss on north faces, ivy where a wall meets a tree,
-  paths worn where people actually walk, a cat on a warm wall.
+```
+Filing 0112: a karate studio. Approved.
 
-Up close, things get real height: walls show their fronts, roofs their pitch,
-and storeys stack. Height becomes a real quantity (six geese, at last).
+Schedule
+  Shell     a hall, timber, one room
+  Inside    mats · a rack of practice swords · a board of belts · a punching bag
+  Outside   a shoe rack by the door · a sign
+Condition   Must be quiet after dark.
+```
 
-*Why:* the floor rises, so no plot looks a mess, and so does the ceiling: a
-cottage, a walled garden, a folly, a bandstand. *Costs:* the art. Every verb
-in every material has to join up and look good, and this is by far the most
-pixel art of the six.
+The schedule is what you get to build with. It's a starting kit, not the
+whole thing: a handful of pieces at first, with the rest earned by going back
+to Gary.
 
-### 2. The Garden: plant it, and it grows
+### Building it: outside, inside, and in things
 
-Plant, don't place. Seeds, bulbs, cuttings and saplings grow through stages
-over real days. Seasons turn, perhaps one a real week, so a plot is never the
-same twice: bulbs, then the trees going gold, then bare branches and frost.
+- **Outside:** drag the shell's footprint out on the plot. It gets walls, a
+  roof that fits the shape, a door facing the path and the sign over it.
+  Choose its material and paint, and what the sign says (Gary reads it
+  first). The map shows the building, not a sprite of an idea.
+- **Inside:** go through the door into the place's own room and lay it out:
+  the mats, the rack, the bag, what's on the floor and on the walls. Light
+  comes in at the windows you put in outside.
+- **In things:** some fittings hold other things. The rack holds the swords,
+  the board holds the belts, and the trophy cabinet holds whatever you put in
+  it: the trophy from the Commons Kata, say, drawn by Gary when you won it.
+  Small things go on shelves, hooks and tables, and you can see them there.
+- **Visitors** walk in. A place you can't go into is just a picture.
 
-- **Care** is quick and optional: water, weed, deadhead, mow. Neglect isn't
-  death, it's wildness. An untended plot goes to meadow, then bramble, then
-  birch, and coming back to it should be a small pleasure of its own.
-- **Shaping:** pruning is an edit. Clip a hedge's outline a pixel at a time
-  and you get topiary. A goose-shaped yew took three weeks of growing to earn.
-- **Spread:** mint creeps, foxgloves self-seed, roots go under the fence, and
-  some of it ends up next door or out on the commons.
-- **Crossing:** bees carry pollen between neighbouring plots, and two colours
-  of one flower side by side can produce a new one. Whoever raises it first
-  names it in the register. That's a reason to plant along the fence on
-  purpose.
-- **Produce:** apples, honey, beans, marrows. The bylaws rule out trade, so
-  you give it away, as a basket left at someone's gate. Now and then there's
-  a show (largest marrow), judged and minuted by the committee.
+### Growing it means going back to Gary
 
-*Why:* it gives people reasons to come back, and the commons changes while
-you're away (the world tick PLAN already wants). For enforcement, plots drift
-out of their permits on their own. The hedge grew. Nobody cheated. *Costs:*
-pace is hard to tune (too slow is dull, too fast is a chore), and every
-growing thing needs each of its stages drawn.
+- **Variations:** want a vending machine in the dojo? File for one. Gary
+  rules on whether a vending machine belongs in a karate studio, and if it
+  does, it's drawn and added to your schedule. This is how you get new stuff,
+  so people file variations gladly. Small additions are stamped the same day.
+  Material ones (a second room, an extension, "and a sauna") can go to
+  committee.
+- **Change of use:** the studio becomes a tea room. That's a fresh ruling on
+  the same plot: the shell stays and the schedule is rewritten. Whatever
+  doesn't fit the new use goes into storage, or stays on as a historic
+  fitting (the tea room with a punching bag in the corner).
+- **Anything else, any time:** library pieces and written-in things go down
+  whenever you like. Anything not on the schedule is unauthorised until it's
+  permitted, and that's where enforcement gets its grip.
 
-### 3. The Workbench: make your own things
+### Not everything is a building
 
-- **Draw it:** a pixel editor at build scale, locked to the commons' palette,
-  with the ink outline added for you. Name the thing and say in a line what
-  it's for (Bylaw 7: someone must understand it).
-- **Or bolt it together:** a parts bin for people who can't draw: legs, tops,
-  roofs, wheels, spouts, handles, flags. Four legs, a top and a roof make a
-  shelter for a hedgehog.
-- **Or have Gary draw it:** today's written-in item, which you can then touch
-  up on the bench.
-- **The Register of Things:** Gary enters each thing under what he takes it
-  to be. That entry is binding, and it isn't always what you said. *Entered
-  as: hat stand.* You may appeal.
-- **Shared:** anyone can build with anything registered, with the maker's
-  name on it. Good designs spread round the commons, and the catalogue grows
-  without us drawing it.
-- **Surfaces:** patterns for flags, bunting, signs, shed walls, a mosaic
-  path, and what you wear at the gate.
+The shell can be an enclosure, or nothing. A goose sanctuary is a pen, a
+goose house small enough to peer into, and a pond. "A bench for looking at
+the pond with" has no shell: its schedule is a bench and a tree for shade,
+outdoors. The same schedule works for all of them.
 
-*Why:* self-expression and ownership. Seeing your bench in someone else's
-plot is a kind of contact the game barely has now, and a thing's registered
-purpose gives enforcement something to hold it to. *Costs:* every drawing has
-to be read before anyone else sees it, the way filings are. The commons could
-also stop looking like one place; the palette lock, the outline and the size
-cap are what hold it together.
+### What carries the look
 
-## Enforcement
+The look comes from a hand-drawn library: shells in a few materials, floors,
+walls, windows, and a few hundred plain fittings (shelves, tables, racks,
+rugs, lamps). Where the library has something close, Gary uses it. Where it
+doesn't, he draws the piece, once, and anyone who files for the same thing
+later gets the same drawing. Drawn pieces will vary in quality, and the
+library has to be good enough to carry them.
 
-### A. The Approved Drawing
+### Decisions, and which way I lean
 
-The permit becomes a plan, not just a sentence. When Gary grants a filing, he
-draws what's allowed onto the plot: zones, each with what may go there and a
-limit (*garden, hatched; shed here, up to three geese; this strip by the path
-kept clear*). Up close, the plan lies under your building like tracing paper,
-and anything outside it shows hatched red. You know where you stand before
-Gary does.
+- **How deep things nest:** plot, then inside, then in things, and no
+  deeper. Rooms within rooms is a lot of interface for not much play.
+- **Bigger on the inside:** the room is sized off the footprint, but
+  generously. An interior larger than its exterior is a variation for the
+  committee.
+- **Does the place do anything:** classes at six, a library that lends, an
+  open sign. Not at first, but it's the next big layer, and B below needs it
+  eventually.
 
-- **Seen by everyone:** unpermitted work shows hatched red on the map too,
-  until it's put right or permitted.
-- **Changing it:** draw on tracing paper over the permit and file it; Gary
-  sees the red-lined changes. Small changes are stamped the same day. A new
-  building or a doubled zone counts as a new filing and may go to committee.
-  A refusal leaves the old drawing standing.
-- **Consequence:** after a notice period, Gary takes the unpermitted thing to
-  the pound. Reclaim it by form, or get it permitted and it comes back.
+## Holding it to its permit
 
-*Why:* it's legible and fair, and changing your permit becomes the main way a
-plot grows. Compliance is geometry, so code can check it, and Gary's words go
-where they're best: drawing the zones and ruling on variations. *Risk:* it's
-a rules engine, and pedantry about cells isn't fun. Zones should be "about
-here", not exact.
+### A. The letter: Gary checks the schedule
 
-### B. The Walkround
+Gary comes round with the schedule, outside and in, and asks about anything
+that isn't on it. If you're there, he asks you then and there. If you're
+not, he leaves a short questionnaire on the door for when you're back.
 
-The permit stays in words (intent and conditions), but Gary's round becomes a
-scene, and he notices things.
+> **Gary:** What's the hot tub for?
+> **You:** After training.
+> **Gary:** That's not part of a karate studio. You'll need to file for it.
 
-- **He stops at what looks off:** the thing not in the intent, the thing
-  taller than the rest, the thing he doesn't understand. If you're there, he
-  asks and you answer in a line. If you're not, he leaves a short
-  questionnaire to answer when you're back (councils really do this; it's
-  called a Planning Contravention Notice).
+- **Explained** (a kettle in a dojo, a hedgehog hotel by the door): it goes
+  on the schedule as ancillary. Gary should be generous here.
+- **Not explained:** it gets a red tag with a date, visible on the map. By
+  the date, take it down or file for it, or it goes to the pound.
+- **Lawful by time:** an unscheduled thing nobody has flagged for a week can
+  get a Certificate of Lawfulness and joins the schedule for good. Building
+  while Gary's not looking is a real, legal play, and his rounds have a real
+  point.
+- **Changing it:** a variation before he comes is cheap. Retrospective
+  permission after a tag is dearer, and it usually comes with a condition.
 
-  > **Gary:** What's this by the shed?
-  > **You:** A hotel for hedgehogs.
-  > **Gary:** Fine. I'll put it down as part of the garden.
+*Why:* it's legible, everyone can see what's allowed, and it's what makes
+variations the way a place grows. *Risk:* it can feel like inventory
+policing, so it lives or dies on Gary being reasonable about what's
+ancillary.
 
-- **Your answer is judged:** explained (it stays, and goes on the permit),
-  tagged (a red tag on the thing, on the map for all, with a date), or
-  "that's a separate filing".
-- **Tags have a clock:** put it right, file for it, or by the date it goes to
-  the pound.
-- **Lawful by time:** anything that stays up long enough without a notice
-  becomes lawful. After a week unchallenged you can apply for a Certificate
-  of Lawfulness, and after that Gary can't touch it. He's tired and can't be
-  everywhere, so building while he's not looking is a real (and legal) play,
-  and coming round is a real one for him.
-- **Changing it:** an Application to Vary before he comes is cheap and
-  usually granted with a condition. After a tag it's retrospective
-  permission: dearer, and he's less pleased about it.
+### B. The spirit: Gary checks the use
 
-*Why:* it puts the model where it's best, reading an explanation and deciding
-whether it holds, and it keeps the comedy of a tired man asking you about a
-gnome. *Risk:* most players won't be there when he comes, so the
-questionnaire has to be as good as the conversation. His route also has to
-show on the map (he already walks the paths), so that being there is
-something you can arrange.
+The permit is for a use, not a list. Gary doesn't count things. Now and then
+he looks in and asks one question: is this still a karate studio?
 
-### C. The Neighbours
+- **Drift:** a few tables and a teapot are fine. When it's mostly tables and
+  teapots, it's a tea room, and that's a change of use without permission.
 
-Gary can't be everywhere, so the commons watches itself.
+  > **Gary:** This is a tea room. You've a permit for a karate studio.
 
-- **Consultation:** a filing goes up on the board for a day before Gary
-  rules, and neighbours may write a line for or against. He and the committee
-  weigh them.
-- **Complaints:** you can report a breach next door, citing the permit or a
-  bylaw, never the person. Gary goes round to see. Complaints carry your
-  name, and a frivolous one goes on your own file as vexatious.
-- **The goose:** it wanders the commons and honks at anything not on its
-  plot's permit. A goose at your fence is a warning everyone can see. It's
-  the one officer who isn't tired.
-- **The file:** everyone has one at the hut: permits, notices, complaints
-  made and received, letters of support. Good standing brings quicker
+- **Notice:** put it back, or file for a change of use. Filed before the
+  drift ("the studio's doing teas on Saturdays"), it might be granted as a
+  mixed use.
+- **Shown on the permit:** his last reading sits under it, so the line is
+  visible before you cross it: *Mostly a karate studio. Some tea.*
+- **Disuse:** a place nobody has opened or changed in a long while gets
+  boarded up, intact. If someone else files for the plot, the holder gets a
+  week's notice to reopen it. This also answers what to do about plots held
+  by people who've left.
+
+*Why:* this is the judgement the model is best at, and it's the comedy of a
+tired man telling you your dojo has become a tea room. It doesn't care about
+one hot tub. *Risk:* it's fuzzy, which is why the reading on the permit
+matters.
+
+### C. The visitors: the commons checks itself
+
+Places are open, so visitors see insides Gary hasn't.
+
+- **The visitors' book:** every place has one. Visitors leave a line, and
+  the support adds up: two neighbours vouching for a variation all but
+  carries it.
+- **Reports:** a visitor can report something they found, citing the
+  schedule, never the person. Reports carry the visitor's name and are
+  limited in number, and Gary goes round to see. A frivolous one goes on the
+  reporter's own file.
+- **The goose** wanders in through open doors and honks at anything
+  unscheduled. Everyone can see a goose in your doorway.
+- **Consultation:** a material variation goes up on the board for a day
+  before Gary rules, and neighbours may write in.
+- **The file:** everyone has one at the hut. Good standing brings quicker
   rulings, fewer conditions, and eventually a resident's seat on the
-  committee, with a real vote alongside the five. Poor standing brings slower
-  rulings, stricter conditions and a curter Gary.
-- **Changing it:** canvass first. With letters of support from two
-  neighbours, a variation is all but certain.
-- **Disputes** go to the committee, which hears both sides and minutes it.
+  committee with a real vote.
 
-*Why:* it's the most multiplayer of the three, when residents barely touch
-each other now, and it gives quiet players a role: the good neighbour, the
-letter-writer, the one who keeps an eye out. *Risk:* real spite in a small
-place. Complaints are read before they go public, there's a limit on them,
-and they're only ever about a thing.
+*Why:* being visited is the point of building a place, and this makes other
+people's opinions part of the game. *Risk:* spite in a small place. Reports
+are read before anyone else sees them, and they're only ever about a thing.
 
-## Pairs, and a pick
+## A pick
 
-| Building | Enforcement | Why they suit |
-|---|---|---|
-| The Kit | The Approved Drawing | Footprints, lines and heights are exactly what a drawing can bound |
-| The Garden | The Walkround | Plots drift on their own: a clock, and a form for what you can see coming |
-| The Workbench | The Neighbours | Things and their purposes are public and shared, so others have a stake |
-
-All three enforcement ideas get sharper if things carry a couple of numbers,
-height in geese and noise in ducks. The bylaws already speak in those units.
-
-My pick is the Garden with the Walkround. Breaking your permit becomes
-something that happens to you rather than something you do, so enforcement
-is a story, not policing, and the pre-emptive form is the natural move:
-*"Application to vary: the hedge will be over six geese by Thursday."* It's
-the world tick PLAN already wants, and it uses Gary for what he's best at.
-Borrow the Kit's line tools for hedges and paths, since a hedge is a line that
-grows. The Kit is the bigger visual leap, and the most art; it's worth doing
-once the loop is proven.
+A, as the base. The schedule only means something if unscheduled things are
+unauthorised, and that's what makes going back to Gary the way a place grows.
+Take change of use from B as the big variation, since it's the funniest
+filing in the game. Add C once there are enough residents visiting each
+other's places for it to matter.
