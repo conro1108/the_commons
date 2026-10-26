@@ -8,7 +8,7 @@ import { CREATURES } from "./content/canon/creatures.ts";
 import {
   EXTRAS, HAIR_COLOURS, HAIRS, OUTFIT_COLOURS, OUTFITS, SKINS, randomHuman, type HumanSpec,
 } from "./content/people.ts";
-import { blit, looksLike, portrait, spriteOf, stranger, widthOf, type Avatar } from "./avatar.ts";
+import { blit, portrait, spriteOf, stranger, widthOf, type Avatar } from "./avatar.ts";
 import { GARY_SPRITE } from "./life.ts";
 
 export interface Papers {
@@ -75,7 +75,6 @@ export function openPapers(p: Papers) {
       <section>
         <h2><span class="sec">B</span>Name on file</h2>
         <input name="name" maxlength="24" autocomplete="nickname" placeholder="As you'd like it on your permits" value="${esc(name)}">
-        <p class="hint egg" hidden>The Meadow has its own arrangements for Connors. Gary is not in a position to discuss them.</p>
       </section>
 
       <section>
@@ -174,15 +173,13 @@ export function openPapers(p: Papers) {
     for (const b of root.querySelectorAll<HTMLButtonElement>(".creature[data-form]")) b.classList.toggle("on", b.dataset.form === form);
     meadow.hidden = kind !== "meadow";
     $(".maker").hidden = kind !== "human";
-    $(".egg").hidden = name.trim().toLowerCase() !== "connor";
   }
 
-  // The person on the stage walks on the spot and turns now and then; a
-  // Connor's mole stands in for whoever they picked.
+  // The person on the stage walks on the spot and turns now and then.
   const stage = $<HTMLCanvasElement>(".stage canvas");
   let raf = 0;
   const tick = (now: number) => {
-    if (kind === "human") portrait(stage, looksLike(name, { human }), 8, (Math.floor(now / 320) % 2) as 0 | 1, Math.floor(now / 2600) % 2 === 1);
+    if (kind === "human") portrait(stage, { human }, 8, (Math.floor(now / 320) % 2) as 0 | 1, Math.floor(now / 2600) % 2 === 1);
     raf = requestAnimationFrame(tick);
   };
   raf = requestAnimationFrame(tick);
