@@ -14,8 +14,8 @@ Branch `worktree-agent-a723058c2a972b2bb`. Resume from the first unticked step.
 - [x] 10. `src/spirit.ts`: pure HTML for sign/board/book/reading/drift/boarded + CSS + drawBoarded()
 - [x] 11. `src/main.ts` section: wiring up close (build-info) and on the card; realtime hook
 - [x] 12. Render hook: boarded plots on the map (`src/render.ts`, one line)
-- [ ] 13. `dev/spirit.html`: every state, no network
-- [ ] 14. `npm run build` + `npm test`, final commit, notes below
+- [x] 13. `dev/spirit.html`: every state, no network
+- [x] 14. `npm run build` + `npm test`, final commit, notes below
 
 ## Notes
 - 1: alter is `db/alters/5-spirit.sql`. `read_sent` added too (the reader's own throttle, like inspect_sent).
@@ -25,3 +25,12 @@ Branch `worktree-agent-a723058c2a972b2bb`. Resume from the first unticked step.
 - 10: src/spirit.ts: spiritHtml (up close), spiritCardHtml (map card), driftLine, styleSpirit (CSS injected, so dev page shares it), drawBoarded(ctx, plot).
 - 11: main.ts section `// --- the spirit` just above `// --- canvas and views`. Hooks: imports (own lines), renderBuildInfo (spiritUp + wireSpirit + keep typing), renderCard held branch (spiritCardHtml + wireAsk), enterFocus (loadSpiritFor), start() (spiritChannel before subscribe). The change-of-use button calls the net.ts stub.
 - 12: render.ts drawPlot: one line after the mini, `if (f.boarded_at) drawBoarded(ctx, p)`, plus its import. Nothing in closeup.ts (A's); boarding up close isn't drawn.
+- 13: dev/spirit.html (+ dev/spirit.ts): nine panel states (holder, visitor, guest, drifted, boarded + asked, empty, three card states) and the plot on the map, plain and boarded. ?plot=N. Screenshot checked.
+- 14: build and test pass. The alter also gives every held place a month's grace (stirred_at = now()) so board_up() doesn't board up the whole commons on its first run.
+
+## For whoever merges
+- Apply `db/alters/5-spirit.sql` before logic.sql reruns (policies reference the new tables/columns).
+- C: `fileChangeOfUse()` in src/net.ts is the stub the drift notice's button calls; `driftOf(db, filing, asOf)` in api/gary.ts says whether the change of use was filed before Gary found the drift (mixed use may be granted) or after (dearer). A granted change of use should clear `filings.drift` (and could set `read_sent = null` so he rereads).
+- B/D: survey() still lists placements of every room; the reading reads room 'in' separately, so survey() wants `.eq("room", "out")` once inside exists.
+- A: nothing in closeup.ts; a boarded place up close isn't drawn boarded (only the panel says so). Hook if wanted: `f.boarded_at`.
+- Not done: a drift notice doesn't come by post (letter) on the map; you see it up close.

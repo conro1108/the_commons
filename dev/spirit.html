@@ -1,0 +1,21 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>the commons — the spirit</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 16px; background: #1b2622; color: #402e3a; font: 14px/1.45 ui-monospace, monospace; }
+  h1 { color: #fffdf3; font-size: 15px; margin: 0 0 12px; }
+  h2 { font-size: 13px; margin: 0 0 6px; text-transform: uppercase; letter-spacing: .06em; }
+  h3 { font-size: 11px; margin: 0 0 4px; text-transform: uppercase; letter-spacing: .06em; color: #7a6a8a; }
+  p { margin: 6px 0; } q { font-style: italic; }
+  .hint, .meta { color: #7a6a8a; } .problem { color: #b5404f; }
+  button { font: inherit; font-weight: bold; margin-top: 6px; padding: 4px 10px; border: 2px solid #402e3a;
+           background: #ffe9a8; color: inherit; cursor: pointer; box-shadow: 2px 2px 0 #402e3a; }
+  .grid { display: flex; flex-wrap: wrap; gap: 18px; align-items: flex-start; }
+  .paper { background: #fffdf3; border: 2px solid #402e3a; box-shadow: 3px 3px 0 #402e3a; padding: 10px 12px; width: 290px; }
+  .label { color: #fffdf3; font-size: 11px; margin: 0 0 4px; }
+  canvas { image-rendering: pixelated; display: block; }
+</style>
+<h1>The spirit: every state, made up, no network. Buttons do nothing here. ?plot=N for the map plot.</h1>
+<div class="grid" id="grid"></div>
+<script type="module" src="./spirit.ts"></script>

@@ -32,7 +32,7 @@ export function driftLine(f: Filing): string {
 
 /** His last reading of the place, under the permit. */
 export function readingHtml(f: Filing): string {
-  if (!f.reading) return "";
+  if (!f.reading || f.boarded_at) return ""; // boarded up says so itself
   return `<p class="spirit-reading">Gary's reading: <q>${esc(f.reading)}</q>${f.read_at ? ` <span class="meta">${day(f.read_at)}</span>` : ""}</p>`;
 }
 

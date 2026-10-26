@@ -52,3 +52,7 @@ create table if not exists the_commons.readings (
 );
 create index if not exists readings_filing on the_commons.readings (filing, id);
 alter table the_commons.readings enable row level security;
+
+-- A month's grace for every place already held, so board_up() doesn't board up
+-- the whole commons the hour it's switched on (nobody's had a sign or a board till now).
+update the_commons.filings set stirred_at = now() where stirred_at is null and status in ('approved', 'conditional');
