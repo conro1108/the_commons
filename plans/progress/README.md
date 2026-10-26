@@ -19,7 +19,7 @@ its progress file, carry on from the first unticked step.
 | B. Inside | `worktree-agent-abdb5b75c87a75ea4` | running |
 | C. Gary's schedule | `worktree-agent-abdf4488549af27a7` | running |
 | D. The letter | `worktree-agent-a2e4e1a742c385faa` | running |
-| E. The spirit | `worktree-agent-a723058c2a972b2bb` | running |
+| E. The spirit | `worktree-agent-a723058c2a972b2bb` | finished, awaiting merge |
 | F. The library | `worktree-agent-acc722659ac2419b9` | running |
 
 ## Merge order (planned)
@@ -34,3 +34,4 @@ logic.sql), tick it below.
 - A launched; told afterwards to keep plans/progress/A-outside.md.
 - B, C, D, E, F launched, each keeping plans/progress/<slice>.md on its branch.
 - Worktrees live in .claude/worktrees/agent-<id>; branches are worktree-agent-<id>.
+- E finished (8 commits). Merge notes: apply db/alters/5-spirit.sql before logic.sql reruns (SQL never run anywhere yet, review carefully); alter grants existing places a month's grace before board_up(). On merge: point net.ts fileChangeOfUse() stub at C's change of use, C clears filings.drift on granting one and can use driftOf() for mixed use; survey() wants .eq("room","out") once B lands; boarded look up close is unclaimed (A's closeup.ts).
