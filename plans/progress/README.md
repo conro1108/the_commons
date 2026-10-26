@@ -35,3 +35,4 @@ logic.sql), tick it below.
 - B, C, D, E, F launched, each keeping plans/progress/<slice>.md on its branch.
 - Worktrees live in .claude/worktrees/agent-<id>; branches are worktree-agent-<id>.
 - E finished (8 commits). Merge notes: apply db/alters/5-spirit.sql before logic.sql reruns (SQL never run anywhere yet, review carefully); alter grants existing places a month's grace before board_up(). On merge: point net.ts fileChangeOfUse() stub at C's change of use, C clears filings.drift on granting one and can use driftOf() for mixed use; survey() wants .eq("room","out") once B lands; boarded look up close is unclaimed (A's closeup.ts).
+- Connor: live data is disposable. So at merge: apply alters without ceremony, and if the schema gets tangled, wipe rows rather than write migrations to preserve them. E's month's grace before board_up() can go (or stay as harmless).
