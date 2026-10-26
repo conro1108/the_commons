@@ -10,6 +10,8 @@ import {
   place, rehandle, saveProfile, signIn, summonGary, supabase, unplace,
   type Appeal, type Filing, type Placement,
 } from "./net.ts";
+import { fileChangeOfUse, fileVariation, loadVariations, type Variation } from "./net.ts";
+import { scheduleHtml, variationForm, variationHtml } from "./permit.ts";
 import type { RealtimeChannel } from "@supabase/supabase-js";
 import { VOID, colourOf, draw, letterPhase, type Letter, type Walker } from "./render.ts";
 import {
@@ -311,7 +313,7 @@ function renderCard() {
   } else if (f) {
     body = `<h2>${esc(plotLabel(def))}</h2><p class="meta where">${esc(REGIONS[def.region].name)}</p>
       <p>Held by ${esc(who(f.filer))}: <q>${esc(f.intent)}</q></p>
-      ${enter}${ruling(f, fresh)}${conditionHtml(f)}<p class="meta">Filing ${pad(f.id)}</p>`;
+      ${enter}${ruling(f, fresh)}${worksHtml(f)}${conditionHtml(f)}${variationsHtml(f)}<p class="meta">Filing ${pad(f.id)}</p>`;
   } else {
     const denial = appealableOn(plot);
     body = `${particulars(def)}
@@ -334,7 +336,8 @@ function renderCard() {
   card.querySelector(".door")?.addEventListener("click", door);
   card.querySelector<HTMLButtonElement>("[data-reply]")?.addEventListener("click", (e) =>
     openCard(plot, Number((e.currentTarget as HTMLButtonElement).dataset.reply)));
-  const form = card.querySelector("form");
+  if (f) wireVariation(f, typed, typing);
+  const form = card.querySelector<HTMLFormElement>("form:not(.vary)");
   if (form) {
     const box = form.querySelector("textarea")!;
     box.value = typed;
@@ -510,6 +513,62 @@ function renderBoard() {
 board.addEventListener("click", (e) => {
   if (e.target === board) closeBoard();
 });
+
+// --- the schedule and variations (slice C) ------------------------------------
+// A granted plot's card shows its schedule (src/permit.ts), what's been filed
+// against it, and, to its holder, room to go back to Gary.
+
+const variations = new Map<number, Variation[]>(); // filing -> its variations, in order
+
+function setVariation(v: Variation) {
+  const list = (variations.get(v.filing) ?? []).filter((x) => x.id !== v.id);
+  variations.set(v.filing, [...list, v].sort((a, b) => a.id - b.id));
+}
+
+const worksHtml = (f: Filing) => (f.schedule && BUILT.includes(f.status) && !unread.has(f.id) ? scheduleHtml(f.schedule) : "");
+
+/** What's been filed against a permit, the latest few; and the form, if it's ours and nothing's before Gary. */
+function variationsHtml(f: Filing) {
+  if (!BUILT.includes(f.status) || unread.has(f.id)) return "";
+  const all = variations.get(f.id) ?? [];
+  const open = all.some((v) => v.status === "pending" || v.status === "committee");
+  const mine = f.filer === me && !guest;
+  return all.slice(-3).map(variationHtml).join("") + (mine && !open ? variationForm(f.schedule?.shell.kind !== "none") : "");
+}
+
+function wireVariation(f: Filing, typed: string, typing: boolean) {
+  const form = card.querySelector<HTMLFormElement>("form.vary");
+  if (!form) return;
+  const box = form.querySelector("textarea")!;
+  const use = form.querySelector<HTMLInputElement>("[name=use]")!;
+  const room = form.querySelector<HTMLSelectElement>("[name=room]");
+  box.value = typed;
+  if (typing) box.focus();
+  use.addEventListener("change", () => {
+    box.placeholder = use.checked ? "a tea room" : "a vending machine";
+    if (room) room.hidden = use.checked;
+  });
+  box.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
+      e.preventDefault();
+      form.requestSubmit();
+    }
+  });
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const what = box.value.trim();
+    form.querySelector("button")!.disabled = true;
+    const got = use.checked ? await fileChangeOfUse(f.id, what) : await fileVariation(f.id, what, (room?.value || null) as "in" | "out" | null);
+    if (typeof got === "string") {
+      form.querySelector("button")!.disabled = false;
+      form.querySelector(".problem")!.textContent = got;
+      return;
+    }
+    box.value = "";
+    setVariation(got);
+    renderCard();
+  });
+}
 
 // --- up close: the plot's card and the toolbar --------------------------------
 
@@ -1414,7 +1473,8 @@ function upsert(f: Filing) {
 }
 
 function regroup(filing: number) {
-  built.set(filing, [...placements.values()].filter((p) => p.filing === filing));
+  // Things in storage (put away on a change of use) aren't on the plot.
+  built.set(filing, [...placements.values()].filter((p) => p.filing === filing && p.room !== "store"));
 }
 
 function addPlacement(p: Placement) {
@@ -1450,6 +1510,7 @@ async function start() {
   for (const a of appealed) setAppeal(a);
   for (const p of placed) placements.set(p.id, p);
   for (const id of new Set(placed.map((p) => p.filing))) regroup(id);
+  for (const v of await loadVariations().catch(() => [])) setVariation(v);
   handles = await handlesFor([me, ...[...filings.values()].map((f) => f.filer)]);
 
   const spawn = { x: LANDMARKS.spawn.x + Math.round((Math.random() - 0.5) * 6), y: LANDMARKS.spawn.y };
@@ -1494,6 +1555,11 @@ async function start() {
         letters.push({ plot: f.plot, out: false, status: "denied", filing: f.id });
       }
       setAppeal(a);
+      renderAll();
+    })
+    .on("postgres_changes", { event: "*", schema: "the_commons", table: "variations" }, ({ new: row }) => {
+      if (!row || !("id" in row)) return;
+      setVariation(row as Variation);
       renderAll();
     })
     .on("postgres_changes", { event: "*", schema: "the_commons", table: "placements" }, ({ eventType, new: row, old }) => {

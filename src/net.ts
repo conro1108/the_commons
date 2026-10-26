@@ -1,7 +1,7 @@
 import { createClient, isAuthRetryableFetchError, type PostgrestError } from "@supabase/supabase-js";
 import type { PropDef } from "./content/canon/props.ts";
 import { parseAvatar, type Avatar } from "./avatar.ts";
-import type { Schedule, Shell, Where } from "./schedule.ts";
+import type { Room, Schedule, Shell, Where } from "./schedule.ts";
 
 export const supabase = createClient(
   import.meta.env.VITE_SUPABASE_URL,
@@ -220,7 +220,7 @@ export interface Placement {
   label?: string | null; // a written-in item's name
   label_ok?: boolean | null; // Gary's read of it: null while he hasn't
   sprite?: PropDef | null; // and his drawing of it, once he's done one
-  room?: Where; // outdoors on the plot, or inside the shell
+  room?: Room; // outdoors on the plot, inside the shell, or in storage (put away on a change of use)
   parent?: number | null; // held in or on another placement; x is the slot
   impounded_at?: string | null; // in the pound at Gary's hut
 }
@@ -265,4 +265,54 @@ export async function move(id: number, x: number, y: number, size?: number): Pro
 export async function paint(filing: number, ground: string): Promise<string | null> {
   const { error } = await supabase.from("filings").update({ ground }).eq("id", filing);
   return error && said(error);
+}
+
+// --- variations and the pieces Gary drew (slice C) ------------------------------
+
+/** Going back to Gary about a permit: an addition, or a change of use (see db/tables.sql). */
+export interface Variation {
+  id: number;
+  filing: number;
+  kind: "addition" | "use";
+  what: string;
+  room: Where | null;
+  retrospective: boolean;
+  status: "pending" | "granted" | "committee" | "denied" | "refused";
+  scale: "small" | "material" | null;
+  condition: string | null;
+  reply: string | null;
+  minutes: Filing["minutes"];
+  filed_at: string;
+  heard_at: string | null;
+}
+
+const VARIATION_COLUMNS = "id, filing, kind, what, room, retrospective, status, scale, condition, reply, minutes, filed_at, heard_at";
+
+export async function loadVariations(): Promise<Variation[]> {
+  const { data, error } = await supabase.from("variations").select(VARIATION_COLUMNS).order("id");
+  if (error) throw error;
+  return data;
+}
+
+async function vary(row: { filing: number; kind: Variation["kind"]; what: string; room?: Where | null }): Promise<Variation | string> {
+  const { data, error } = await supabase.from("variations").insert(row).select(VARIATION_COLUMNS).single();
+  if (!error) return data;
+  if (error.code === "23514") return "A variation must be between 3 and 80 characters.";
+  if (error.code === "23505" || error.code === "42501") return "Gary's already got one about this permit in front of him.";
+  return said(error);
+}
+
+/** File for something new on one's permit ("a vending machine"); room: where it'd go, or null for Gary's call. */
+export const fileVariation = (filing: number, what: string, room: Where | null = null) => vary({ filing, kind: "addition", what, room });
+
+/** File for a change of use: the shell stays, the schedule is rewritten. Slice E's drift notice points here. */
+export const fileChangeOfUse = (filing: number, use: string) => vary({ filing, kind: "use", what: use });
+
+/** Gary's drawings of scheduled things nothing in the library was close to, by name (norm() in src/schedule.ts). */
+export async function loadPieces(names: string[]): Promise<Map<string, PropDef>> {
+  const out = new Map<string, PropDef>();
+  if (!names.length) return out;
+  const { data } = await supabase.from("pieces").select("name, sprite").in("name", names);
+  for (const p of data ?? []) if (p.sprite) out.set(p.name, p.sprite);
+  return out;
 }

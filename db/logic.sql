@@ -485,6 +485,139 @@ end $$;
 revoke execute on function the_commons.convene() from public, anon, authenticated;
 select cron.schedule('the_commons_committee', '0 4 * * *', 'select the_commons.convene()');
 
+-- --- Gary's schedule (slice C): pieces, variations, storage ---------------------
+-- Placed after the cron reset above, so its jobs survive it.
+
+-- A thing's name as compared: norm() in src/schedule.ts.
+create function the_commons.norm(text) returns text
+language sql immutable set search_path = '' as $$
+  select regexp_replace(regexp_replace(lower(btrim($1)), '\s+', ' ', 'g'), '^(a|an|the|some) ', '')
+$$;
+grant execute on function the_commons.norm(text) to anon, authenticated;
+
+-- Pieces Gary has drawn for schedules: anyone's client draws a fitting from them.
+create policy "pieces are public" on the_commons.pieces for select using (true);
+grant select on the_commons.pieces to anon, authenticated;
+grant all on the_commons.pieces to service_role;
+
+-- A written-in item by a name Gary drew for a schedule goes up drawn and read:
+-- he wrote the name himself. Fires after known_item (triggers go by name), and
+-- leaves alone a name he's already read either way.
+create function the_commons.piece_item() returns trigger
+language plpgsql security definer set search_path = '' as $$
+declare s jsonb;
+begin
+  if new.label_ok is not null or new.sprite is not null then return new; end if;
+  select p.sprite into s from the_commons.pieces p where p.name = the_commons.norm(new.label) and p.sprite is not null;
+  if s is not null then
+    new.label_ok := true;
+    new.sprite := s;
+  end if;
+  return new;
+end $$;
+revoke execute on function the_commons.piece_item() from public, anon, authenticated;
+create trigger placements_piece before insert on the_commons.placements
+  for each row when (new.label is not null) execute function the_commons.piece_item();
+
+-- Variations: the holder of a granted plot goes back to Gary, one at a time.
+create function the_commons.can_vary(bigint) returns boolean
+language sql stable security definer set search_path = '' as $$
+  select exists (select 1 from the_commons.filings f where f.id = $1 and f.filer = auth.uid() and f.status in ('approved', 'conditional'))
+    and not exists (select 1 from the_commons.variations v where v.filing = $1 and v.status in ('pending', 'committee'))
+$$;
+grant execute on function the_commons.can_vary(bigint) to authenticated;
+
+create policy "heard variations are public; your own are yours"
+  on the_commons.variations for select
+  using (ok or filer = auth.uid());
+create policy "vary your own permit"
+  on the_commons.variations for insert to authenticated
+  with check (filer = auth.uid() and not coalesce((auth.jwt() ->> 'is_anonymous')::boolean, false)
+    and the_commons.can_vary(filing));
+grant select on the_commons.variations to anon, authenticated;
+grant insert (filing, kind, what, room) on the_commons.variations to authenticated;
+grant all on the_commons.variations to service_role;
+
+-- Their own in-tray, drained like Gary's: until heard, backing off to hourly
+-- after five tries, lost in the post after two days.
+select pgmq.create('the_commons_variations')
+  where not exists (select 1 from pgmq.list_queues() where queue_name = 'the_commons_variations');
+
+create function the_commons.enqueue_variation() returns trigger
+language plpgsql security definer set search_path = '' as $$
+begin
+  perform pgmq.send('the_commons_variations', jsonb_build_object('variation', new.id));
+  return new;
+end $$;
+revoke execute on function the_commons.enqueue_variation() from public, anon, authenticated;
+create trigger variations_enqueue after insert on the_commons.variations
+  for each row execute function the_commons.enqueue_variation();
+
+create function the_commons.drain_variations() returns void
+language plpgsql security definer set search_path = '' as $$
+declare
+  m record;
+  v the_commons.variations;
+  secret text;
+begin
+  select decrypted_secret into secret from vault.decrypted_secrets where name = 'the_commons_gary';
+  if secret is null then return; end if;
+  for m in select * from pgmq.read('the_commons_variations', 120, 10) loop
+    select * into v from the_commons.variations where id = (m.message->>'variation')::bigint;
+    if v.id is null or v.status <> 'pending' then
+      perform pgmq.delete('the_commons_variations', m.msg_id);
+    elsif m.read_ct > 53 then
+      update the_commons.variations
+        set status = 'denied', heard_at = now(), ok = true,
+            reply = 'Your variation appears to have been lost in the post. These things happen.'
+        where id = v.id and status = 'pending';
+      perform pgmq.delete('the_commons_variations', m.msg_id);
+    else
+      if m.read_ct > 5 then perform pgmq.set_vt('the_commons_variations', m.msg_id, 3600); end if;
+      perform net.http_post(
+        url := 'https://the-commons-eosin.vercel.app/api/gary',
+        body := jsonb_build_object('variation', v.id),
+        headers := jsonb_build_object('Content-Type', 'application/json',
+                                      'Authorization', 'Bearer ' || secret),
+        timeout_milliseconds := 30000);
+    end if;
+  end loop;
+end $$;
+revoke execute on function the_commons.drain_variations() from public, anon, authenticated;
+select cron.schedule('the_commons_variations', '5 seconds', 'select the_commons.drain_variations()');
+
+-- Material variations go to the committee's 4am sitting, alongside convene().
+create function the_commons.convene_variations() returns int
+language plpgsql security definer set search_path = '' as $$
+declare
+  secret text;
+  v record;
+  n int := 0;
+begin
+  select decrypted_secret into secret from vault.decrypted_secrets where name = 'the_commons_gary';
+  if secret is null then return 0; end if;
+  for v in select id from the_commons.variations where status = 'committee' loop
+    n := n + 1;
+    perform net.http_post(
+      url := 'https://the-commons-eosin.vercel.app/api/gary',
+      body := jsonb_build_object('committee_variation', v.id),
+      headers := jsonb_build_object('Content-Type', 'application/json',
+                                    'Authorization', 'Bearer ' || secret),
+      timeout_milliseconds := 30000);
+  end loop;
+  return n;
+end $$;
+revoke execute on function the_commons.convene_variations() from public, anon, authenticated;
+select cron.schedule('the_commons_committee_variations', '0 4 * * *', 'select the_commons.convene_variations()');
+
+do $$
+begin
+  if not exists (select 1 from pg_publication_tables
+      where pubname = 'supabase_realtime' and schemaname = 'the_commons' and tablename = 'variations') then
+    alter publication supabase_realtime add table the_commons.variations;
+  end if;
+end $$;
+
 -- Realtime, for the tables the map watches.
 do $$
 declare t text;
