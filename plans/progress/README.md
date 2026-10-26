@@ -18,7 +18,7 @@ its progress file, carry on from the first unticked step.
 | A. Outside | `worktree-agent-a7b5ff9fc6bf3cff7` | running |
 | B. Inside | `worktree-agent-abdb5b75c87a75ea4` | finished, awaiting merge |
 | C. Gary's schedule | `worktree-agent-abdf4488549af27a7` | running |
-| D. The letter | `worktree-agent-a2e4e1a742c385faa` | running |
+| D. The letter | `worktree-agent-a2e4e1a742c385faa` | finished, awaiting merge |
 | E. The spirit | `worktree-agent-a723058c2a972b2bb` | finished, awaiting merge |
 | F. The library | `worktree-agent-acc722659ac2419b9` | running |
 
@@ -38,3 +38,4 @@ logic.sql), tick it below.
 - Connor: live data is disposable. So at merge: apply alters without ceremony, and if the schema gets tangled, wipe rows rather than write migrations to preserve them. E's month's grace before board_up() can go (or stay as harmless).
 - B finished (8 commits, no new schema; logic.sql gets room_size() and placeable() replacing in_plot in placement policies, SQL unrun). Merge notes: point the SEAM import in interior.ts at F's FITTINGS, adapt fitting() (needs rows/palette, on floor|wall, slots [cx, bottom y], small, flat, lamp, vary), delete src/interior-fittings.ts; swap doorOutside() for A's real door cells; finishOf() material keys should match A's materials; A's closeup.ts can call drawHeld() for held things outdoors.
 - Connor: keep the tables.sql/logic.sql setup as groundwork for safer migrations later, but don't spend effort protecting data now; this work comes first. Wiping rows to unblock a merge is fine.
+- D finished (tags table in db/alters/4-letter.sql, crons the_commons_rounds 3h + the_commons_tags hourly; SQL unrun). Merge notes: point net.ts fileRetrospective() and gary.ts retrospective() (501 stub) at C's variations (mark tag 'filed', rule with condition, refused -> 'tagged' with new date); move the door questionnaire from gatepost to A's door; B can draw tags on inside things; scheduled() has an SQL twin on_schedule(), keep in step (D added a CLAUDE.md gotcha + map row; check it merges cleanly).
