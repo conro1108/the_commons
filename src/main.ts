@@ -1106,11 +1106,18 @@ function enterableAt(e: MouseEvent) {
   return f && BUILT.includes(f.status) ? f : null;
 }
 
-// Double-click a plot to step inside, or the path round it to step out.
-canvas.addEventListener("dblclick", (e) => {
+// Double-click a plot to step inside, or the path round it to step out. Counted
+// by hand, since phones don't send dblclick once the canvas takes its own touches.
+let lastClick: { t: number; x: number; y: number } | null = null;
+canvas.addEventListener("click", (e) => {
+  const touch = (e as PointerEvent).pointerType !== "mouse";
+  const last = lastClick;
+  lastClick = { t: e.timeStamp, x: e.clientX, y: e.clientY };
+  if (!last || e.timeStamp - last.t > 400 || Math.hypot(e.clientX - last.x, e.clientY - last.y) > (touch ? 30 : 6)) return;
+  lastClick = null;
   if (zoom) return;
   if (!focus) {
-    if (onGary(toArt(e, mapView))) return void summon();
+    if (onGary(toArt(e, mapView), touch ? 4 : 0)) return void summon();
     const f = enterableAt(e);
     if (f) walkInto(f);
   } else if (!toBuild(e)) {
@@ -1153,9 +1160,9 @@ function walkInto(f: Filing) {
 }
 
 /** Whether a map point is on Gary, give or take a pixel. */
-function onGary(p: { x: number; y: number }) {
+function onGary(p: { x: number; y: number }, slop = 0) {
   const g = garyAt(Date.now(), recent());
-  return Math.abs(p.x - g.x) <= 6 && p.y >= g.y - 13 && p.y <= g.y + 1;
+  return Math.abs(p.x - g.x) <= 6 + slop && p.y >= g.y - 13 - slop && p.y <= g.y + 1 + slop;
 }
 
 const onBoard = (p: { x: number; y: number }) => {
