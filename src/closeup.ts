@@ -11,6 +11,7 @@ import type { Filing, Placement } from "./net.ts";
 import { INK, mapGround } from "./render.ts";
 import { hash, keep } from "./map/noise.ts";
 import { grade } from "./light.ts";
+import { drawQuestionnaire, drawRedTag, isRed, isWaiting, type Tag } from "./letter.ts";
 
 /** Commons shown round the plot up close, in art px. */
 export const FOCUS_PAD = 24;
@@ -35,6 +36,7 @@ export interface FocusScene {
   ghost: Placement | null; // a prop about to be placed
   brush: Cells | null; // ground about to be painted
   hover: { p: Placement; colour: string } | null; // a prop about to be moved or taken down
+  tags?: Tag[]; // Gary's tags on this plot (the letter)
 }
 
 /** Whether a prop can stand with its top-left at (x, y): all of it on the plot, none of it on a feature. */
@@ -385,6 +387,21 @@ function sign(ctx: CanvasRenderingContext2D, text: string, left: number, top: nu
   );
 }
 
+// --- the letter: red tags on things, a questionnaire on the door (src/letter.ts) -
+
+/** Red tags hung on the tagged things, and Gary's questionnaire pinned by the gate while one's unanswered. */
+function letterUpClose(ctx: CanvasRenderingContext2D, scene: FocusScene, now: number) {
+  const tags = scene.tags!;
+  for (const t of tags.filter(isRed)) {
+    const p = scene.built.find((x) => x.id === t.placement);
+    if (!p || p.room === "in" || p.parent) continue; // inside: slice B's room
+    drawRedTag(ctx, p.x * ZOOM + propSize(look(p)).w - 2, p.y * ZOOM - 1, now);
+  }
+  // The door, until there's a building with one: by the gatepost, left of the sign.
+  const post = fenceOf(scene.plot).posts[0];
+  if (post && tags.some(isWaiting)) drawQuestionnaire(ctx, post.x * ZOOM - 6, post.y * ZOOM - 13);
+}
+
 /** One plot up close, in focus-space art pixels. */
 export function drawFocus(ctx: CanvasRenderingContext2D, scene: FocusScene, now: number) {
   const { plot, filing: f } = scene;
@@ -419,6 +436,7 @@ export function drawFocus(ctx: CanvasRenderingContext2D, scene: FocusScene, now:
   gateposts(ctx, plot, scene.mine);
   const post = fenceOf(plot).posts[0];
   if (post) sign(ctx, String(plot.id), post.x * ZOOM + 5, post.y * ZOOM - 12);
+  if (scene.tags) letterUpClose(ctx, scene, now);
   ctx.restore();
   grade(ctx, w, h);
 }

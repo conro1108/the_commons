@@ -10,7 +10,7 @@ Slice D of plans/building-and-enforcement-slices.md. Resume from the first untic
 - [x] 6. `api/gary.ts`: ruling on an answer (`{ tag: id }`): Jev (ancillary/incidental/separate/evasive, generous), scribe reply, checked, stored; ancillary -> schedule.
 - [x] 7. Retrospective permission stub (C's call site), client and server. Server: `retrospective()` in gary.ts, unwired (501). Client: `fileRetrospective()` in net.ts returns a "desk isn't open" line.
 - [x] 8. `src/net.ts` section: loadTags, answerTag, reclaim, fileRetrospective (stub).
-- [ ] 9. Render hooks: red tags on the map (`render.ts`), on things up close and questionnaire on the door (`closeup.ts`); impounded things not drawn.
+- [x] 9. Render hooks: red tags on the map (`render.ts`), on things up close and questionnaire on the door (`closeup.ts`); impounded things not drawn. Hooks: render.ts `mapTags()` + `POUND` (Scene.tags, Scene.pound), closeup.ts `letterUpClose()` (FocusScene.tags), one call line each; art in letter.ts. Impounded filtering is in main.ts regroup (step 10).
 - [ ] 10. `src/main.ts` section: tags state + realtime, "Gary's here" when present, questionnaire on the door, red tag card, the pound at the hut.
 - [ ] 11. Dev: `dev/letter.html` (cards, no network), `?letter=1` on dev/plot and dev/map.
 - [ ] 12. Test: decision -> outcome (explained/tagged) if cheap; else none.
