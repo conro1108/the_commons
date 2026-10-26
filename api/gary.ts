@@ -16,6 +16,9 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { experimental_decide as decide, generateText, type Experimental_DecisionQuestion, type Experimental_DecisionState } from "ai";
 import world from "../src/world/plots.json" with { type: "json" };
 import type { PlotDef, Region, Side, World } from "../src/world/types.ts";
+// The first runtime imports from src/ (pure, DOM-free): see "the schedule" below.
+import { LIBRARY, MATERIALS, closest } from "../src/library.ts";
+import { changeUse, isFitting, norm, vary, type Addition, type Fate, type Fitting, type Schedule, type Where } from "../src/schedule.ts";
 
 const JUDGE = "typesafe-ai/jev";
 const SCRIBE = "anthropic/claude-haiku-5.5";
@@ -657,6 +660,7 @@ async function convene(db: Db, id: number): Promise<Response> {
     })
     .eq("id", id)
     .eq("status", "committee");
+  if (verdict.status === "approved" || verdict.status === "conditional") await scheduleFor(db, id);
   return Response.json(verdict);
 }
 
@@ -759,6 +763,7 @@ async function hearAppeal(db: Db, id: number): Promise<Response> {
     p_claimed: "Sorry, someone else claimed the plot while I was reading your appeal.", p_minutes: null,
   });
   if (error) throw error;
+  if (data) await scheduleFor(db, f.id);
   return Response.json({ allowed: data });
 }
 
@@ -793,6 +798,7 @@ async function sitAppeal(db: Db, id: number): Promise<Response> {
     p_claimed: "The plot was claimed by another filing before the committee could sit. It can only apologise.", p_minutes: minutes,
   });
   if (error) throw error;
+  if (data) await scheduleFor(db, f.id);
   return Response.json({ allowed: data });
 }
 
@@ -987,10 +993,12 @@ async function readLabel(db: Db, id: number): Promise<Response> {
   await db.from("placements").update({ label_ok: ok, label_check: answers }).eq("id", id).is("label_ok", null);
   if (!ok) return Response.json({ ok });
 
-  // Then he draws it, once per name: anything already drawn under it is reused.
+  // Then he draws it, once per name: anything already drawn under it (or drawn for a schedule, in pieces) is reused.
   const { data: seen } = await db
     .from("placements").select("sprite").ilike("label", p.label.trim().replace(/[\\%_]/g, "\\$&")).not("sprite", "is", null).limit(1).maybeSingle();
-  const { sprite, drafts } = seen ? { sprite: seen.sprite as Sprite, drafts: null } : await draw(p.label.trim());
+  const { data: piece } = seen ? { data: null } : await db.from("pieces").select("sprite").eq("name", norm(p.label)).not("sprite", "is", null).maybeSingle();
+  const got = seen ?? piece;
+  const { sprite, drafts } = got ? { sprite: got.sprite as Sprite, drafts: null } : await draw(p.label.trim());
   await db.from("placements").update({ sprite, sprite_drafts: drafts }).eq("id", id).is("sprite", null);
   return Response.json({ ok, drawn: !!sprite });
 }
@@ -1112,6 +1120,164 @@ export async function precedentFor(db: Db, id: number, plot: PlotDef) {
     .map((r) => ({ id: r.id, intent: r.intent, status: r.status, ground: `on ${regionOf(plotOf(r.plot)).name}` }));
 }
 
+// --- the schedule (slice C) ----------------------------------------------------
+
+// When Gary grants a filing he writes its schedule (src/schedule.ts): the shell,
+// a starting kit of fittings outside and in, and the use. Jev picks the shell and
+// which library piece each fitting is (src/library.ts, the one seam onto the
+// library); the scribe names the fittings; Jev checks them; code applies. A
+// fitting nothing in the library is close to is keyed "item" and drawn once into
+// the pieces table by name, so anyone scheduled for the same thing, or writing in
+// an item by that name, gets the same drawing. Every path that grants calls
+// scheduleFor(). Variations and changes of use are below.
+
+const SHELLS = {
+  building: "A building, with walls, a roof and a door: anything you'd go inside (a studio, a shop, a hut, a reading room).",
+  enclosure: "An enclosure open to the sky: a pen, a run, a walled or fenced garden, a yard.",
+  none: "No structure at all: things standing out on the plot (a bench, a flower bed, a pond, a sundial).",
+} as const;
+type ShellKind = keyof typeof SHELLS;
+
+const SCHEDULER = `${GARY}
+
+You've granted a filing, and now you write its schedule: the starting kit the permit lets them build with. The shell is decided ("shell"). Output only JSON, no markdown, no commentary:
+{"shell": "...", "fittings": [{"name": "...", "where": "in" | "out"}]}
+"shell": the shell as it reads on a schedule, in a few words: "a hall, timber, one room", "a pen, wire mesh", "a hut, stone". If shell.kind is "none", write "none".
+"fittings": three to six things that make it this place and not another. A starting kit, not everything it could ever have. Each "name" a plain noun phrase of at most 24 characters ("mats", "a rack of practice swords", "a shoe rack"), no brands, and no sign (every building has one).
+"where": "in" for inside the building, "out" for on the plot outside. With no building, everything is "out". A building's kit is mostly inside, with one or two things outside.
+"library" lists ordinary pieces already drawn: use their names where they suit, but name what the place actually needs.
+Never anything crude, nothing the filing doesn't plausibly need, nothing against the bylaws or the condition.
+
+Example, "a karate studio", a building, timber:
+{"shell": "a hall, timber, one room", "fittings": [{"name": "mats", "where": "in"}, {"name": "a rack of practice swords", "where": "in"}, {"name": "a board of belts", "where": "in"}, {"name": "a punching bag", "where": "in"}, {"name": "a shoe rack", "where": "out"}]}`;
+
+/** The library pieces that can go there, as criteria for Jev, and "none" for one he'd have to draw. */
+const piecesFor = (where: Where): Record<string, string> => ({
+  ...Object.fromEntries(LIBRARY.filter((p) => p.where === where || p.where === "either").map((p) => [p.key, p.name])),
+  none: "Nothing listed is close to it: it would have to be drawn specially.",
+});
+
+/** A fitting's library key: the piece its name plainly is, else Jev's pick, else "item" for one to draw. */
+function keyOf(name: string, where: Where, picked: string | undefined): string {
+  const near = closest(name);
+  if (near && (near.where === where || near.where === "either")) return near.key;
+  return !picked || picked === "none" ? "item" : picked;
+}
+
+const shellWords = (kind: ShellKind, material: string | null) =>
+  kind === "none" ? "none" : `${kind === "building" ? "a building" : "an enclosure"}, ${MATERIALS[material ?? ""] ?? "timber"}${kind === "building" ? ", one room" : ""}`;
+
+/** A written schedule, parsed; problems if it won't do. Code checks it; the model only writes. */
+export function scheduleProblems(raw: string, kind: ShellKind): { shell?: string; fittings?: { name: string; where: Where }[]; problems: string[] } {
+  let j: { shell?: unknown; fittings?: unknown };
+  try {
+    j = JSON.parse(raw.replace(/^```(json)?|```$/gm, "").trim());
+  } catch {
+    return { problems: ["it wasn't valid JSON"] };
+  }
+  if (typeof j?.shell !== "string" || !Array.isArray(j.fittings)) return { problems: ['it wasn\'t {"shell": string, "fittings": [...]}'] };
+  const fittings = (j.fittings as { name?: unknown; where?: unknown }[])
+    .filter((f): f is { name: string; where: Where } => typeof f?.name === "string" && (f.where === "in" || f.where === "out"))
+    .map((f) => ({ name: f.name.trim().replace(/\s+/g, " "), where: kind === "building" ? f.where : ("out" as Where) }));
+  const problems: string[] = [];
+  if (fittings.length < 3 || fittings.length > 6) problems.push(`it had ${fittings.length} usable fittings; three to six`);
+  const bad = fittings.filter((f) => f.name.length < 2 || f.name.length > 24);
+  if (bad.length) problems.push(`names must be 2 to 24 characters: ${bad.map((f) => f.name).join(", ")}`);
+  if (problemsWith([j.shell, ...fittings.map((f) => f.name)].join(" "), {}).length) problems.push("it contained a link or handle");
+  return { shell: j.shell.trim().slice(0, 80), fittings, problems };
+}
+
+/** Gary writes a granted filing's schedule. keep: a shell already standing, which a change of use keeps. Exported for the back office. */
+export async function writeSchedule(filing: { id: number; intent: string; condition?: string | null }, plot: PlotDef, keep?: Schedule["shell"]) {
+  const at = new Date().toISOString();
+  const site = siteOf(plot);
+  const { answers: shape } = await ask("schedule, shell", { filing: pad(filing.id), intent: filing.intent, plot: site }, {
+    shell: { type: "choice", instructions: "What does this filing need to be built as?", criteria: SHELLS as Record<ShellKind, string> },
+    material: { type: "choice", instructions: "If it had a building or an enclosure, which material would suit it, and this plot's ground and weather?", criteria: MATERIALS },
+    chief: { type: "choice", instructions: "Which one of these is most essential to it?", criteria: Object.fromEntries(LIBRARY.map((p) => [p.key, p.name])) },
+  });
+  const kind: ShellKind = keep?.kind ?? (shape.shell.choice as ShellKind);
+  const material = keep ? keep.material : kind === "none" ? null : shape.material.choice;
+  const input = {
+    filing: pad(filing.id), intent: filing.intent, condition: filing.condition ?? null, plot: site.particulars,
+    shell: { kind, material: material && (MATERIALS[material] ?? material), ...(keep && { already_standing: keep.words }) },
+    library: LIBRARY.map((p) => p.name),
+  };
+  const drafts: { text: string; checks: Record<string, number | string>; problems: string[] }[] = [];
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const last = drafts.at(-1);
+    const { text } = await write(`schedule, draft ${attempt + 1}`, {
+      reasoning: LIGHT_THINKING,
+      system: SCHEDULER,
+      prompt: last ? { ...input, rejected: last.text, rejected_because: last.problems } : input,
+      maxOutputTokens: 4000, // reasoning counts against it
+    });
+    const parsed = scheduleProblems(text, kind);
+    if (parsed.problems.length) {
+      drafts.push({ text, checks: {}, problems: parsed.problems });
+      continue;
+    }
+    const fs = parsed.fittings!;
+    const { answers } = (await ask(`schedule, check ${attempt + 1}`, { intent: filing.intent, shell: input.shell, shell_words: parsed.shell, fittings: fs.map((f) => f.name) }, {
+      ...Object.fromEntries(fs.flatMap((f, i) => [
+        [`odd${i}`, { type: "boolean" as const, instructions: `Is "${f.name}" crude or unkind, or plainly out of place in ${filing.intent}?` }],
+        [`key${i}`, { type: "choice" as const, instructions: `Which of these is "${f.name}", or would do as it? Pick "none" unless one really would.`, criteria: piecesFor(f.where) }],
+      ])),
+      shell_wrong: { type: "boolean" as const, instructions: "Does shell_words describe something other than the shell given (its kind and material), or anything crude?" },
+    })) as unknown as { answers: Record<string, { probability: number; choice: string }> };
+    const checks = Object.fromEntries(Object.entries(answers).map(([k, a]) => [k, a.choice ?? a.probability]));
+    const kept = fs.map((f, i) => ({ f, i })).filter(({ i }) => answers[`odd${i}`].probability <= 0.5);
+    if (kept.length < 2) {
+      drafts.push({ text, checks, problems: ["most of the fittings didn't belong"] });
+      continue;
+    }
+    drafts.push({ text, checks, problems: [] });
+    const fittings: Fitting[] = kept.map(({ f, i }) => ({ name: f.name, key: keyOf(f.name, f.where, answers[`key${i}`].choice), where: f.where, how: "granted", at }));
+    const words = kind === "none" ? "none" : answers.shell_wrong.probability > 0.5 ? shellWords(kind, material) : parsed.shell!;
+    const schedule: Schedule = { shell: keep ?? { kind, words, material }, fittings, use: filing.intent };
+    return { schedule, record: { shape, drafts } };
+  }
+  // Twice no good: the one piece he'd least do without.
+  const chief = LIBRARY.find((p) => p.key === shape.chief.choice) ?? LIBRARY[0];
+  const where: Where = kind === "building" && chief.where !== "out" ? "in" : "out";
+  const schedule: Schedule = {
+    shell: keep ?? { kind, words: shellWords(kind, material), material },
+    fittings: [{ name: chief.name, key: chief.key, where, how: "granted", at }],
+    use: filing.intent,
+  };
+  return { schedule, record: { shape, drafts } };
+}
+
+/** Draw what the library hasn't got, once per name; anything drawn before, as a piece or a written-in item, is reused. */
+async function drawPieces(db: Db, names: string[]) {
+  await Promise.all([...new Set(names.map(norm))].map(async (name) => {
+    const { data: have } = await db.from("pieces").select("name").eq("name", name).maybeSingle();
+    if (have) return;
+    const { data: seen } = await db
+      .from("placements").select("sprite").ilike("label", name.replace(/[\\%_]/g, "\\$&")).not("sprite", "is", null).limit(1).maybeSingle();
+    const { sprite, drafts } = seen ? { sprite: seen.sprite as Sprite, drafts: null } : await draw(name);
+    // Nothing usable: no row, so the next to need it tries again.
+    if (sprite) await db.from("pieces").upsert({ name, sprite, drafts }, { onConflict: "name", ignoreDuplicates: true });
+  }));
+}
+
+/** Write the schedule onto a filing just granted, if it hasn't one, then draw what the library hasn't got. Every grant calls this;
+ *  a failure leaves the filing unscheduled, held to nothing like those from before schedules. */
+export async function scheduleFor(db: Db, id: number): Promise<Schedule | null> {
+  try {
+    const { data: f } = await db.from("filings").select("*").eq("id", id).single();
+    if (!f || (f.status !== "approved" && f.status !== "conditional") || f.schedule) return null;
+    const { schedule, record } = await writeSchedule(f, plotOf(f.plot));
+    const { data: wrote } = await db
+      .from("filings").update({ schedule, verdict: { ...f.verdict, schedule: record } }).eq("id", id).is("schedule", null).select("id");
+    if (wrote?.length) await drawPieces(db, schedule.fittings.filter((x) => x.key === "item").map((x) => x.name));
+    return schedule;
+  } catch (e) {
+    console.error("schedule", id, e);
+    return null;
+  }
+}
+
 export const deskDb = () =>
   createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SECRET_KEY!, {
     db: { schema: "the_commons" },
@@ -1158,6 +1324,7 @@ export async function desk(
     })
     .eq("id", id)
     .eq("status", "pending");
+  if (verdict.status === "approved" || verdict.status === "conditional") await scheduleFor(db, id);
 
   return Response.json(verdict);
 }
