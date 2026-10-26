@@ -354,6 +354,21 @@ begin
       end if;
       continue;
     end if;
+    -- A shell's sign (slice A): read until it's ruled on, changed or taken down.
+    if m.message ? 'sign' then
+      if m.read_ct > 20 or not exists (select 1 from the_commons.filings
+          where id = (m.message->>'sign')::bigint and shell->>'sign' is not null and shell->>'sign_ok' is null) then
+        perform pgmq.delete('the_commons_gary', m.msg_id);
+      else
+        perform net.http_post(
+          url := 'https://the-commons-eosin.vercel.app/api/gary',
+          body := jsonb_build_object('sign', (m.message->>'sign')::bigint),
+          headers := jsonb_build_object('Content-Type', 'application/json',
+                                        'Authorization', 'Bearer ' || secret),
+          timeout_milliseconds := 30000);
+      end if;
+      continue;
+    end if;
     select * into f from the_commons.filings where id = (m.message->>'id')::bigint;
     if f.id is null or f.status <> 'pending' then
       perform pgmq.delete('the_commons_gary', m.msg_id);
@@ -484,6 +499,75 @@ begin
 end $$;
 revoke execute on function the_commons.convene() from public, anon, authenticated;
 select cron.schedule('the_commons_committee', '0 4 * * *', 'select the_commons.convene()');
+
+-- --- The shell (slice A) -----------------------------------------------------
+-- The holder's building or pen (filings.shell, Shell in src/schedule.ts), put up
+-- under the same policy as painting the ground. Its shape is checked here; the
+-- sign over its door is read by Gary like a written-in label, and his read of it
+-- (sign_ok) is his: a holder's write keeps it while the sign stands, clears it
+-- when the words change, and takes a ruling he's already made on the same words.
+grant update (shell) on the_commons.filings to authenticated;
+
+create function the_commons.shell_built() returns trigger
+language plpgsql security definer set search_path = '' as $$
+declare
+  s jsonb := new.shell;
+  x int; y int; w int; h int;
+  big boolean;
+  known jsonb;
+begin
+  if new.shell is not distinct from old.shell then return new; end if;
+  if (new.shell - 'sign_ok') is distinct from (old.shell - 'sign_ok') then new.built_at := now(); end if;
+  if s is null or coalesce(auth.jwt() ->> 'role', '') = 'service_role' then return new; end if;
+  if jsonb_typeof(s) <> 'object' or jsonb_typeof(s->'x') <> 'number' or jsonb_typeof(s->'y') <> 'number'
+      or jsonb_typeof(s->'w') <> 'number' or jsonb_typeof(s->'h') <> 'number' then
+    raise exception 'That building has no footprint.' using errcode = '23514';
+  end if;
+  x := (s->>'x')::int; y := (s->>'y')::int; w := (s->>'w')::int; h := (s->>'h')::int;
+  big := coalesce(s->>'kind', 'building') = 'enclosure';
+  if coalesce(s->>'kind', 'building') not in ('building', 'enclosure')
+      or w < 3 or h < 3 or w > case when big then 32 else 20 end or h > case when big then 26 else 14 end then
+    raise exception 'That footprint is the wrong size.' using errcode = '23514';
+  end if;
+  if exists (select 1 from generate_series(x, x + w - 1) cx, generate_series(y, y + h - 1) cy
+      where not the_commons.in_plot(new.plot, cx, cy)) then
+    raise exception 'It has to stand on the plot.' using errcode = '23514';
+  end if;
+  if s ? 'sign' and jsonb_typeof(s->'sign') <> 'null'
+      and (jsonb_typeof(s->'sign') <> 'string' or length(btrim(s->>'sign')) not between 1 and 24) then
+    raise exception 'A sign is between 1 and 24 characters.' using errcode = '23514';
+  end if;
+  if nullif(btrim(s->>'sign'), '') is null then
+    s := jsonb_set(s, '{sign}', 'null') || '{"sign_ok": null}';
+  elsif old.shell is not null and old.shell->>'sign' = s->>'sign' then
+    s := s || jsonb_build_object('sign_ok', old.shell->'sign_ok');
+  else
+    select f.shell->'sign_ok' into known from the_commons.filings f
+      where f.id <> new.id and lower(btrim(f.shell->>'sign')) = lower(btrim(s->>'sign'))
+        and jsonb_typeof(f.shell->'sign_ok') = 'boolean'
+      order by (f.shell->>'sign_ok')::boolean desc, f.id
+      limit 1;
+    s := s || jsonb_build_object('sign_ok', coalesce(known, 'null'));
+    if known is null then perform pgmq.send('the_commons_gary', jsonb_build_object('sign', new.id)); end if;
+  end if;
+  new.shell := s;
+  return new;
+end $$;
+revoke execute on function the_commons.shell_built() from public, anon, authenticated;
+create trigger filings_shell_built before update of shell on the_commons.filings
+  for each row execute function the_commons.shell_built();
+
+-- Gary's read of a sign, written only if it's still the sign he read. /api/gary's alone.
+create function the_commons.sign_read(p_id bigint, p_sign text, p_ok boolean) returns boolean
+language sql security definer set search_path = '' as $$
+  with done as (
+    update the_commons.filings set shell = shell || jsonb_build_object('sign_ok', p_ok)
+      where id = p_id and shell->>'sign' = p_sign and shell->>'sign_ok' is null
+      returning 1)
+  select exists (select 1 from done)
+$$;
+revoke execute on function the_commons.sign_read(bigint, text, boolean) from public, anon, authenticated;
+grant execute on function the_commons.sign_read(bigint, text, boolean) to service_role;
 
 -- Realtime, for the tables the map watches.
 do $$

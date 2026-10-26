@@ -266,3 +266,13 @@ export async function paint(filing: number, ground: string): Promise<string | nu
   const { error } = await supabase.from("filings").update({ ground }).eq("id", filing);
   return error && said(error);
 }
+
+// --- the shell (slice A) -------------------------------------------------------
+
+/** Put up, change or take down the holder's building or pen. The database keeps Gary's read of the sign as his. */
+export async function saveShell(filing: number, shell: Shell | null): Promise<string | null> {
+  const { error } = await supabase.from("filings").update({ shell }).eq("id", filing);
+  if (!error) return null;
+  if (error.code === "23514") return error.message; // the database says what was wrong with it
+  return said(error);
+}

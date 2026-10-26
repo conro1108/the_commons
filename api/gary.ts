@@ -995,6 +995,21 @@ async function readLabel(db: Db, id: number): Promise<Response> {
   return Response.json({ ok, drawn: !!sprite });
 }
 
+// --- the shell's sign (slice A) --------------------------------------------------
+
+/** Read the sign over a building's door before it shows to anyone else. Same test as a label; stored only if it's still the sign he read. */
+async function readSign(db: Db, id: number): Promise<Response> {
+  const { data: f } = await db.from("filings").select("shell").eq("id", id).maybeSingle();
+  const sign: string | undefined = f?.shell?.sign;
+  if (!sign || f?.shell.sign_ok != null) return Response.json({ skipped: true });
+  const { answers } = await ask("sign", { sign }, {
+    unacceptable: { type: "boolean", instructions: UNFIT("sign over the door of a building on a shared common") },
+  });
+  const ok = answers.unacceptable.probability <= 0.5;
+  const { data: kept } = await db.rpc("sign_read", { p_id: id, p_sign: sign, p_ok: ok });
+  return Response.json({ ok, kept });
+}
+
 interface Sprite {
   rows: string[];
   palette: Record<string, string>;
@@ -1129,13 +1144,14 @@ export async function POST(req: Request): Promise<Response> {
 /** Whatever's landed in the in-tray. */
 export async function desk(
   db: Db,
-  body: { id?: number; inspect?: number; item?: number; committee?: number; committee_appeal?: number; audit?: number; appeal?: number },
+  body: { id?: number; inspect?: number; item?: number; sign?: number; committee?: number; committee_appeal?: number; audit?: number; appeal?: number },
 ): Promise<Response> {
   if (body.inspect) return inspectPlot(db, body.inspect);
   if (body.appeal) return hearAppeal(db, body.appeal);
   if (body.committee_appeal) return sitAppeal(db, body.committee_appeal);
   if (body.audit) return auditPlot(db, body.audit);
   if (body.item) return readLabel(db, body.item);
+  if (body.sign) return readSign(db, body.sign);
   if (body.committee) return convene(db, body.committee);
   const id = body.id!;
 
