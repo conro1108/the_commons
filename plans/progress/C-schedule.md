@@ -14,7 +14,7 @@ Branch `worktree-agent-abdf4488549af27a7`. Resume from the first unticked step.
 - [x] 10. `api/gary.ts`: committee sitting on variations; desk() routes `variation` / `committee_variation`.
 - [x] 11. `src/net.ts` own section: Variation type, load, fileVariation, fileChangeOfUse.
 - [x] 12. `src/permit.ts`: schedule + variations HTML (shared by main.ts and the dev page).
-- [ ] 13. `src/main.ts` own section: schedule on the permit card, variation form + list, realtime.
+- [x] 13. `src/main.ts` own section: schedule on the permit card, variation form + list, realtime.
 - [ ] 14. `dev/permit.html`: the permit card with a schedule, no network (?use=, ?v=).
 - [ ] 15. Tests for the pure schedule helpers.
 - [ ] 16. `npm run build`, `npm test`, final note.
@@ -30,3 +30,4 @@ Branch `worktree-agent-abdf4488549af27a7`. Resume from the first unticked step.
 - 8-10: section 'variations and changes of use (slice C)': variationOf (pure), ruleVariation, fileVariation (server, for D/E), addToSchedule (for D: ancillary/lawful), applyChangeOfUse (writeSchedule keeping shell, Jev fates, changeUse, store()), hearVariation, sitVariation (reuses sit()). desk routes variation / committee_variation.
 - 11: net.ts section: Variation, loadVariations, fileVariation, fileChangeOfUse (E's entry), loadPieces.
 - 12: src/permit.ts (scheduleHtml, variationHtml, variationForm) + '.works' CSS in index.html (the existing '.schedule' class is the unclaimed plot's deed, so not reused).
+- 13: main.ts section 'the schedule and variations (slice C)' before 'up close'. Hooks: imports, card body (worksHtml + variationsHtml), claim form selector now 'form:not(.vary)', wireVariation call, loadVariations in start (errors -> none), realtime on variations, regroup skips room 'store'.
