@@ -15,7 +15,7 @@ Branch `worktree-agent-abdf4488549af27a7`. Resume from the first unticked step.
 - [x] 11. `src/net.ts` own section: Variation type, load, fileVariation, fileChangeOfUse.
 - [x] 12. `src/permit.ts`: schedule + variations HTML (shared by main.ts and the dev page).
 - [x] 13. `src/main.ts` own section: schedule on the permit card, variation form + list, realtime.
-- [ ] 14. `dev/permit.html`: the permit card with a schedule, no network (?use=, ?v=).
+- [x] 14. `dev/permit.html`: the permit card with a schedule, no network (?use=, ?v=).
 - [ ] 15. Tests for the pure schedule helpers.
 - [ ] 16. `npm run build`, `npm test`, final note.
 
@@ -31,3 +31,4 @@ Branch `worktree-agent-abdf4488549af27a7`. Resume from the first unticked step.
 - 11: net.ts section: Variation, loadVariations, fileVariation, fileChangeOfUse (E's entry), loadPieces.
 - 12: src/permit.ts (scheduleHtml, variationHtml, variationForm) + '.works' CSS in index.html (the existing '.schedule' class is the unclaimed plot's deed, so not reused).
 - 13: main.ts section 'the schedule and variations (slice C)' before 'up close'. Hooks: imports, card body (worksHtml + variationsHtml), claim form selector now 'form:not(.vary)', wireVariation call, loadVariations in start (errors -> none), realtime on variations, regroup skips room 'store'.
+- 14: dev/permit.html (+permit.ts): four made-up cards (dojo with variations, tea room after a change of use, goose sanctuary with a denied retrospective, bench with no shell); ?use=, ?mine=1. Screenshotted, looks right.
