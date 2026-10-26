@@ -10,7 +10,7 @@ Branch `worktree-agent-a723058c2a972b2bb`. Resume from the first unticked step.
 - [x] 6. `api/gary.ts`: readUse() reading (Jev: yes/mostly/drifted; scribe: other use + line; checks; fallbacks), readings row, latest copied onto filing; desk hooks
 - [x] 7. `api/gary.ts`: driftOf() export for C's change of use (mixed use if filed before drift)
 - [x] 8. `src/schedule.ts`: useOf() (schedule.use or intent)
-- [ ] 9. `src/net.ts` section: Filing fields, Notice/Visit types, load/post/sign/flip/ask/summon, fileChangeOfUse stub (C)
+- [x] 9. `src/net.ts` section: Filing fields, Notice/Visit types, load/post/sign/flip/ask/summon, fileChangeOfUse stub (C)
 - [ ] 10. `src/spirit.ts`: pure HTML for sign/board/book/reading/drift/boarded + CSS + drawBoarded()
 - [ ] 11. `src/main.ts` section: wiring up close (build-info) and on the card; realtime hook
 - [ ] 12. Render hook: boarded plots on the map (`src/render.ts`, one line)
@@ -21,3 +21,4 @@ Branch `worktree-agent-a723058c2a972b2bb`. Resume from the first unticked step.
 - 1: alter is `db/alters/5-spirit.sql`. `read_sent` added too (the reader's own throttle, like inspect_sent).
 - 2-4: one section in db/logic.sql, `-- --- the spirit` ... `-- --- end of the spirit`, just before the realtime block. Fitness reads aren't on the pgmq in-tray (drain_gary untouched): send_spirit() posts {notice}/{visit}/{reading} itself, throttled by sent_at/tries/read_sent. Crons: the_commons_spirit (15s), the_commons_disuse (hourly, board_up()). RPCs: summon_reader(), ask_for_plot(plot). Disuse = greatest(stamped_at, built_at, stirred_at) older than 30 days. Freed = status 'lost' (plot free under filings_plot_held; placements kept on the lost filing). Unboarding is the filings_stirred trigger: any stir or build by anyone clears boarded_at/quit_by. Not run against a database (no psql here).
 - 5-8: `// --- the spirit` section in api/gary.ts just above deskDb; desk() gets `& SpiritBody` and a two-line hook (spiritDesk). Reading: Jev picks yes/mostly/drifted; scribe writes two lines (other use / the reading), checked for invents/contradicts/unfit, fallback formReading(). Unchanged evidence (stable()) only bumps read_at. Drift stored on filings.drift (the other use, or 'something else'). `driftOf(db, filing, asOf)` exported for C. survey() isn't filtered to room='out' (B/D's to change); inside things are read separately.
+- 9: optional spirit fields on Filing (so dev pages' made-up filings still compile); section at the end of net.ts. `fileChangeOfUse()` is the STUB for C.
