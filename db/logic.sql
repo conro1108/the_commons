@@ -585,7 +585,9 @@ begin
         where p.filing = g.id and p.impounded_at is null and (p.prop <> 'item' or p.label_ok)
           and (asked_by is not null or p.placed_at < now() - interval '10 minutes')
           and not the_commons.on_schedule(g.schedule, p.prop, p.label, p.room)
-          and not exists (select 1 from the_commons.tags t where t.placement = p.id and t.status in ('asked', 'tagged', 'filed')))
+          -- nothing open on it, or on another of the same kind (three geese are one question)
+          and not exists (select 1 from the_commons.tags t where t.filing = g.id and t.status in ('asked', 'tagged', 'filed')
+            and (t.placement = p.id or lower(t.what) = lower(the_commons.thing_name(p.prop, p.label)))))
     order by g.built_at desc nulls last
     limit case when asked_by is null then 2 else 10 end
   loop
@@ -668,8 +670,9 @@ begin
     where f.status in ('approved', 'conditional') and f.schedule is not null
       and p.impounded_at is null and p.placed_at < now() - interval '7 days' and (p.prop <> 'item' or p.label_ok)
       and not the_commons.on_schedule(f.schedule, p.prop, p.label, p.room)
-      and not exists (select 1 from the_commons.tags g where g.placement = p.id
-        and (g.status in ('asked', 'tagged', 'filed') or g.asked_at > now() - interval '7 days'))
+      and not exists (select 1 from the_commons.tags g where g.placement = p.id and g.asked_at > now() - interval '7 days')
+      and not exists (select 1 from the_commons.tags g where g.filing = p.filing and g.status in ('asked', 'tagged', 'filed')
+        and (g.placement = p.id or lower(g.what) = lower(the_commons.thing_name(p.prop, p.label))))
   loop
     perform the_commons.add_fitting(t.filing, jsonb_build_object(
       'name', case when t.prop = 'item' then btrim(t.label) else the_commons.thing_name(t.prop, t.label) end,

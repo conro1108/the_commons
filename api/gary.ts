@@ -1153,13 +1153,15 @@ async function round(db: Db, id: number): Promise<Response> {
   const { data: f } = await db.from("filings").select("id, status, schedule").eq("id", id).single();
   if (!f || !BUILT_STATUSES.includes(f.status) || !f.schedule) return Response.json({ skipped: true });
   const { data: placed } = await db.from("placements").select("id, prop, label, label_ok, room").eq("filing", id).is("impounded_at", null).order("id");
-  const { data: open } = await db.from("tags").select("placement").eq("filing", id).in("status", ["asked", "tagged", "filed"]);
+  const { data: open } = await db.from("tags").select("placement, what").eq("filing", id).in("status", ["asked", "tagged", "filed"]);
   const asked = new Set((open ?? []).map((t) => t.placement as number));
+  const askedOf = new Set((open ?? []).map((t) => (t.what as string).toLowerCase()));
   // Three geese are one question: the first of each, and the answer covers the rest (the schedule goes by kind).
   const kinds = new Map<string, { id: number; what: string; where: Where }>();
   for (const p of (placed ?? []) as { id: number; prop: string; label: string | null; label_ok: boolean | null; room: Where }[]) {
     if ((p.prop === "item" && !p.label_ok) || asked.has(p.id) || scheduled(f.schedule as Schedule, p)) continue;
     const what = thingName(p.prop, p.label);
+    if (askedOf.has(what.toLowerCase())) continue;
     const key = `${p.room}:${what.toLowerCase()}`;
     if (!kinds.has(key)) kinds.set(key, { id: p.id, what, where: p.room });
   }

@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { SIZES, problemsWith, tally, verdictOf } from "../api/gary.ts";
+import { SIZES, explainedBy, problemsWith, tally, verdictOf } from "../api/gary.ts";
 import { PALETTE, footprint } from "../src/content/props.ts";
 import { plotsBlock } from "../scripts/plots-sql.ts";
 import world from "../src/world/plots.json" with { type: "json" };
@@ -36,6 +36,12 @@ test("the committee needs a quorum; a majority against denies under the most-cit
   assert.deepEqual(tally(["b3", "b1", "b3", "approved", null], "flag"), { status: "denied", condition: null, bylaw: 3, count: "1 to 3, 1 abstaining" });
   assert.equal(tally(["approved", "approved", "approved", "b2", "conditional"], "flag")?.status, "approved");
   assert.equal(tally(["approved", "approved", "conditional", "b2", "b4"], "flag")?.condition, "flag");
+});
+
+test("Gary is generous about what's ancillary, but an unfit answer explains nothing", () => {
+  assert.equal(explainedBy({ unfit: 0.1, kind: "separate", odds: { ancillary: 0.2, incidental: 0.2, separate: 0.6 } }), true);
+  assert.equal(explainedBy({ unfit: 0.1, kind: "separate", odds: { ancillary: 0.1, incidental: 0.1, separate: 0.8 } }), false);
+  assert.equal(explainedBy({ unfit: 0.9, kind: "ancillary", odds: { ancillary: 1 } }), false);
 });
 
 test("Gary knows every prop on the palette, at the size it's drawn", () => {
