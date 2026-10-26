@@ -28,6 +28,7 @@ create table if not exists the_commons.variations (
   heard_at      timestamptz
 );
 create index if not exists variations_filing on the_commons.variations (filing, id);
+create unique index if not exists variations_open on the_commons.variations (filing) where status in ('pending', 'committee');
 alter table the_commons.variations enable row level security;
 
 alter table the_commons.placements drop constraint if exists placements_room_check;

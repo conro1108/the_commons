@@ -183,4 +183,6 @@ create table if not exists the_commons.variations (
   heard_at      timestamptz
 );
 create index if not exists variations_filing on the_commons.variations (filing, id);
+create unique index if not exists variations_open on the_commons.variations (filing)
+  where status in ('pending', 'committee'); -- one before Gary at a time
 alter table the_commons.variations enable row level security;
