@@ -2,7 +2,7 @@
 
 The Commons is a shared multiplayer patch of land in the world of The Meadow
 (`~/projects/cozy_sprites`) and The Farm (github.com/kassandrews/the_farm).
-Read `PLAN.md` first: premise, the first-guess loop, AI rules, architecture.
+Read `PLAN.md` first: premise, what's built, AI rules, architecture.
 Tone follows the_farm's DESIGN.md — deadpan institutional absurdism, no fail
 states, no stamina.
 

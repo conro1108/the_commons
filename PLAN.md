@@ -1,175 +1,52 @@
-# The Commons — plan
+# The Commons
 
-A shared, persistent, multiplayer patch of land in the world of The Meadow
-(cozy_sprites) and The Farm (the_farm). The Farm is your town; the Commons is
-the land that belongs to *everyone's* town at once — which means it belongs to
-nobody, which means it is administered, with enormous seriousness, by Gary — the Meadow's Tired Office
-Creature, on what he understands to be a permanent secondment.
+A shared, persistent patch of land in the world of The Meadow (cozy_sprites)
+and The Farm (the_farm). It belongs to everyone's town at once, so it belongs to
+nobody, so it is administered, with enormous seriousness, by Gary, the Meadow's
+Tired Office Creature.
 
-Tone and pillars are inherited from the_farm's DESIGN.md: deadpan institutional
-absurdism, no fail states, no stamina, real time gates the world and never your
-hands. Read it before designing a mechanic.
+Tone is the_farm's DESIGN.md: deadpan institutional absurdism, no fail states,
+no stamina. Mechanics are still open; play them and throw out what's dull.
 
-**The mechanics are the open, interesting part.** The loop below is a first
-guess to be played and thrown away.
+## What's here
 
-This is also deliberately an infra project: lean hard on Vercel and Supabase.
-The rule that keeps that honest — **every service gets one job it is the best
-tool for**, and no job is done twice. See the infra map.
+- **Come in** by name: your name is your key, no password. Guests look round
+  as grey ghosts and can't file.
+- **File a claim** on a plot with one line of intent. Gary approves, attaches
+  a condition, refers it to the committee, or denies it under a bylaw, and
+  writes the permit. Crude filings are refused, shown to nobody else.
+- **Build** on a granted plot: canon props, written-in items Gary draws, and
+  painted ground. Gary comes round to check conditions, and audits now and
+  then.
+- **Appeal** a denial to Gary, then up to the committee, which sits nightly.
 
-## A first-guess loop
+## Next, roughly
 
-1. **File a claim.** Pick an empty plot, write one line of intent ("a bench,
-   for looking at the pond with"). It goes into Gary's in-tray and comes back
-   a few seconds later — the delay is the joke, and it's also the queue.
-   Gary returns a decision from a fixed set — *approved*, *approved with
-   conditions*, *referred to committee*, *denied* — plus the permit's prose, maybe a
-   condition from an enum ("must face north", "must include a small flag"),
-   and citations of precedent ("cf. Filing 0041, also a bench"). Denials cite
-   one of a few absurd bylaws (no moats; no livestock larger than a goat) and
-   free the plot to refile; committee resolves overnight.
-2. **Build on your plot.** Canon props and tiles, free and uncapped.
-3. **The commons reacts.** The world is server-simulated, so what one player
-   does changes what everyone comes back to. See below — this is the
-   multiplayer mechanic, and the reason the backend has real work.
-4. **The Commons Gazette.** Nightly, the day's event log becomes a newspaper —
-   one AI call for everyone — with a front page you can share.
-
-Later, if the commons wants more: **petitions** (co-sign; at a threshold the
-weekly council rules, picking an effect from an enum and writing minutes),
-**mail** (Pesto delivers on his round, later than you'd like), **public works**
-(a bridge needs 200 planks from anyone; the plaque lists who).
-
-## The commons reacts
-
-A world tick advances the whole commons a step every few minutes. Things a
-browser can't be trusted to compute for everyone:
-
-- **Spread.** Hedges creep into empty neighbouring plots; flowers seed
-  downwind; paths wear in where people actually walk (from Presence data).
-  A hedge that reaches your plot is a boundary dispute, with paperwork.
-- **A cast that notices.** Gary inspects the newest construction; Pesto
-  re-routes around whatever got built; someone sits on the bench you made.
-  Each of these is an event, and events are memories: the cast's dialogue
-  retrieves relevant ones (the_farm's "NPCs that remember", but shared —
-  Gary remembers what *other* people built).
-- **Shared stock.** The plank pile for public works, the seed exchange —
-  quantities everyone draws from and adds to.
-- **Settling up.** Committee referrals resolve, petitions tally, the day's
-  events close for the gazette.
-
-No fail states: spread is never damage, a dispute is never a loss.
+Deeper building, and permits held to over time. Then a world tick so the
+commons changes while you're away (hedges spread, paths wear in, the cast
+notices). Maybe a nightly gazette, petitions, mail.
 
 ## AI rules
 
-- The AI writes prose and **picks from enums**; code validates and applies.
-  It never mutates state directly.
+- AI picks from enums and writes prose; code applies the result.
 - Every result is stored and never regenerated for the same input.
-- Players' text is public and sign-in is anonymous. Gary's stamp doubles as
-  moderation: a crude or nasty filing is denied (status `refused`, shown to
-  nobody else, never appealed). Gary loses his patience over it — withering,
-  then incredulous, then snapping outright — in proportion, naming it at most in tamer words of his own, never quoting it.
-  *Lost in the post* is only for filings Gary never received.
-- Gary's ruling is one choice — approve, conditional, committee, or denied
-  under a specific bylaw — so a denial always cites one. GLM writes the
-  permit; the decision model then checks the draft against the input
-  (misdescribes the filing? contradicts the ruling? invents things?). One
-  retry with the problems named, then a plain permit written by code. Every
-  draft and check is stored in `verdict`.
-- Budget is the Gateway's free $5/month — buying any credits forfeits it, so
-  only models marked *Free AI Gateway Credit* (models page column; not in the
-  public API) are usable. Gary's *judgment* — decision, condition, bylaw,
-  lost-in-the-post — is a decision model (`perplexity/pplx-decider-v1.2`,
-  AI SDK `experimental_decide`: typed questions in, choices and probabilities
-  out). It writes no prose, so the permit is `zai/glm-4.7-flash`. Jev
-  (`typesafe-ai/jev`) was the first pick but isn't free-tier. The gazette and
-  council get the best free-tier model. Residents may hold any number of plots
-  and file as often as they like. Near the budget, an Edge Config
-  flag puts **Gary on leave**: stamps go canned until it's flipped back.
+- A decision model rules (Jev); a scribe writes the prose and the decision
+  model checks it before it goes out (models at the top of `api/gary.ts`).
 
-## Infra map
+## How it fits together
 
-| Service | Its job here |
-|---|---|
-| **Supabase Postgres + RLS** | All state. Clients write directly only where RLS can judge it alone (props on your own plot, a filing row in `pending`). |
-| **Supabase Auth** | Your name is your key: no password, anyone who gives it is you. Guests are anonymous sessions (grey ghosts, can't file). Filing papers gives the user a never-sent `<id>@the-commons.invalid` address; `api/door.ts` hands out one-time tokens for it by name. Look and name live in `app.profiles`, filled in on Form R-1 (`src/papers.ts`). |
-| **Supabase Realtime** | Postgres Changes for the map and stamps; **Broadcast** for avatars walking around (never persisted); **Presence** for who's on the commons, which also feeds path wear. |
-| **pg_cron** | The world tick (every few minutes) and draining Gary's queue (every five seconds). Vercel Hobby crons are daily-only, so anything frequent lives here. |
-| **Supabase Queues (pgmq)** | Gary's in-tray. A filing insert enqueues; retries and backlog for free. |
-| **pg_net + Vault** | The database calls out to Vercel: the drain job POSTs queued filings to `/api/gary`, with a shared secret held in Vault. |
-| **Supabase Edge Functions** | The world tick when its step logic outgrows SQL (pathfinding for Pesto, spread rules) — TypeScript, invoked by pg_cron. |
-| **pgvector** | Embeddings of filings and events: Gary's precedent citations, the cast's memory retrieval. |
-| **Supabase Storage** | Nightly snapshot of the map — a time-lapse of the commons growing up. |
-| **Vercel Functions** | Everything that touches the AI: `/api/gary`, `/api/gazette`. They write with `SUPABASE_SECRET_KEY`, so nobody forges a permit. |
-| **AI Gateway** | All model calls, embeddings included. OIDC on Vercel, so no key in the repo. One place for spend. |
-| **Vercel Cron** | Daily: the gazette. Weekly: the council, if petitions land. |
-| **Vercel Workflow** | The council meeting as a durable multi-step run: gather petitions → deliberate → apply effects → write minutes. Check availability on Hobby before leaning on it. |
-| **OG images (`@vercel/og`)** | Share cards: a stamped permit, the gazette's front page, your plot. Pixel art as SVG rects. |
-| **Edge Config** | Gary on leave (AI kill switch), festival overrides, tuning knobs — read at the edge, changed without a deploy. |
-| **Vercel Firewall** | Rate limits on `/api/*`. |
+- **Supabase:** Postgres + RLS holds everything; clients write directly only
+  where RLS can judge it alone. Realtime: Postgres Changes for rulings,
+  Broadcast for walking, Presence for who's here.
+- **The filing pipeline:** insert a filing → trigger enqueues (pgmq) →
+  pg_cron drains every few seconds → pg_net POSTs `/api/gary` → Gary rules
+  and writes back with the secret key → Realtime delivers the stamp.
+  pg_cron also sends the inspector, the daily auditor and the nightly
+  committee. Name jobs, queues and secrets `the_commons_*`; they're
+  database-wide.
+- **Vercel:** Functions in `api/` for anything with AI or the secret key;
+  models through the AI Gateway.
+- **Deploy:** pushing to `main` deploys the app. CI reruns `db/logic.sql`
+  on `db/**` changes. `db/tables.sql` is never rerun (see CLAUDE.md).
 
-The filing pipeline is the spine, and touches most of the map:
-client inserts `filings` row → trigger enqueues (pgmq) → pg_cron drains →
-pg_net POSTs `/api/gary` → AI Gateway (decision model rules, GLM writes the permit) → write-back with
-the secret key → Realtime delivers the stamp to the filer.
-
-Client: Vite + TypeScript + canvas, no framework — same as the siblings. Pixel
-art is code (string grids + palettes); vendor canon art from cozy_sprites into
-`src/content/canon/` (copy, never import; never modify cozy_sprites).
-the_farm isn't ours — ask before lifting from it.
-
-Rough tables: `plots`, `placements`, `filings`, `events` (append-only, embedded,
-feeds the gazette and memory), `gazette`, `cast` (positions, current errand),
-later `petitions`/`signatures`. Users are `auth.users` ids; names come from
-`app.profiles`.
-
-## Deploy — straight from the repo
-
-- **Frontend, Functions, crons:** Vercel Git integration; every push to `main`
-  deploys. `SUPABASE_SECRET_KEY` goes in Vercel env when the first Function
-  lands. `.env` holds only the publishable URL/key and is committed.
-- **Database:** `.github/workflows/db.yml` reruns `db/logic.sql` (functions,
-  triggers, policies, queue, cron, the plots' rows) on any `db/**` change.
-  Repo secrets are set. `db/tables.sql` is the tables; it's never rerun, and
-  a change to one is a hand-run `alter table` folded back in, so a push never
-  wipes the commons.
-- **Edge Functions:** to be decided — deploy from the same workflow via the
-  Management API, if the tick ever leaves SQL.
-- Schema `the_commons` is created and exposed to PostgREST.
-
-## Phases
-
-Each phase gets its own live checklist in `plans/phase-N.md`, written when the
-phase starts and kept current while building, so work can resume mid-phase.
-
-1. **Claim a spot** — done ([plans/phase-1.md](plans/phase-1.md)). Shared map,
-   avatars and who's here, file a claim, Gary rules on it.
-2. **Build it** — in progress ([plans/phase-2.md](plans/phase-2.md)). Place
-   props on your plot, free and uncapped, in a focused view of the plot.
-3. **Give it some life** — done ([plans/phase-3.md](plans/phase-3.md)).
-4. **Somewhere, not a grid** — done ([plans/phase-4.md](plans/phase-4.md)).
-   A composed map of five kinds of ground; plot site and climate feed the loop.
-   After it: the appeal ladder up to the committee, and a schema split so a
-   push stops wiping the commons ([plans/appeals.md](plans/appeals.md)).
-5. **Building, in depth, and keeping to it** — more to building a plot than
-   placing props, and a permit that's held to over time: Gary comes back now
-   and then to see a plot is still what was filed for, and amends it if not.
-6. **The field changes while you're away** — the world tick: hedges spread,
-   paths wear in, the cast notices what got built.
-7. **The daily newspaper** — the nightly Gazette, with an OG front page.
-
-Later: petitions and the council, mail, public works, identity (see Open
-questions).
-
-## Open questions
-
-- **Drawn write-ins.** A written-in item is a labelled parcel, so "a beach
-  umbrella" reads as shade to the inspector but looks like a box. Follow-up:
-  draw a sprite for each approved label (generated once, stored, reused by
-  name) so the umbrella looks like one. Hold off until a generator can match
-  the canon art; a bad sprite is worse than a parcel.
-- pg_cron jobs, pgmq queues, and Vault secrets are database-wide, not
-  per-schema — name them `the_commons_*` so they don't collide with siblings,
-  and have `logic.sql` unschedule its own jobs before rescheduling.
-- One commons for everyone, or several (a "parish" per N players)?
-- How big is a plot, and does the map grow as people arrive?
+Phase checklists from earlier work are in `plans/`.
