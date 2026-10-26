@@ -1,0 +1,15 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>the commons — room</title>
+<style>
+  html, body { margin: 0; background: #1b2622; color: #f6f1dc; font: 12px system-ui; }
+  canvas { display: block; image-rendering: pixelated; margin: 8px; }
+  label { margin: 0 8px; }
+</style>
+<div>
+  <label>hour <input id="hour" type="range" min="0" max="24" step="0.25" /> <span id="hour-v"></span></label>
+  <label>w <input id="w" type="range" min="3" max="22" /></label>
+  <label>h <input id="h" type="range" min="3" max="14" /></label>
+</div>
+<canvas id="c"></canvas>
+<script type="module" src="./room.ts"></script>
