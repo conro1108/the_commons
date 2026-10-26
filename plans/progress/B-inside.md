@@ -3,7 +3,7 @@
 Slice B of `plans/building-and-enforcement-slices.md`. Resume from the first unticked step.
 
 - [x] 1. Progress file. Read the design, slices, foundation (`src/schedule.ts`, `db/alters/0-foundation.sql`).
-- [ ] 2. Fittings stand-in behind one seam (`src/interior-fittings.ts`, read only through `fitting()` in interior.ts).
+- [x] 2. Fittings stand-in behind one seam (`src/interior-fittings.ts`, read only through `fitting()` in interior.ts).
 - [ ] 3. `src/interior.ts` geometry: room size off the shell, wall rows, cells to art, doors in and out.
 - [ ] 4. Drawing the room: floor, back and side walls, front lip, windows, door.
 - [ ] 5. Things in the room, and things in things (slots), with hit tests.
@@ -19,3 +19,4 @@ Slice B of `plans/building-and-enforcement-slices.md`. Resume from the first unt
 - [ ] 15. Final notes below, commit.
 
 ## Notes
+- Step 2: stand-in is src/interior-fittings.ts (18 pieces). RoomFitting = PropDef + on floor|wall, flat, slots [cx, bottom y], small, lamp, vary. Delete on merge with F.
