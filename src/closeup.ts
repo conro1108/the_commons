@@ -10,7 +10,9 @@ import type { Boundary } from "./world/types.ts";
 import type { Filing, Placement } from "./net.ts";
 import { INK, mapGround } from "./render.ts";
 import { hash, keep } from "./map/noise.ts";
-import { grade } from "./light.ts";
+import { dark, grade, hourNow } from "./light.ts";
+import { onShell, shellLights, shellMini, shellStandings, underRoof } from "./shell.ts";
+import type { Shell } from "./schedule.ts";
 
 /** Commons shown round the plot up close, in art px. */
 export const FOCUS_PAD = 24;
@@ -35,13 +37,15 @@ export interface FocusScene {
   ghost: Placement | null; // a prop about to be placed
   brush: Cells | null; // ground about to be painted
   hover: { p: Placement; colour: string } | null; // a prop about to be moved or taken down
+  shell?: { shell: Shell | null; ok: boolean; picked?: boolean } | null; // a shell being put up or changed, in place of the filing's
 }
 
-/** Whether a prop can stand with its top-left at (x, y): all of it on the plot, none of it on a feature. */
-export function canPlace(plot: PlotDef, prop: string, x: number, y: number): boolean {
+/** Whether a prop can stand with its top-left at (x, y): all of it on the plot, none of it on a feature or under a roof. */
+export function canPlace(plot: PlotDef, prop: string, x: number, y: number, shell?: Shell | null): boolean {
   const { w, h } = propSize(prop);
   const cw = Math.ceil(w / ZOOM), ch = Math.ceil(h / ZOOM);
   for (let cy = y; cy < y + ch; cy++) for (let cx = x; cx < x + cw; cx++) if (!inPlot(plot, cx, cy)) return false;
+  if (underRoof(shell, { x, y, w: cw, h: ch })) return false;
   return !plot.features.some((f) => x < f.x + f.w && x + cw > f.x && y < f.y + f.h && y + ch > f.y);
 }
 
@@ -117,9 +121,11 @@ function features(ctx: CanvasRenderingContext2D, plot: PlotDef, flat: boolean): 
     }));
 }
 
-function drawBuilt(ctx: CanvasRenderingContext2D, plot: PlotDef, ps: Placement[], now?: number) {
+function drawBuilt(ctx: CanvasRenderingContext2D, plot: PlotDef, ps: Placement[], now?: number, shell?: Standing[]) {
   for (const f of features(ctx, plot, true)) f.draw();
-  for (const s of [...features(ctx, plot, false), ...standingProps(ctx, ps, now)].sort((a, b) => a.base - b.base)) s.draw();
+  // Only what stands outdoors on the plot itself: not what's inside, held in something, or in the pound.
+  const out = ps.filter((p) => (p.room ?? "out") === "out" && !p.parent && !p.impounded_at);
+  for (const s of [...features(ctx, plot, false), ...standingProps(ctx, out, now), ...(shell ?? [])].sort((a, b) => a.base - b.base)) s.draw();
 }
 
 /**
@@ -138,7 +144,7 @@ export function placementAt(ps: Placement[], bx: number, by: number): Placement 
 
 // --- the miniature -------------------------------------------------------------
 
-const minis = new Map<string, { from: Placement[]; ground: string; c: HTMLCanvasElement }>();
+const minis = new Map<string, { from: Placement[]; ground: string; shell: string; c: HTMLCanvasElement }>();
 
 /**
  * A plot as the map sees it: the full build shrunk to one pixel per cell, each
@@ -150,14 +156,15 @@ export function mini(plot: PlotDef, f: Filing | null, ps: Placement[]): HTMLCanv
   const key = `${plot.id}:${f?.id ?? 0}`;
   const ground = f?.ground ?? empty(plot);
   const hit = minis.get(key);
-  if (hit && hit.from === ps && hit.ground === ground) return hit.c;
+  const shell = JSON.stringify(f?.shell ?? null);
+  if (hit && hit.from === ps && hit.ground === ground && hit.shell === shell) return hit.c;
   const BW = plot.w * ZOOM, BH = plot.h * ZOOM;
   const full = document.createElement("canvas");
   full.width = BW;
   full.height = BH;
   const fctx = full.getContext("2d")!;
   paintGround(fctx, ground, f?.id ?? plot.id, plot, false);
-  drawBuilt(fctx, plot, ps);
+  drawBuilt(fctx, plot, ps, undefined, f?.shell ? shellStandings(fctx, f.shell, { mine: false }) : undefined);
   const src = fctx.getImageData(0, 0, BW, BH).data;
   const c = hit?.c ?? document.createElement("canvas");
   c.width = plot.w;
@@ -185,7 +192,8 @@ export function mini(plot: PlotDef, f: Filing | null, ps: Placement[]): HTMLCanv
     }
   }
   ctx.putImageData(out, 0, 0);
-  minis.set(key, { from: ps, ground, c });
+  if (f?.shell) shellMini(ctx, f.shell); // crisper than its shrunken drawing
+  minis.set(key, { from: ps, ground, shell, c });
   return c;
 }
 
@@ -402,14 +410,23 @@ export function drawFocus(ctx: CanvasRenderingContext2D, scene: FocusScene, now:
     ctx.lineWidth = 1;
     ctx.strokeRect(x * ZOOM + 0.5, y * ZOOM + 0.5, bw * ZOOM - 1, bh * ZOOM - 1);
   }
-  drawBuilt(ctx, plot, scene.built, now);
+  const shell = scene.shell ? scene.shell.shell : f.shell;
+  if (scene.shell?.shell && !scene.shell.picked) {
+    // The footprint on the ground while it's being put up: pale if it can go there, red if not.
+    const { x, y, w: sw, h: sh } = scene.shell.shell;
+    ctx.strokeStyle = scene.shell.ok ? "#fff8e0cc" : "#e05c48";
+    ctx.lineWidth = 1;
+    ctx.strokeRect(x * ZOOM + 0.5, y * ZOOM + 0.5, sw * ZOOM - 1, sh * ZOOM - 1);
+  }
+  const fading = !!scene.shell && !scene.shell.ok;
+  drawBuilt(ctx, plot, scene.built, now, shell ? shellStandings(ctx, shell, { mine: scene.mine }, fading ? 0.5 : 1) : undefined);
   if (scene.hover) {
     const { p, colour } = scene.hover;
     ctx.drawImage(halo(look(p), colour), p.x * ZOOM - 1, p.y * ZOOM - 1);
     prop(ctx, look(p), p.x * ZOOM, p.y * ZOOM);
   }
   if (scene.ghost) {
-    const ok = canPlace(plot, scene.ghost.prop, scene.ghost.x, scene.ghost.y);
+    const ok = canPlace(plot, scene.ghost.prop, scene.ghost.x, scene.ghost.y, shell);
     ctx.globalAlpha = ok ? 0.6 : 0.35;
     if (!ok) ctx.drawImage(halo(scene.ghost.prop, "#e05c48"), scene.ghost.x * ZOOM - 1, scene.ghost.y * ZOOM - 1);
     prop(ctx, scene.ghost.prop, scene.ghost.x * ZOOM, scene.ghost.y * ZOOM);
@@ -421,4 +438,13 @@ export function drawFocus(ctx: CanvasRenderingContext2D, scene: FocusScene, now:
   if (post) sign(ctx, String(plot.id), post.x * ZOOM + 5, post.y * ZOOM - 12);
   ctx.restore();
   grade(ctx, w, h);
+  if (shell && dark(hourNow())) {
+    ctx.save();
+    ctx.translate(FOCUS_PAD, FOCUS_PAD);
+    shellLights(ctx, shell);
+    ctx.restore();
+  }
 }
+
+/** Whether a build-space point is on the shell, as the close-up draws it. */
+export const shellHit = (s: Shell | null | undefined, bx: number, by: number) => !!s && onShell(s, bx, by);

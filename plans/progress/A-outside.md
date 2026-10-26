@@ -3,11 +3,11 @@
 Resume from the first unticked step. Notes say what was decided and touched.
 
 - [x] 1. Read the design, slices, CLAUDE.md; plan. No new columns needed (filings.shell exists), so no db/alters file unless that changes.
-- [ ] 2. `src/shell.ts`: materials, paints, what the schedule allows (null schedule = building, default timber; 'none' = no tool), footprint checks, door side from the gate, default windows.
-- [ ] 3. `src/shell.ts`: draw a building up close: material walls, roof by proportion (gable E-W, gable N-S, hipped), door, windows, sign with a pixel font, porch for side/back doors.
-- [ ] 4. `src/shell.ts`: draw an enclosure (fence ring with a gate) and the map miniature of both.
-- [ ] 5. `src/closeup.ts`: shell in the back-to-front sort, footprint ghost, props kept off a building, mini cache keyed on the shell.
-- [ ] 6. `dev/plot.html`: ?shell= (and ?material=, ?paint=, ?sign=, ?kind=) with no network.
+- [x] 2. `src/shell.ts`: materials, paints, what the schedule allows (null schedule = building, default timber; 'none' = no tool), footprint checks, door side from the gate, default windows. Added optional `kind` to `Shell` in schedule.ts (missing = building).
+- [x] 3. `src/shell.ts`: draw a building up close: material walls, roof by proportion (gable E-W, gable N-S, hipped), door, windows, sign with a 3x5 font (two lines, else a squiggle), a built-out porch for side doors, a peek of porch roof for back doors. Cached per shell+look.
+- [x] 4. `src/shell.ts`: enclosure (fence ring, gate on the door side, gateposts, sign on a post) and `shellMini` for the map at a pixel per cell.
+- [x] 5. `src/closeup.ts`: shell in the back-to-front sort; `scene.shell` draft override with footprint outline; `canPlace(..., shell)` keeps props out from under a roof; drawBuilt only draws room 'out', unparented, unimpounded placements; mini keyed on shell; lit windows after dark.
+- [x] 6. `dev/plot.html`: ?shell=1 or x,y,w,h, ?kind, ?material, ?paint, ?sign, ?door, ?unread, ?all=1 (every material), ?mini=1. Looked at it via playwright screenshots (/tmp, not committed).
 - [ ] 7. `src/net.ts`: saveShell section.
 - [ ] 8. `db/logic.sql`: own section: grant update (shell), trigger (holder can't set sign_ok; sign change resets it, reuses a known ruling, enqueues; shell counts as building); drain_gary hook for 'sign'.
 - [ ] 9. `api/gary.ts`: readSign + desk hook.

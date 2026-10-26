@@ -34,6 +34,7 @@ export interface Schedule {
 
 /** The shell as the holder has put it up, in build cells of the plot's box. */
 export interface Shell {
+  kind?: "building" | "enclosure"; // missing means a building
   x: number;
   y: number;
   w: number;
