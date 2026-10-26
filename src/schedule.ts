@@ -54,3 +54,6 @@ export function scheduled(s: Schedule | null, p: { prop: string; label?: string 
   return s.fittings.some((f) =>
     f.where === where && (p.prop === "item" ? f.key === "item" && f.name.trim().toLowerCase() === name : f.key === p.prop));
 }
+
+/** What a place is for, as the spirit reads it: the schedule's use, or for a filing from before schedules, its intent. */
+export const useOf = (f: { schedule: Schedule | null; intent: string }): string => f.schedule?.use || f.intent;

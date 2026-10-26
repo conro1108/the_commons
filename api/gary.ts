@@ -16,6 +16,7 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { experimental_decide as decide, generateText, type Experimental_DecisionQuestion, type Experimental_DecisionState } from "ai";
 import world from "../src/world/plots.json" with { type: "json" };
 import type { PlotDef, Region, Side, World } from "../src/world/types.ts";
+import { useOf, type Schedule } from "../src/schedule.ts";
 
 const JUDGE = "typesafe-ai/jev";
 const SCRIBE = "anthropic/claude-haiku-5.5";
@@ -1112,6 +1113,179 @@ export async function precedentFor(db: Db, id: number, plot: PlotDef) {
     .map((r) => ({ id: r.id, intent: r.intent, status: r.status, ground: `on ${regionOf(plotOf(r.plot)).name}` }));
 }
 
+// --- the spirit ----------------------------------------------------------------
+
+// What a place is used for (plans/building-and-enforcement.md, "The spirit").
+// The database POSTs { notice: id } and { visit: id } for each new line on a
+// what's-on board or in a visitors' book, read for fitness before anyone else
+// sees it (readLine), and { reading: id } when a place has settled after a
+// change, or once a week (send_reader()): Gary reads the board, the book, the
+// sign and the layout against what the permit is for, and asks one question.
+
+export type Finding = "yes" | "mostly" | "drifted";
+
+const FINDINGS = (use: string): Record<Finding, string> => ({
+  yes: `Still plainly ${use}. What's on, what visitors say and how it's laid out fit it, give or take the odd extra (teas on Saturdays at a karate studio is fine).`,
+  mostly: `Mostly still ${use}, but something else is going on there as well, more than the odd extra.`,
+  drifted: `No longer really ${use}: what's on, what visitors say and how it's laid out add up to a different sort of place.`,
+});
+
+/** What Gary looks at to read a place's use. */
+export type Spirit = {
+  use: string; // what the permit is for
+  open: boolean; // the sign on the door
+  board: string[]; // the what's-on board, a notice a line
+  book: string[]; // the visitors' book, latest first, the last month
+  outside: string[]; // what's set out on the plot (survey())
+  beside: string[];
+  inside: string[]; // what's set out in the room, and what's in or on what
+};
+
+const READER = `${GARY}
+
+You've been round to see what a place is actually being used for, and you've made your finding ("finding") against what its permit is for ("use"). Write exactly two lines, plain text, no markdown:
+Line 1: if the finding is "mostly" or "drifted", what else it's being used as, in two to four words starting "a" or "an" ("a tea room"). Otherwise "none".
+Line 2: your reading of the place for its file: at most 12 words, one or two short sentences, the way you'd jot it down. For example "Still a karate studio." / "Mostly a karate studio. Some tea." / "A tea room, really."
+Go by the evidence only: the what's-on board ("board"), the visitors' book ("book"), whether it's open, and what's set out outside and inside. Never invent anything that isn't there, and never give coordinates.`;
+
+const READING_CHECKS = {
+  invents: "Does the reading (or the other use) rest on something that isn't in the evidence: a notice, a visitor's remark, or a thing set out that isn't there?",
+  contradicts: "Does the reading say something different from the finding: still the permitted use when the finding is drifted, or drifted when it is yes?",
+  unfit: REMARK_CHECKS.unfit,
+} as const;
+
+/** The plain reading, for when the scribe can't manage one. */
+export function formReading(finding: Finding, use: string): string {
+  return finding === "yes" ? `Still ${use}.` : finding === "mostly" ? `Mostly ${use}.` : `Not really ${use} any more.`;
+}
+
+/** Gary reads a place's use: the decision model finds, the scribe names what else it is and writes the reading. */
+export async function readUse(spirit: Spirit) {
+  const { answers } = await ask("reading", spirit, {
+    finding: {
+      type: "choice",
+      instructions: `Is this place still ${spirit.use}? Read what's on, what visitors say, whether it's open and how it's laid out, as a whole; don't count things. If there's hardly anything to go on, it's still what it was.`,
+      criteria: FINDINGS(spirit.use),
+    },
+  });
+  const finding = answers.finding.choice as Finding;
+  const input = { ...spirit, finding };
+  const drafts: { text: string; checks: Record<string, number>; problems: string[] }[] = [];
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const last = drafts.at(-1);
+    const { text } = await write(`reading, draft ${attempt + 1}`, {
+      reasoning: LIGHT_THINKING,
+      system: READER,
+      prompt: last ? { ...input, rejected: last.text, rejected_because: last.problems } : input,
+      maxOutputTokens: 3000,
+    });
+    const [first = "", second = ""] = text.trim().split(/\n+/).map((l) => l.trim());
+    const other = finding === "yes" || /^none\.?$/i.test(first) ? null : first.replace(/[.!]+$/, "").slice(0, 40);
+    const line = trim(second, 2, 120);
+    let problems = problemsWith(line, {});
+    if (!problems.length && other && problemsWith(other, {}).length) problems = ["the other use contained a link or handle"];
+    if (!problems.length && finding !== "yes" && !other) problems = ["line 1 must name what else it's being used as"];
+    let checks: Record<string, number> = {};
+    if (!problems.length) {
+      const { answers: a } = await ask(
+        `reading, check ${attempt + 1}`,
+        { ...input, other_use: other, reading: line },
+        Object.fromEntries(Object.entries(READING_CHECKS).map(([k, instructions]) => [k, { type: "boolean" as const, instructions }])),
+      );
+      checks = Object.fromEntries(Object.entries(a).map(([k, v]) => [k, (v as { probability: number }).probability]));
+      problems = Object.entries(checks).filter(([, p]) => p > 0.5).map(([k]) => READING_CHECKS[k as keyof typeof READING_CHECKS]);
+    }
+    drafts.push({ text, checks, problems });
+    if (!problems.length) return { finding, other, line, answers: { ...answers, drafts } };
+  }
+  return { finding, other: null, line: formReading(finding, spirit.use), answers: { ...answers, drafts } };
+}
+
+/** What Gary sees of a place's use, as of now. */
+async function spiritOf(db: Db, f: { id: number; plot: number; ground: string | null; intent: string; schedule: Schedule | null; open_sign?: boolean }): Promise<Spirit> {
+  const month = new Date(Date.now() - 30 * 864e5).toISOString();
+  const [{ data: board }, { data: book }, { data: placed }, out] = await Promise.all([
+    db.from("notices").select("line").eq("filing", f.id).eq("ok", true).order("posted_at"),
+    db.from("visits").select("line").eq("filing", f.id).eq("ok", true).gte("at", month).order("at", { ascending: false }).limit(12),
+    db.from("placements").select("id, prop, label, label_ok, parent").eq("filing", f.id).eq("room", "in").is("impounded_at", null).order("id"),
+    survey(db, f),
+  ]);
+  const things = (placed ?? []) as { id: number; prop: string; label: string | null; label_ok: boolean | null; parent: number | null }[];
+  const name = (p: (typeof things)[number]) => (p.prop !== "item" ? p.prop.replace(/_/g, " ") : p.label_ok ? p.label! : "an unlabelled parcel");
+  const byId = new Map(things.map((p) => [p.id, p]));
+  return {
+    use: useOf(f),
+    open: !!f.open_sign,
+    board: (board ?? []).map((n) => n.line),
+    book: (book ?? []).map((v) => v.line),
+    outside: out.things,
+    beside: out.beside,
+    inside: things.map((p) => (p.parent && byId.has(p.parent) ? `${name(p)}, in or on the ${name(byId.get(p.parent)!)}` : name(p))),
+  };
+}
+
+/** Read a notice or a line in the visitors' book before anyone else sees it. Same test as an item's name. */
+async function readLine(db: Db, table: "notices" | "visits", id: number): Promise<Response> {
+  const { data: r } = await db.from(table).select("line, ok").eq("id", id).maybeSingle();
+  if (!r || r.ok !== null) return Response.json({ skipped: true });
+  const what = table === "notices" ? "notice someone has pinned on the what's-on board by their door" : "line someone has written in a visitors' book";
+  const { answers } = await ask(table === "notices" ? "notice" : "visitors' book", { line: r.line }, {
+    unacceptable: { type: "boolean", instructions: UNFIT(what) },
+  });
+  const ok = answers.unacceptable.probability <= 0.5;
+  await db.from(table).update({ ok, checked: answers }).eq("id", id).is("ok", null);
+  return Response.json({ ok });
+}
+
+/** Read one place's use. The same evidence never gets a second reading, only a fresh date. */
+async function readPlace(db: Db, id: number): Promise<Response> {
+  const { data: f } = await db.from("filings").select("*").eq("id", id).single();
+  if (!f || !["approved", "conditional"].includes(f.status) || f.boarded_at) return Response.json({ skipped: true });
+  const spirit = await spiritOf(db, f);
+  const at = new Date().toISOString();
+  const { data: last } = await db.from("readings").select("evidence").eq("filing", id).order("id", { ascending: false }).limit(1).maybeSingle();
+  if (last && stable(last.evidence) === stable(spirit)) {
+    await db.from("filings").update({ read_at: at }).eq("id", id);
+    return Response.json({ skipped: "unchanged" });
+  }
+  const { finding, other, line, answers } = await readUse(spirit);
+  await db.from("readings").insert({ filing: id, at, use: spirit.use, verdict: finding, other, line, evidence: spirit, answers });
+  await db.from("filings")
+    .update({ reading: line, read_at: at, drift: finding === "drifted" ? (other ?? "something else") : null })
+    .eq("id", id).in("status", ["approved", "conditional"]);
+  return Response.json({ finding, other, line });
+}
+
+/**
+ * For slice C's change of use: what Gary had made of the place as of a moment
+ * (when the change of use was filed; now if not given). Filed before he found
+ * it drifted (drifted false), a mixed use may be granted ("the studio's doing
+ * teas on Saturdays"); after, it's a change of use without permission, dearer.
+ * `to` is what it had drifted to, `mostly` what else was going on.
+ */
+export async function driftOf(db: Db, filing: number, asOf?: string) {
+  const { data } = await db.from("readings").select("at, verdict, other, line")
+    .eq("filing", filing).lte("at", asOf ?? new Date().toISOString()).in("verdict", ["yes", "mostly", "drifted"])
+    .order("id", { ascending: false }).limit(1).maybeSingle();
+  return {
+    drifted: data?.verdict === "drifted",
+    to: data?.verdict === "drifted" ? (data.other as string | null) : null,
+    mostly: data?.verdict === "mostly" ? (data.other as string | null) : null,
+    reading: (data?.line as string | undefined) ?? null,
+    at: (data?.at as string | undefined) ?? null,
+  };
+}
+
+export type SpiritBody = { notice?: number; visit?: number; reading?: number };
+
+/** The spirit's share of the in-tray, or null if it isn't for us. */
+function spiritDesk(db: Db, body: SpiritBody): Promise<Response> | null {
+  if (body.notice) return readLine(db, "notices", body.notice);
+  if (body.visit) return readLine(db, "visits", body.visit);
+  if (body.reading) return readPlace(db, body.reading);
+  return null;
+}
+
 export const deskDb = () =>
   createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SECRET_KEY!, {
     db: { schema: "the_commons" },
@@ -1129,8 +1303,10 @@ export async function POST(req: Request): Promise<Response> {
 /** Whatever's landed in the in-tray. */
 export async function desk(
   db: Db,
-  body: { id?: number; inspect?: number; item?: number; committee?: number; committee_appeal?: number; audit?: number; appeal?: number },
+  body: { id?: number; inspect?: number; item?: number; committee?: number; committee_appeal?: number; audit?: number; appeal?: number } & SpiritBody,
 ): Promise<Response> {
+  const spirit = spiritDesk(db, body);
+  if (spirit) return spirit;
   if (body.inspect) return inspectPlot(db, body.inspect);
   if (body.appeal) return hearAppeal(db, body.appeal);
   if (body.committee_appeal) return sitAppeal(db, body.committee_appeal);
