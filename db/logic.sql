@@ -84,9 +84,10 @@ grant execute on function the_commons.in_plot(smallint, int, int) to anon, authe
 create policy "rulings are public; your own filings are yours"
   on the_commons.filings for select
   using (status not in ('pending', 'refused', 'lost') or filer = auth.uid());
+-- Guests (anonymous sessions) only look round; appeals and building follow from filing.
 create policy "file a claim"
   on the_commons.filings for insert to authenticated
-  with check (filer = auth.uid());
+  with check (filer = auth.uid() and not coalesce((auth.jwt() ->> 'is_anonymous')::boolean, false));
 grant select on the_commons.filings to anon, authenticated;
 -- Once granted, the holder may paint the ground; nothing else on the row is theirs.
 create policy "paint your own granted plot"

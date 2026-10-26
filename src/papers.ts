@@ -1,7 +1,8 @@
 // Your papers: Form R-1, the application for residency. Filled in on the way
 // in, and amended whenever you like from the tag. Section A is how you look
 // (one of the Meadow's creatures, or a person made up from parts), B is the
-// name on file, C is keeping it all with a Google account.
+// name on file, which is also how you get back in, C says so. Before any of it,
+// the door: apply, come in under a name already on file, or just look round.
 
 import { CREATURES } from "./content/canon/creatures.ts";
 import {
@@ -14,15 +15,12 @@ export interface Papers {
   me: string;
   name: string;
   avatar: Avatar | null; // null on a first visit
-  pencilled: boolean; // anonymous: kept in this browser only
   save: (name: string, avatar: Avatar) => Promise<string | null>;
-  keep: () => Promise<string | null>; // off to Google
+  back?: () => void; // a first visit can go back to the door
   signOut: () => void;
 }
 
 const esc = (s: string) => s.replace(/[&<>"]/g, (c) => `&${{ "&": "amp", "<": "lt", ">": "gt", '"': "quot" }[c]};`);
-
-const GOOGLE = `<svg viewBox="0 0 48 48" width="18" height="18" aria-hidden="true"><path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3C33.7 32.7 29.2 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34 6.1 29.3 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20 20-8.9 20-20c0-1.3-.1-2.4-.4-3.5z"/><path fill="#FF3D00" d="m6.3 14.7 6.6 4.8C14.7 15.1 19 12 24 12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34 6.1 29.3 4 24 4 16.3 4 9.7 8.3 6.3 14.7z"/><path fill="#4CAF50" d="M24 44c5.2 0 9.9-2 13.4-5.2l-6.2-5.2C29.2 35.1 26.7 36 24 36c-5.2 0-9.6-3.3-11.3-8l-6.5 5C9.5 39.6 16.2 44 24 44z"/><path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.2-2.2 4.2-4.1 5.6l6.2 5.2C37 39.2 44 34 44 24c0-1.3-.1-2.4-.4-3.5z"/></svg>`;
 
 /** A sprite drawn small and crisp onto a fresh canvas, for a card or a chip. */
 function mini(a: Avatar | null, scale: number, w: number, h: number, sprite = a && spriteOf(a)) {
@@ -58,7 +56,7 @@ export function openPapers(p: Papers) {
         <p class="meta">${first
           ? "Welcome. Before you go in, Gary needs a few particulars. There are three sections. He has numbered them."
           : "Amend whatever you like. Gary will initial it."}</p>
-        ${first ? "" : `<button type="button" class="close" aria-label="Close">×</button>`}
+        <button type="button" class="close" aria-label="Close">×</button>
       </header>
 
       <section>
@@ -81,17 +79,15 @@ export function openPapers(p: Papers) {
       </section>
 
       <section>
-        <h2><span class="sec">C</span>Keeping your papers</h2>
-        ${p.pencilled
-          ? `<p>Your papers are <b>pencilled in</b>: they live in this browser and nowhere else. Sign them with Google and they'll keep — the same plots, the same name, on any device. Already a resident elsewhere? The same button finds you.</p>`
-          : `<p class="kept"><span class="stamp approved">Kept on file</span> Signed with Google. You can come back from anywhere. <button type="button" class="link signout">Sign out</button></p>`}
+        <h2><span class="sec">C</span>Coming back</h2>
+        <p>Your name is the key to these papers. Give it at the gate, on any device, and you're back on file. So is anyone else who gives it. Gary considers this adequate.
+          ${first ? "" : `<button type="button" class="link signout">Leave the commons</button>`}</p>
       </section>
 
       <footer>
         <p class="problem" role="alert"></p>
         <div class="actions">
-          ${first ? "" : `<button type="button" class="cancel">Cancel</button>`}
-          ${p.pencilled ? `<button type="button" class="google">${GOOGLE}<span>${first ? "Submit and sign with Google" : "Sign with Google"}</span></button>` : ""}
+          <button type="button" class="cancel">${first ? "Back" : "Cancel"}</button>
           <button class="submit">${first ? "Submit application" : "File amendment"}</button>
         </div>
       </footer>
@@ -186,7 +182,7 @@ export function openPapers(p: Papers) {
   const stage = $<HTMLCanvasElement>(".stage canvas");
   let raf = 0;
   const tick = (now: number) => {
-    if (kind === "human") portrait(stage, looksLike(name, { human }, p.me), 8, (Math.floor(now / 320) % 2) as 0 | 1, Math.floor(now / 2600) % 2 === 1);
+    if (kind === "human") portrait(stage, looksLike(name, { human }), 8, (Math.floor(now / 320) % 2) as 0 | 1, Math.floor(now / 2600) % 2 === 1);
     raf = requestAnimationFrame(tick);
   };
   raf = requestAnimationFrame(tick);
@@ -220,19 +216,15 @@ export function openPapers(p: Papers) {
     $(".approved-stamp").hidden = false;
     setTimeout(close, 950);
   });
-  // Off to Google even if the papers wouldn't file: a resident from elsewhere,
-  // retyping their own name, finds it taken by themselves until they're back.
-  root.querySelector(".google")?.addEventListener("click", async () => {
-    if (busy) return;
-    if (name.trim()) await submit();
-    const err = await p.keep();
-    if (err) problem(`Google would not take the papers: ${err}`);
-  });
   root.querySelector(".signout")?.addEventListener("click", p.signOut);
-  root.querySelector(".cancel")?.addEventListener("click", close);
-  root.querySelector(".close")?.addEventListener("click", close);
+  const cancel = () => {
+    close();
+    p.back?.();
+  };
+  root.querySelector(".cancel")!.addEventListener("click", cancel);
+  root.querySelector(".close")!.addEventListener("click", cancel);
   const escape = (e: KeyboardEvent) => {
-    if (e.key === "Escape" && !first) close();
+    if (e.key === "Escape") cancel();
   };
   window.addEventListener("keydown", escape);
 
@@ -248,6 +240,62 @@ export function openPapers(p: Papers) {
   renderParts();
   refresh();
   if (first && !matchMedia("(pointer: coarse)").matches) setTimeout(() => input.focus({ preventScroll: true }), 50);
+}
+
+/** The gate, for anyone not on file: apply, come in by name, or look round. */
+export function openDoor(o: { apply: () => void; logIn: (name: string) => Promise<string | null>; look: () => void }) {
+  stop?.();
+  const root = document.getElementById("papers")!;
+  root.innerHTML = `
+    <form class="papers door" novalidate>
+      <header>
+        <p class="form-no"><span>Form R-0</span><span>Admission</span></p>
+        <h1>The Commons</h1>
+        <p class="meta">Gary needs to know who you are. Or that you aren't anyone, which is also fine.</p>
+      </header>
+      <section>
+        <h2><span class="sec">A</span>Already on file</h2>
+        <input name="name" maxlength="24" autocomplete="nickname" placeholder="The name on your papers">
+        <p class="problem" role="alert"></p>
+        <div class="actions"><button class="submit">Come in</button></div>
+      </section>
+      <section>
+        <h2><span class="sec">B</span>New here</h2>
+        <p>Apply for residency: a look, a name, and you can file for a plot.</p>
+        <div class="actions"><button type="button" class="apply">Apply for residency</button></div>
+      </section>
+      <section>
+        <h2><span class="sec">C</span>Just looking</h2>
+        <p>Look round as a guest. Guests can't file, and Gary can't see them very well.</p>
+        <div class="actions"><button type="button" class="look">Look round</button></div>
+      </section>
+    </form>`;
+  root.hidden = false;
+  const $ = <T extends HTMLElement = HTMLElement>(q: string) => root.querySelector<T>(q)!;
+  const close = () => {
+    root.hidden = true;
+    root.innerHTML = "";
+    stop = null;
+  };
+  stop = close;
+  const input = $<HTMLInputElement>("input[name=name]");
+  $("form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const name = input.value.trim();
+    if (!name) return void input.focus();
+    root.querySelectorAll("button").forEach((b) => (b.disabled = true));
+    const err = await o.logIn(name);
+    root.querySelectorAll("button").forEach((b) => (b.disabled = false));
+    if (err) $(".problem").textContent = err;
+  });
+  $(".apply").addEventListener("click", () => {
+    close();
+    o.apply();
+  });
+  $(".look").addEventListener("click", () => {
+    close();
+    o.look();
+  });
 }
 
 export const papersOpen = () => !document.getElementById("papers")!.hidden;

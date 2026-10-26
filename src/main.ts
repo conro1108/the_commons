@@ -6,8 +6,8 @@ import {
   LANDMARKS, MAP_H, MAP_W, REGIONS, ZOOM, plotAt, plotById, plotLabel, route, slide, walkable, type PlotDef, type Point,
 } from "./world/index.ts";
 import {
-  APPEALS, HELD, afterGoogle, nextCourt, avatarOf, fileAppeal, fileClaim, handlesFor, keepPapers, loadAppeals, loadFilings, loadPlacements, move, paint,
-  pencilled, place, rehandle, saveProfile, signIn, summonGary, supabase, unplace,
+  APPEALS, HELD, nextCourt, avatarOf, fileAppeal, fileClaim, handlesFor, isGuest, keepPapers, logIn, loadAppeals, loadFilings, loadPlacements, move, paint,
+  place, rehandle, saveProfile, signIn, summonGary, supabase, unplace,
   type Appeal, type Filing, type Placement,
 } from "./net.ts";
 import type { RealtimeChannel } from "@supabase/supabase-js";
@@ -18,7 +18,7 @@ import {
 import { BOARD_BOX } from "./map/landmarks.ts";
 import { GARY_LINES, garyAt } from "./life.ts";
 import { looksLike } from "./avatar.ts";
-import { openPapers, papersOpen } from "./papers.ts";
+import { openDoor, openPapers, papersOpen } from "./papers.ts";
 
 const SPEED = 40; // art pixels per second
 const ZOOM_MS = 520; // map <-> plot
@@ -78,8 +78,8 @@ const pad = (n: number) => String(n).padStart(4, "0");
 const esc = (s: string) => s.replace(/[&<>"]/g, (c) => `&${{ "&": "amp", "<": "lt", ">": "gt", '"': "quot" }[c]};`);
 const touch = matchMedia("(pointer: coarse)").matches;
 const phone = matchMedia("(max-width: 600px)"); // papers sit along the bottom, the card as a sheet
-const lookOf = (id: string) => looksLike(handles.get(id), avatarOf(id), id);
-const who = (id: string) => (id === me ? "you" : (handles.get(id) ?? "a resident"));
+const lookOf = (id: string) => looksLike(handles.get(id), avatarOf(id));
+const who = (id: string) => (id === me ? "you" : !avatarOf(id) ? "a guest" : (handles.get(id) ?? "a resident"));
 const clamp = (v: number, lo: number, hi: number) => Math.min(Math.max(v, lo), Math.max(lo, hi));
 
 /** Who holds what, as far as we know: a ruling still in the post reads as pending until its letter opens. */
@@ -203,24 +203,38 @@ function conditionHtml(f: Filing) {
 }
 
 // Your papers: name and look, amended from the tag whenever you like.
-let kept = false; // signed with Google, not just pencilled into this browser
+let guest = true; // only looking round: no name on file, can't file
 
 function papers() {
   openPapers({
     me,
     name: handles.get(me) ?? "",
     avatar: avatarOf(me),
-    pencilled: !kept,
     save: async (name, avatar) => {
-      const problem = await saveProfile(me, name, avatar);
+      const problem = (await saveProfile(me, name, avatar)) ?? (guest ? await keepPapers() : null);
       if (!problem) {
+        guest = false;
         channel?.send({ type: "broadcast", event: "renamed", payload: { id: me } });
         renderAll();
       }
       return problem;
     },
-    keep: keepPapers,
-    signOut: () => void supabase.auth.signOut(),
+    back: guest ? door : undefined,
+    signOut: () => void supabase.auth.signOut({ scope: "local" }),
+  });
+}
+
+/** The gate: apply, come in under a name already on file, or look round as a guest. */
+function door() {
+  localStorage.removeItem("looking");
+  openDoor({
+    apply: papers,
+    logIn: async (name) => {
+      const problem = await logIn(name);
+      if (!problem) location.reload();
+      return problem;
+    },
+    look: () => localStorage.setItem("looking", "1"),
   });
 }
 
@@ -231,8 +245,9 @@ function renderTag() {
     .sort((a, b) => a.plot - b.plot);
   const mine = handles.get(me) ?? "…";
   $("tag").innerHTML = `<h1>The Commons</h1><p class="meta">Administered by Gary. Here: ${names.map(esc).join(", ")}</p>
-    <p class="meta">On file as <button class="plot-link rename" title="Amend your papers">${esc(mine)}</button>
-      ${kept ? "" : `<button class="plot-link keep" title="Pencilled in: kept in this browser only">pencilled in</button>`}</p>
+    <p class="meta">${guest
+      ? `Looking round as a guest. <button class="plot-link door">Come in</button>`
+      : `On file as <button class="plot-link rename" title="Amend your papers">${esc(mine)}</button>`}</p>
     ${held.length
       ? `<p class="yours"><span class="swatch" style="background:${colourOf(me)}"></span>${held
           .map((f) => `<button data-filing="${f.id}" class="plot-link ${unread.has(f.id) ? "pending" : f.status}" title="${esc(labelOf(f.plot))}">${f.plot}</button>`)
@@ -241,7 +256,8 @@ function renderTag() {
   for (const b of $("tag").querySelectorAll<HTMLButtonElement>("[data-filing]")) {
     b.addEventListener("click", () => visit(filings.get(Number(b.dataset.filing))!));
   }
-  for (const b of $("tag").querySelectorAll(".rename, .keep")) b.addEventListener("click", papers);
+  $("tag").querySelector(".rename")?.addEventListener("click", papers);
+  $("tag").querySelector(".door")?.addEventListener("click", door);
 }
 
 /** Go to one of our plots: inside if it's granted, otherwise its card on the map. */
@@ -300,9 +316,11 @@ function renderCard() {
     const denial = appealableOn(plot);
     body = `${particulars(def)}
       ${denial ? `<p class="meta">Gary denied your Filing ${pad(denial.id)} here. <button class="plot-link" data-reply="${denial.id}">Appeal it</button></p>` : ""}
-      <form><label class="intent">Your intent, in one breath
+      ${guest
+        ? `<p class="meta">Guests can't file. <button class="plot-link door">Come in</button> and you can.</p>`
+        : `<form><label class="intent">Your intent, in one breath
       <textarea rows="2" maxlength="120" placeholder="a bench, for looking at the pond with" required></textarea></label>
-      <button>Submit to Gary</button><p class="problem"></p></form>`;
+      <button>Submit to Gary</button><p class="problem"></p></form>`}`;
   }
   card.innerHTML = `<div class="bar"><button class="fold" aria-label="${folded ? "Unfold" : "Fold up"}">${folded ? "+" : "–"}</button><button class="close" aria-label="Close">×</button></div>${body}`;
   card.classList.toggle("folded", folded);
@@ -313,6 +331,7 @@ function renderCard() {
     renderCard();
   });
   if (f) card.querySelector(".enter")?.addEventListener("click", () => walkInto(f));
+  card.querySelector(".door")?.addEventListener("click", door);
   card.querySelector<HTMLButtonElement>("[data-reply]")?.addEventListener("click", (e) =>
     openCard(plot, Number((e.currentTarget as HTMLButtonElement).dataset.reply)));
   const form = card.querySelector("form");
@@ -1424,9 +1443,8 @@ async function again<T>(load: () => Promise<T>): Promise<T> {
 }
 
 async function start() {
-  if (await afterGoogle()) return; // off to Google again, as the resident that account already is
   me = await again(signIn);
-  kept = !(await pencilled());
+  guest = await isGuest();
   const [loaded, placed, appealed] = await again(() => Promise.all([loadFilings(), loadPlacements(), loadAppeals()]));
   for (const f of loaded) upsert(f);
   for (const a of appealed) setAppeal(a);
@@ -1495,7 +1513,7 @@ async function start() {
 
   renderAll();
   requestAnimationFrame(frame);
-  if (!avatarOf(me)) papers(); // first time through the gate
+  if (guest && !localStorage.getItem("looking")) door();
 }
 
 resize();

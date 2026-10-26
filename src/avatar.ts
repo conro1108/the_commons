@@ -20,7 +20,7 @@ export function parseAvatar(x: unknown): Avatar | null {
 
 const strangers = new Map<string, Avatar>();
 
-/** Someone who hasn't chosen yet: a person, the same one on every screen. */
+/** A starting face for the papers: a person, the same one for the same id. */
 export function stranger(id: string): Avatar {
   let found = strangers.get(id);
   if (!found) {
@@ -36,12 +36,29 @@ export function stranger(id: string): Avatar {
   return found;
 }
 
-export const spriteOf = (a: Avatar, step: 0 | 1 = 0): PropDef =>
-  "meadow" in a ? (a.meadow === "mole" ? MOLE : CREATURES[a.meadow]) : humanSprite(a.human, step);
+/** A guest, who hasn't chosen anything and so is mostly sheet. */
+const GHOST: PropDef = {
+  rows: [
+    "..ggggg..",
+    ".gwwwwwg.",
+    "gwwwwwwwg",
+    "gwwkwkwwg",
+    "gwwwwwwwg",
+    "gwwwwwwwg",
+    "gwwwwwwwg",
+    "gwwwwwwwg",
+    "gwgwwwgwg",
+    ".g.ggg.g.",
+  ],
+  palette: { g: "#85828b", w: "#c4c1c7", k: "#5d5a63" },
+};
 
-/** As in the Meadow: anyone named Connor is a mole, whatever they picked. */
-export const looksLike = (name: string | undefined, chosen: Avatar | null, id: string): Avatar =>
-  name?.trim().toLowerCase() === "connor" ? { meadow: "mole" } : (chosen ?? stranger(id));
+export const spriteOf = (a: Avatar, step: 0 | 1 = 0): PropDef =>
+  "meadow" in a ? (a.meadow === "mole" ? MOLE : a.meadow === "ghost" ? GHOST : CREATURES[a.meadow]) : humanSprite(a.human, step);
+
+/** As in the Meadow: anyone named Connor is a mole, whatever they picked. Anyone who hasn't picked is a ghost. */
+export const looksLike = (name: string | undefined, chosen: Avatar | null): Avatar =>
+  name?.trim().toLowerCase() === "connor" ? { meadow: "mole" } : (chosen ?? { meadow: "ghost" });
 
 export const widthOf = (s: PropDef) => Math.max(...s.rows.map((r) => r.length));
 

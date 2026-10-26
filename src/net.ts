@@ -69,39 +69,40 @@ export async function signIn(): Promise<string> {
   return signed.user.id;
 }
 
-/** Whether these papers are only pencilled in: an anonymous session, gone with the browser. */
-export async function pencilled(): Promise<boolean> {
+/** Whether we're only looking round: an anonymous session, with no name to come back by. */
+export async function isGuest(): Promise<boolean> {
   const { data } = await supabase.auth.getUser();
   return data.user?.is_anonymous ?? true;
 }
 
-const back = () => ({ redirectTo: location.origin + location.pathname });
+async function door(body: object, token?: string): Promise<{ token?: string; error?: string }> {
+  try {
+    const res = await fetch("/api/door", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...(token && { Authorization: `Bearer ${token}` }) },
+      body: JSON.stringify(body),
+    });
+    return await res.json();
+  } catch {
+    return { error: "Gary's door is stuck. Try again in a moment." };
+  }
+}
 
-/**
- * Keep these papers: put a Google account on the anonymous user we already
- * are, so the same id, plots and profile survive a cleared browser. Leaves the
- * page for Google and comes back.
- */
+/** Papers just filed by a guest: keep them, so the name will let them back in from anywhere. */
 export async function keepPapers(): Promise<string | null> {
-  const { error } = await supabase.auth.linkIdentity({ provider: "google", options: back() });
-  return error && error.message;
+  const { data } = await supabase.auth.getSession();
+  const { error } = await door({ keep: true }, data.session?.access_token);
+  if (error) return error;
+  await supabase.auth.refreshSession(); // the new papers say we're no longer a guest
+  return null;
 }
 
-/** Sign in as a resident from another browser: whoever that Google account already is. */
-export async function signInWithGoogle(): Promise<string | null> {
-  const { error } = await supabase.auth.signInWithOAuth({ provider: "google", options: back() });
-  return error && error.message;
-}
-
-/**
- * Back from Google with an account that's already somebody's: linking can't
- * merge two residents, so become that one instead. True if we're off again.
- */
-export async function afterGoogle(): Promise<boolean> {
-  const query = new URLSearchParams(location.search + "&" + location.hash.slice(1));
-  if (query.get("error_code") !== "identity_already_exists") return false;
-  history.replaceState(null, "", location.pathname);
-  return !(await signInWithGoogle());
+/** Come in as the resident by that name, whoever's browser this is. */
+export async function logIn(name: string): Promise<string | null> {
+  const { token, error } = await door({ name });
+  if (!token) return error ?? "Nobody by that name is on file.";
+  const { error: refused } = await supabase.auth.verifyOtp({ token_hash: token, type: "magiclink" });
+  return refused && refused.message;
 }
 
 export async function loadFilings(): Promise<Filing[]> {

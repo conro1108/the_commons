@@ -92,7 +92,7 @@ No fail states: spread is never damage, a dispute is never a loss.
 | Service | Its job here |
 |---|---|
 | **Supabase Postgres + RLS** | All state. Clients write directly only where RLS can judge it alone (props on your own plot, a filing row in `pending`). |
-| **Supabase Auth** | Anonymous sign-in; Google via `linkIdentity()` keeps your papers (same uuid). Look and name live in `app.profiles`, filled in on Form R-1 (`src/papers.ts`). |
+| **Supabase Auth** | Your name is your key: no password, anyone who gives it is you. Guests are anonymous sessions (grey ghosts, can't file). Filing papers gives the user a never-sent `<id>@the-commons.invalid` address; `api/door.ts` hands out one-time tokens for it by name. Look and name live in `app.profiles`, filled in on Form R-1 (`src/papers.ts`). |
 | **Supabase Realtime** | Postgres Changes for the map and stamps; **Broadcast** for avatars walking around (never persisted); **Presence** for who's on the commons, which also feeds path wear. |
 | **pg_cron** | The world tick (every few minutes) and draining Gary's queue (every five seconds). Vercel Hobby crons are daily-only, so anything frequent lives here. |
 | **Supabase Queues (pgmq)** | Gary's in-tray. A filing insert enqueues; retries and backlog for free. |
@@ -173,9 +173,3 @@ questions).
   and have `logic.sql` unschedule its own jobs before rescheduling.
 - One commons for everyone, or several (a "parish" per N players)?
 - How big is a plot, and does the map grow as people arrive?
-- **Identity: persistent accounts via Google** (and maybe GitHub), so a plot
-  survives a cleared browser. Plan: Supabase Auth's Google provider +
-  `linkIdentity()`, which upgrades the anonymous user in place — same uuid,
-  same plot, same `app.profiles` row. Not Clerk or similar: those users never
-  land in `auth.users`, breaking the toybox rule. Needs a Google OAuth client
-  and the provider enabled on the shared project (benefits every sibling).
