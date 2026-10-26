@@ -8,12 +8,12 @@ Branch `worktree-agent-acc722659ac2419b9`. Resume from the first unticked step.
 - [x] 4. Storage: shelves, bookcase, cabinets, drawers, chests.
 - [x] 5. Things that hold things (group "Racks"): racks, peg board, hooks, coat stand, trophy cabinet, display case. Held things in group "Held" so stock resolves.
 - [x] 6. Underfoot: rugs, mats, tatami, doormat. Flat, no ink outline, drawn first.
-- [ ] 7. Kitchen and shop: counter, stove, sink, fridge, vending machine, dresser, till.
-- [ ] 8. Sleeping and washing: beds, bath, hot tub, screen.
-- [ ] 9. Light and growing: lamps, plants, fireplace, wood stove.
-- [ ] 10. Walls: chalkboard, cork board, mirror, picture, clock, shelves.
-- [ ] 11. Odds: punching bag, gong, piano, easel, fish tank, etc.
-- [ ] 12. More small held things (books, cups, kettle...).
+- [x] 7. Kitchen and shop: counter, stove, sink, fridge, vending machine, dresser, till.
+- [x] 8. Sleeping and washing: beds, bath, hot tub, screen.
+- [x] 9. Light and growing: lamps, plants, fireplace, wood stove.
+- [x] 10. Walls: chalkboard, cork board, mirror, picture, clock, shelves.
+- [x] 11. Odds: punching bag, gong, piano, easel, fish tank, etc.
+- [x] 12. More small held things (books, cups, kettle...).
 - [ ] 13. Floors and wall finishes (tileable).
 - [ ] 14. Register fittings as props (one line in props.ts) so placements draw; throws on a key collision.
 - [x] 15. (done early, to judge as I go) `dev/library.html` + `dev/library.ts`: every piece on a floor/wall patch, footprint and slots marked; ?scale ?floor ?wall ?stock ?slots ?only ?group ?room.
