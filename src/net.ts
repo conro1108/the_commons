@@ -2,6 +2,7 @@ import { createClient, isAuthRetryableFetchError, type PostgrestError } from "@s
 import type { PropDef } from "./content/canon/props.ts";
 import { parseAvatar, type Avatar } from "./avatar.ts";
 import type { Room, Schedule, Shell, Where } from "./schedule.ts";
+import { TAG_COLUMNS, type Tag } from "./letter.ts";
 
 export const supabase = createClient(
   import.meta.env.VITE_SUPABASE_URL,
@@ -315,4 +316,41 @@ export async function loadPieces(names: string[]): Promise<Map<string, PropDef>>
   const { data } = await supabase.from("pieces").select("name, sprite").in("name", names);
   for (const p of data ?? []) if (p.sprite) out.set(p.name, p.sprite);
   return out;
+}
+
+// --- the letter: Gary's questions, red tags, the pound (src/letter.ts) ---------
+
+export async function loadTags(): Promise<Tag[]> {
+  const { data, error } = await supabase.from("tags").select(TAG_COLUMNS).order("id").limit(2000);
+  if (error) throw error;
+  return data;
+}
+
+/** Answer Gary's question about something on your plot. Once; he rules on it straight away. */
+export async function answerTag(id: number, answer: string): Promise<string | null> {
+  const { data, error } = await supabase.from("tags").update({ answer }).eq("id", id).is("answer", null).select("id");
+  if (error) return error.code === "23514" ? "An answer must be between 1 and 200 characters." : said(error);
+  return data.length ? null : "Gary has already had an answer to that one.";
+}
+
+/** Get something back from the pound: where it was, or at x, y. False if that spot's taken. */
+export async function reclaim(id: number, x?: number, y?: number): Promise<boolean | string> {
+  const { data, error } = await supabase.rpc("reclaim", { p_id: id, p_x: x ?? null, p_y: y ?? null });
+  return error ? said(error) : data;
+}
+
+/** Double-click Gary: he comes round your plots with the schedule. How many he's gone to. */
+export async function summonRounds(): Promise<number | null> {
+  const { data, error } = await supabase.rpc("summon_rounds");
+  return error ? null : data;
+}
+
+/**
+ * File for a red-tagged thing: retrospective permission. A stub until slice C's
+ * variations land: C files a variation for the thing here, marked as for this
+ * tag, and api/gary.ts retrospective() says what's owed (dearer than asking
+ * first: usually a condition). Returns a clerk's explanation, or null if filed.
+ */
+export async function fileRetrospective(_tag: Tag): Promise<string | null> {
+  return "The variations desk isn't open yet. Take it down for now, or wait and see.";
 }

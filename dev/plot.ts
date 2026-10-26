@@ -1,8 +1,10 @@
-// One plot up close, with made-up building on it. ?plot=N, ?scale=3, ?hour=, ?bare=1 for nothing built. No network.
+// One plot up close, with made-up building on it. ?plot=N, ?scale=3, ?hour=, ?bare=1 for nothing built,
+// ?letter=1 for a red tag on the beehive and a questionnaire by the gate. No network.
 
 import { drawFocus, focusSize } from "../src/closeup.ts";
 import { plotById } from "../src/world/index.ts";
 import type { Filing, Placement } from "../src/net.ts";
+import { fakeTag } from "./letter.ts";
 
 const q = new URLSearchParams(location.search);
 const plot = plotById(Number(q.get("plot") ?? 12))!;
@@ -26,5 +28,6 @@ const filing: Filing = {
 };
 const props = ["bench", "tree", "flowers", "beehive", "lamppost", "goose"];
 const built: Placement[] = q.get("bare") ? [] : props.map((prop, k) => ({ id: k + 1, filing: 1, x: 2 + ((k * 7) % Math.max(1, plot.w - 8)), y: Math.max(0, mid - 5 + (k % 2) * 7), prop }));
+const tags = q.get("letter") && built.length > 5 ? [fakeTag(4, 1, "tagged"), fakeTag(6, 1, "asked")] : undefined;
 ctx.setTransform(S, 0, 0, S, 0, 0);
-drawFocus(ctx, { plot, filing, built, mine: true, ghost: null, brush: null, hover: null }, performance.now() + 1e6);
+drawFocus(ctx, { plot, filing, built, mine: true, ghost: null, brush: null, hover: null, tags }, performance.now() + 1e6);

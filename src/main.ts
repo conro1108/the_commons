@@ -8,6 +8,7 @@ import {
 import {
   APPEALS, HELD, nextCourt, avatarOf, fileAppeal, fileClaim, handlesFor, isGuest, keepPapers, logIn, loadAppeals, loadFilings, loadPlacements, move, paint,
   place, rehandle, saveProfile, signIn, summonGary, supabase, unplace,
+  answerTag, fileRetrospective, loadTags, reclaim, summonRounds,
   type Appeal, type Filing, type Placement,
 } from "./net.ts";
 import { fileChangeOfUse, fileVariation, loadVariations, type Variation } from "./net.ts";
@@ -21,6 +22,7 @@ import { BOARD_BOX } from "./map/landmarks.ts";
 import { GARY_LINES, garyAt } from "./life.ts";
 import { looksLike } from "./avatar.ts";
 import { openDoor, openPapers, papersOpen } from "./papers.ts";
+import { isWaiting, letterHtml, poundHtml, thingName, type Tag } from "./letter.ts";
 
 const SPEED = 40; // art pixels per second
 const ZOOM_MS = 520; // map <-> plot
@@ -313,7 +315,7 @@ function renderCard() {
   } else if (f) {
     body = `<h2>${esc(plotLabel(def))}</h2><p class="meta where">${esc(REGIONS[def.region].name)}</p>
       <p>Held by ${esc(who(f.filer))}: <q>${esc(f.intent)}</q></p>
-      ${enter}${ruling(f, fresh)}${worksHtml(f)}${conditionHtml(f)}${variationsHtml(f)}<p class="meta">Filing ${pad(f.id)}</p>`;
+      ${enter}${ruling(f, fresh)}${worksHtml(f)}${conditionHtml(f)}${letterFor(f)}${variationsHtml(f)}<p class="meta">Filing ${pad(f.id)}</p>`;
   } else {
     const denial = appealableOn(plot);
     body = `${particulars(def)}
@@ -337,7 +339,8 @@ function renderCard() {
   card.querySelector<HTMLButtonElement>("[data-reply]")?.addEventListener("click", (e) =>
     openCard(plot, Number((e.currentTarget as HTMLButtonElement).dataset.reply)));
   if (f) wireVariation(f, typed, typing);
-  const form = card.querySelector<HTMLFormElement>("form:not(.vary)");
+  wireLetter(card);
+  const form = card.querySelector<HTMLFormElement>("form:not(.vary):not(.answer)");
   if (form) {
     const box = form.querySelector("textarea")!;
     box.value = typed;
@@ -588,9 +591,11 @@ function renderBuildInfo() {
   $("build-info").innerHTML = `<h2>${esc(plotLabel(p))}</h2><p class="meta where">${esc(REGIONS[p.region].name)}, ${Math.round(p.area / 10) * 10} sq. yd.</p>
     <p>${f.filer === me ? "Yours" : `Held by ${esc(who(f.filer))}`}: <q>${esc(f.intent)}</q></p>
     ${foldCondition(f)}
+    ${letterFor(f)}
     ${f.filer === me
       ? `<p class="hint">Building on a granted plot needs no further paperwork. Gary finds this difficult.</p>`
       : `<p class="meta">${count ? `${count} thing${count === 1 ? "" : "s"} built.` : "Nothing built yet."}</p>`}`;
+  wireLetter($("build-info"));
   $("tool-hint").textContent = HINTS[tool.split(":")[0]];
   if (f.filer === me) {
     if (drawnHere(f).map((d) => d.look).join() !== drawnKey) renderPalette();
@@ -755,6 +760,7 @@ function renderAll() {
   renderTag();
   renderCard();
   renderBoard();
+  renderPound();
 }
 
 // --- canvas and views --------------------------------------------------------
@@ -885,7 +891,7 @@ function drawZoom(now: number) {
     ox: Math.round(from.x + (to.x - from.x) * k - s * left),
     oy: Math.round(from.y + (to.y - from.y) * k - s * top),
   });
-  draw(ctx, { held: heldPlots(), built, me, hover: null, selected: null, walkers: [...walkers.values()], look: lookOf, letters: [], t: Date.now(), recent: recent() });
+  draw(ctx, { held: heldPlots(), built, me, hover: null, selected: null, walkers: [...walkers.values()], look: lookOf, letters: [], t: Date.now(), recent: recent(), tags: tagsOf, pound: pounded });
   const fade = Math.max(0, (u - 0.65) / 0.35);
   if (fade > 0) {
     ctx.globalAlpha = fade;
@@ -937,13 +943,15 @@ function brushAt(bx: number, by: number): Cells {
 function focusScene(f: Filing): FocusScene {
   const mine = f.filer === me && !zoom;
   const ps = built.get(f.id) ?? [];
-  const scene: FocusScene = { plot: plotOf(f), filing: f, built: ps, mine: f.filer === me, ghost: null, brush: null, hover: null };
+  const scene: FocusScene = { plot: plotOf(f), filing: f, built: ps, mine: f.filer === me, ghost: null, brush: null, hover: null, tags: tagsOf.get(f.id) };
   if (!mine || !pointer) return scene;
   const [kind, arg] = tool.split(":");
   if (drag) {
     const moved = { ...drag.p, x: drag.x, y: drag.y };
     scene.built = ps.map((p) => (p.id === moved.id ? moved : p));
     scene.hover = { p: moved, colour: "#fff8e0" };
+  } else if (kind === "reclaim") {
+    scene.ghost = handGhost(f, pointer);
   } else if (kind === "prop" || kind === "item") {
     const prop = sized(kind === "item" ? drawnAs(tool.slice(5)) : arg, size);
     scene.ghost = { id: 0, filing: f.id, prop, ...propAt(prop, pointer.x, pointer.y) };
@@ -1046,7 +1054,7 @@ function paintTo(to: Cells) {
 canvas.addEventListener("pointerdown", (e) => {
   if (!focus || zoom || !mineInFocus()) return;
   const [kind] = tool.split(":");
-  placing = e.button === 0 && (kind === "prop" || kind === "item");
+  placing = e.button === 0 && (kind === "prop" || kind === "item" || kind === "reclaim");
   const b = toBuild(e);
   if (!b) return void (placing = false);
   pointer = b;
@@ -1103,7 +1111,7 @@ canvas.addEventListener("pointerup", async (e) => {
     if (e.pointerType !== "mouse") pointer = null;
     if (!at || !focus) return;
     const [kind, arg] = tool.split(":");
-    return void (kind === "item" ? placeAt("item", at, tool.slice(5)) : placeAt(arg, at));
+    return void (kind === "item" ? placeAt("item", at, tool.slice(5)) : kind === "reclaim" ? putBack(at) : placeAt(arg, at));
   }
   if (stroke && focus) {
     const { before } = stroke;
@@ -1258,8 +1266,8 @@ function speak(line?: string) {
 
 /** Double-clicked, Gary comes round your outstanding conditions now. */
 async function summon() {
-  const n = await summonGary();
-  speak(n === null ? "Not now. The kettle." : n ? "Right. I'll come round now." : "Nothing outstanding that I haven't already seen.");
+  const [n, r] = await Promise.all([summonGary(), summonRounds()]);
+  speak(n === null && r === null ? "Not now. The kettle." : n || r ? "Right. I'll come round now." : "Nothing outstanding that I haven't already seen.");
 }
 
 // Hold the notice board for three seconds and the back office opens (src/backoffice.ts).
@@ -1290,6 +1298,7 @@ canvas.addEventListener("click", (e) => {
   heading = null;
   const p = toArt(e, mapView);
   if (onGary(p)) return speak();
+  if (onHut(p)) return goTo(LANDMARKS.office.at.x, LANDMARKS.office.at.y, openPound);
   if (onBoard(p)) {
     closeCard();
     return goTo(LANDMARKS.board.at.x, LANDMARKS.board.at.y, openBoard);
@@ -1304,6 +1313,173 @@ canvas.addEventListener("click", (e) => {
   release();
   walkAlong(p.x, p.y);
 });
+
+// --- the letter: Gary's questions, red tags, the pound (src/letter.ts) --------
+
+const tags = new Map<number, Tag>();
+let tagsOf = new Map<number, Tag[]>(); // filing -> its tags, for the map and up close; replaced on change
+// Questions Gary asked while we were about (Realtime brought them, so we're present):
+// he's at the gate, rather than leaving a questionnaire on the door.
+const askedHere = new Set<number>();
+const answering = new Map<number, string>(); // answers half typed, kept across re-renders
+let typingTag: number | null = null; // and which one has the cursor
+let pounded = 0; // things in the pound, anyone's: the crates by the hut
+HINTS.reclaim = `${touch ? "Touch, slide and let go" : "Click"} to put it back where you like.`;
+
+function setTag(t: Tag) {
+  tags.set(t.id, t);
+  tagsOf = new Map();
+  for (const x of tags.values()) tagsOf.set(x.filing, [...(tagsOf.get(x.filing) ?? []), x]);
+}
+
+async function loadLetter() {
+  try {
+    for (const t of await loadTags()) setTag(t);
+    renderAll();
+  } catch {
+    // No tags table yet (or a blip): the commons works without the letter.
+  }
+}
+
+/** A tag as the database now has it. A new question on our plot means Gary's at the gate now. */
+function tagArrived(t: Tag, fresh: boolean) {
+  const was = tags.get(t.id);
+  setTag(t);
+  const f = filings.get(t.filing);
+  if (f?.filer !== me) return renderAll();
+  if (fresh && isWaiting(t)) {
+    askedHere.add(t.id);
+    if (!focus) {
+      speak(t.question);
+      openCard(f.plot);
+    }
+  } else if (was?.status === "asked" && t.status !== "asked" && t.reply && !focus) speak(t.reply);
+  renderAll();
+}
+
+/** The letter on a plot's paper: questions, red tags, certificates. */
+const letterFor = (f: Filing) => letterHtml(tagsOf.get(f.id) ?? [], { mine: f.filer === me, here: askedHere });
+
+/** Wire up the letter's forms and buttons in a paper just rendered. */
+function wireLetter(paper: HTMLElement) {
+  for (const box of paper.querySelectorAll<HTMLElement>("[data-tag]")) {
+    const t = tags.get(Number(box.dataset.tag));
+    if (!t) continue;
+    const form = box.querySelector<HTMLFormElement>("form.answer");
+    if (form) {
+      const text = form.querySelector("textarea")!;
+      text.value = answering.get(t.id) ?? "";
+      if (typingTag === t.id) text.focus();
+      text.addEventListener("input", () => answering.set(t.id, text.value));
+      text.addEventListener("focus", () => void (typingTag = t.id));
+      // Re-rendering takes the box away from under the cursor; only a real blur lets go.
+      text.addEventListener("blur", () => void (text.isConnected && typingTag === t.id && (typingTag = null)));
+      text.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
+          e.preventDefault();
+          form.requestSubmit();
+        }
+      });
+      form.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const button = form.querySelector("button")!;
+        button.disabled = true;
+        const problem = await answerTag(t.id, text.value.trim());
+        button.disabled = false;
+        if (problem) return void (form.querySelector(".problem")!.textContent = problem);
+        answering.delete(t.id);
+        setTag({ ...t, answer: text.value.trim(), answered_at: new Date().toISOString() });
+        renderAll();
+      });
+    }
+    box.querySelector(".take-down")?.addEventListener("click", () => {
+      const p = t.placement !== null ? placements.get(t.placement) : null;
+      if (!p) return;
+      removePlacement(p.id);
+      unplace(p.id).then((ok) => ok || setPlacement(p));
+    });
+    box.querySelector(".file-for")?.addEventListener("click", async () => {
+      const problem = await fileRetrospective(t);
+      box.querySelector(".problem")!.textContent = problem ?? "";
+      if (!problem) renderAll();
+    });
+  }
+}
+
+// The pound, behind Gary's hut: your impounded things, and getting them back.
+const pound = Object.assign(document.createElement("div"), { id: "pound", className: "paper", hidden: true });
+$("field").append(pound);
+
+const onHut = (p: { x: number; y: number }) => {
+  const o = LANDMARKS.office;
+  return p.x >= o.x - 1 && p.x < o.x + o.w + 12 && p.y >= o.y - 10 && p.y < o.y + o.h;
+};
+
+function openPound() {
+  closeCard();
+  pound.hidden = false;
+  renderPound();
+}
+
+function renderPound() {
+  if (pound.hidden) return;
+  const mine = [...placements.values()].filter((p) => p.impounded_at && filings.get(p.filing)?.filer === me && !p.parent);
+  pound.innerHTML = poundHtml(mine.map((p) => ({
+    id: p.id, name: thingName(p.prop, p.label), plot: labelOf(filings.get(p.filing)!.plot),
+    icon: icon(`pound:${look(p)}`, () => propCanvas(look(p))), since: p.impounded_at!,
+  })));
+  pound.querySelector(".close")!.addEventListener("click", () => void (pound.hidden = true));
+  for (const li of pound.querySelectorAll<HTMLElement>("[data-placement]")) {
+    li.querySelector(".reclaim")!.addEventListener("click", () => void getBack(Number(li.dataset.placement)));
+  }
+}
+
+/** Back where it was if that's free; otherwise to its plot, in hand, to put down somewhere. */
+async function getBack(id: number) {
+  const p = placements.get(id);
+  if (!p) return;
+  const ok = await reclaim(id);
+  if (typeof ok === "string") return void (pound.querySelector(".problem")!.textContent = ok);
+  if (ok) {
+    setPlacement({ ...p, impounded_at: null });
+    pound.hidden = true;
+    speak(`There's your ${thingName(p.prop, p.label)}. It's back where it was.`);
+    return;
+  }
+  pound.hidden = true;
+  tool = `reclaim:${id}`;
+  enterFocus(filings.get(p.filing)!);
+  problem("Something's standing where it was. Put it down somewhere else.");
+}
+
+/** The thing in hand from the pound, if that's the tool and we're on its plot. */
+function inHand() {
+  const p = tool.startsWith("reclaim:") ? placements.get(Number(tool.slice(8))) : null;
+  return p && p.impounded_at && focus?.id === p.filing ? p : null;
+}
+
+window.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") pound.hidden = true;
+});
+
+function handGhost(f: Filing, at: { x: number; y: number }): Placement | null {
+  const p = inHand();
+  return p ? { ...p, id: 0, filing: f.id, prop: look(p), size: 1, label: null, ...propAt(look(p), at.x, at.y) } : null;
+}
+
+async function putBack(at: { x: number; y: number }) {
+  const p = inHand();
+  if (!p || !focus) return;
+  const spot = propAt(look(p), at.x, at.y);
+  if (!canPlace(plotOf(focus), look(p), spot.x, spot.y)) return problem("It has to stand on the plot, and not on what's already there.");
+  const ok = await reclaim(p.id, spot.x, spot.y);
+  if (ok !== true) return problem(typeof ok === "string" ? ok : "Something is already standing exactly there.");
+  problem("");
+  land(p.id);
+  setPlacement({ ...p, ...spot, impounded_at: null });
+  tool = "move";
+  renderBuildInfo();
+}
 
 // --- the field channel: avatars (broadcast), who's here (presence), filings --
 
@@ -1426,7 +1602,7 @@ function frame(now: number) {
     follow();
     viewport(mapView);
     const t = Date.now();
-    draw(ctx, { held: heldPlots(), built, me, hover, selected, walkers: [...walkers.values()], look: lookOf, letters, t, recent: recent() });
+    draw(ctx, { held: heldPlots(), built, me, hover, selected, walkers: [...walkers.values()], look: lookOf, letters, t, recent: recent(), tags: tagsOf, pound: pounded });
     post(now);
     placeCard();
     overlays(now, t);
@@ -1473,8 +1649,10 @@ function upsert(f: Filing) {
 }
 
 function regroup(filing: number) {
-  // Things in storage (put away on a change of use) aren't on the plot.
-  built.set(filing, [...placements.values()].filter((p) => p.filing === filing && p.room !== "store"));
+  // Things in storage (put away on a change of use) or impounded (at the hut) aren't on the plot.
+  built.set(filing, [...placements.values()].filter((p) => p.filing === filing && p.room !== "store" && !p.impounded_at));
+  pounded = [...placements.values()].filter((p) => p.impounded_at && !p.parent).length;
+  pounded = [...placements.values()].filter((p) => p.impounded_at && !p.parent).length;
 }
 
 function addPlacement(p: Placement) {
@@ -1511,6 +1689,7 @@ async function start() {
   for (const p of placed) placements.set(p.id, p);
   for (const id of new Set(placed.map((p) => p.filing))) regroup(id);
   for (const v of await loadVariations().catch(() => [])) setVariation(v);
+  void loadLetter();
   handles = await handlesFor([me, ...[...filings.values()].map((f) => f.filer)]);
 
   const spawn = { x: LANDMARKS.spawn.x + Math.round((Math.random() - 0.5) * 6), y: LANDMARKS.spawn.y };
@@ -1573,6 +1752,9 @@ async function start() {
       }
       renderAll();
     });
+  channel.on("postgres_changes", { event: "*", schema: "the_commons", table: "tags" }, ({ eventType, new: row }) => {
+    if (row && "id" in row) tagArrived(row as Tag, eventType === "INSERT");
+  });
   channel.subscribe((status) => {
     if (status === "SUBSCRIBED") channel.track(spawn);
   });

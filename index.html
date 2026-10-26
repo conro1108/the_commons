@@ -66,6 +66,17 @@
       .condition { background: #fbf4dc; border: 1px dashed #c9b88f; padding: 4px 8px; margin: 8px 0; }
       .where { margin-top: -4px; font-style: italic; }
 
+      /* The letter (src/letter.ts): Gary's questionnaire, red tags, the pound. */
+      .letter .form-no { margin: 0 0 2px; font-size: 10px; text-transform: uppercase; letter-spacing: .14em; color: #7a6a8a; }
+      .letter .questionnaire.here { border: 2px solid #b07a1e; }
+      .letter .red { border-color: #c8473c; }
+      #pound { top: 50%; left: 50%; width: 300px; transform: translate(-50%, -50%) rotate(.4deg); animation: pop .18s ease-out; }
+      #pound ul { list-style: none; padding: 0; margin: 8px 0; }
+      #pound li { display: flex; align-items: center; gap: 8px; margin: 6px 0; }
+      #pound li img { image-rendering: pixelated; width: 32px; }
+      #pound li > span { flex: 1; }
+      #pound .reclaim { margin: 0; }
+
       /* An unclaimed plot's particulars, as a schedule to a deed. */
       #card:has(.schedule) { width: 330px; }
       .schedule .form-no { display: flex; justify-content: space-between; margin: 0 0 4px; font-size: 10px;

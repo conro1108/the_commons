@@ -610,6 +610,208 @@ end $$;
 revoke execute on function the_commons.convene_variations() from public, anon, authenticated;
 select cron.schedule('the_commons_committee_variations', '0 4 * * *', 'select the_commons.convene_variations()');
 
+-- --- the letter (slice D) -----------------------------------------------------
+-- Gary's rounds against the schedule: he asks about anything built that isn't
+-- on it (tags), the holder answers, /api/gary rules (explained: ancillary, on
+-- the schedule; not: a red tag with a date). Past the date it goes to the
+-- pound at his hut, and the holder can get it back (reclaim). A thing nobody's
+-- asked about for a week gets a Certificate of Lawfulness. Separate from the
+-- audit (send_auditor), which still holds plots to their intent and condition,
+-- and is all there is for filings granted before schedules.
+
+-- Whether a thing is on the schedule: src/schedule.ts scheduled(), in SQL. A null schedule holds nothing.
+create function the_commons.on_schedule(s jsonb, p_prop text, p_label text, p_room text) returns boolean
+language sql immutable set search_path = '' as $$
+  select s is null or exists (select 1 from jsonb_array_elements(coalesce(s->'fittings', '[]')) f
+    where f->>'where' = coalesce(p_room, 'out')
+      and case when p_prop = 'item' then f->>'key' = 'item' and lower(btrim(f->>'name')) = lower(btrim(p_label))
+               else f->>'key' = p_prop end)
+$$;
+
+-- What Gary calls a thing, bare: "hot tub", "lobster". Mirrors thingName() in src/letter.ts.
+create function the_commons.thing_name(p_prop text, p_label text) returns text
+language sql immutable set search_path = '' as $$
+  select case when p_prop = 'item' then regexp_replace(btrim(coalesce(p_label, 'parcel')), '^(a|an|the|some)\s+', '', 'i')
+              else replace(p_prop, '_', ' ') end
+$$;
+
+-- Add a fitting to a filing's schedule in one statement, so two at once don't lose one.
+create function the_commons.add_fitting(p_filing bigint, p_fitting jsonb) returns void
+language sql security definer set search_path = '' as $$
+  update the_commons.filings
+    set schedule = jsonb_set(schedule, '{fittings}', coalesce(schedule->'fittings', '[]') || jsonb_build_array(p_fitting))
+    where id = p_filing and schedule is not null
+$$;
+revoke execute on function the_commons.add_fitting(bigint, jsonb) from public, anon, authenticated;
+grant execute on function the_commons.add_fitting(bigint, jsonb) to service_role;
+
+-- Something for /api/gary, now.
+create function the_commons.letter_post(body jsonb) returns void
+language plpgsql security definer set search_path = '' as $$
+declare secret text;
+begin
+  select decrypted_secret into secret from vault.decrypted_secrets where name = 'the_commons_gary';
+  if secret is null then return; end if;
+  perform net.http_post(
+    url := 'https://the-commons-eosin.vercel.app/api/gary',
+    body := body,
+    headers := jsonb_build_object('Content-Type', 'application/json', 'Authorization', 'Bearer ' || secret),
+    timeout_milliseconds := 30000);
+end $$;
+revoke execute on function the_commons.letter_post(jsonb) from public, anon, authenticated;
+
+-- Tags are public: a red tag is for everyone to see. An answer Gary hasn't
+-- read yet is only its writer's. The holder writes the answer, once.
+create policy "tags are public; an unread answer is yours"
+  on the_commons.tags for select
+  using (status <> 'asked' or answer is null
+    or exists (select 1 from the_commons.filings f where f.id = filing and f.filer = auth.uid()));
+create policy "answer Gary"
+  on the_commons.tags for update to authenticated
+  using (status = 'asked' and answer is null
+    and exists (select 1 from the_commons.filings f where f.id = filing and f.filer = auth.uid()))
+  with check (exists (select 1 from the_commons.filings f where f.id = filing and f.filer = auth.uid()));
+grant select on the_commons.tags to anon, authenticated;
+grant update (answer) on the_commons.tags to authenticated;
+grant all on the_commons.tags to service_role;
+
+-- An answer is stamped, and goes straight to Gary's desk; keep_tags() resends any he didn't get.
+create function the_commons.tag_answered() returns trigger
+language plpgsql security definer set search_path = '' as $$
+begin
+  if tg_when = 'BEFORE' then
+    new.answered_at := now();
+    return new;
+  end if;
+  perform the_commons.letter_post(jsonb_build_object('tag', new.id));
+  return null;
+end $$;
+revoke execute on function the_commons.tag_answered() from public, anon, authenticated;
+create trigger tags_answered before update of answer on the_commons.tags
+  for each row when (old.answer is null and new.answer is not null) execute function the_commons.tag_answered();
+create trigger tags_answered_post after update of answer on the_commons.tags
+  for each row when (old.answer is null and new.answer is not null) execute function the_commons.tag_answered();
+
+-- Gary's round: plots with something unscheduled he hasn't asked about (built
+-- at least ten minutes ago, so it isn't mid-build), the latest built first.
+-- Two each time; he doesn't get round to everyone, which is how things get
+-- to be lawful. Asked by a holder, just theirs. Returns how many he's off to.
+create function the_commons.send_rounds(asked_by uuid) returns int
+language plpgsql security definer set search_path = '' as $$
+declare
+  f record;
+  n int := 0;
+begin
+  for f in
+    select g.id from the_commons.filings g
+    where g.status in ('approved', 'conditional') and g.schedule is not null
+      and (asked_by is null or g.filer = asked_by)
+      and exists (select 1 from the_commons.placements p
+        where p.filing = g.id and p.impounded_at is null and (p.prop <> 'item' or p.label_ok)
+          and (asked_by is not null or p.placed_at < now() - interval '10 minutes')
+          and not the_commons.on_schedule(g.schedule, p.prop, p.label, p.room)
+          -- nothing open on it, or on another of the same kind (three geese are one question)
+          and not exists (select 1 from the_commons.tags t where t.filing = g.id and t.status in ('asked', 'tagged', 'filed')
+            and (t.placement = p.id or lower(t.what) = lower(the_commons.thing_name(p.prop, p.label)))))
+    order by g.built_at desc nulls last
+    limit case when asked_by is null then 2 else 10 end
+  loop
+    n := n + 1;
+    perform the_commons.letter_post(jsonb_build_object('letter', f.id));
+  end loop;
+  return n;
+end $$;
+revoke execute on function the_commons.send_rounds(uuid) from public, anon, authenticated;
+
+-- Double-click Gary and he comes round with the schedule too.
+create function the_commons.summon_rounds() returns int
+language sql security definer set search_path = '' as $$
+  select the_commons.send_rounds(auth.uid())
+$$;
+revoke execute on function the_commons.summon_rounds() from public, anon;
+grant execute on function the_commons.summon_rounds() to authenticated;
+
+-- Get something back from the pound: where it was if that's free (or at x, y
+-- if given), with anything that was in or on it. False if the spot's taken:
+-- the client then has it in hand to put down somewhere else.
+create function the_commons.reclaim(p_id bigint, p_x int default null, p_y int default null) returns boolean
+language plpgsql security definer set search_path = '' as $$
+declare
+  p the_commons.placements;
+  plot smallint;
+begin
+  select pl.* into p from the_commons.placements pl join the_commons.filings f on f.id = pl.filing
+    where pl.id = p_id and pl.impounded_at is not null and f.filer = auth.uid() and f.status in ('approved', 'conditional');
+  if p.id is null then return false; end if;
+  select f.plot into plot from the_commons.filings f where f.id = p.filing;
+  if p_x is not null and p.room = 'out' and p.parent is null and not the_commons.in_plot(plot, p_x, p_y) then return false; end if;
+  begin
+    update the_commons.placements set impounded_at = null, x = coalesce(p_x, x), y = coalesce(p_y, y) where id = p_id;
+  exception when unique_violation then
+    return false;
+  end;
+  update the_commons.placements set impounded_at = null where parent = p_id and impounded_at is not null;
+  update the_commons.tags set status = 'returned' where placement = p_id and status = 'impounded';
+  return true;
+end $$;
+revoke execute on function the_commons.reclaim(bigint, int, int) from public, anon;
+grant execute on function the_commons.reclaim(bigint, int, int) to authenticated;
+
+-- Hourly, no models: close tags on things taken down or permitted since,
+-- tag what nobody answered for three days, send on answers Gary didn't get,
+-- impound what's past its date, and certify what nobody's asked about for a week.
+create function the_commons.keep_tags() returns void
+language plpgsql security definer set search_path = '' as $$
+declare
+  t record;
+begin
+  update the_commons.tags set status = 'removed', closed_at = now()
+    where status in ('asked', 'tagged', 'filed') and placement is null;
+
+  update the_commons.tags g set status = 'permitted', closed_at = now()
+    from the_commons.placements p, the_commons.filings f
+    where g.status in ('asked', 'tagged', 'filed') and p.id = g.placement and f.id = g.filing
+      and f.schedule is not null and the_commons.on_schedule(f.schedule, p.prop, p.label, p.room);
+
+  update the_commons.tags set status = 'tagged', due = now() + interval '3 days',
+      reply = 'Nobody answered the questionnaire, so I''ve had to tag it. Take it down or file for it by the date, or it comes to the pound.'
+    where status = 'asked' and answer is null and asked_at < now() - interval '3 days';
+
+  for t in select id from the_commons.tags where status = 'asked' and answered_at < now() - interval '10 minutes' loop
+    perform the_commons.letter_post(jsonb_build_object('tag', t.id));
+  end loop;
+
+  -- Past the date: to the pound, with anything in or on it. One filed for waits on its filing.
+  with gone as (
+    update the_commons.tags set status = 'impounded', closed_at = now()
+    where status = 'tagged' and due < now()
+    returning placement)
+  update the_commons.placements set impounded_at = now()
+    where impounded_at is null and (id in (select placement from gone) or parent in (select placement from gone));
+
+  for t in
+    select p.id, p.filing, p.prop, p.label, p.room
+    from the_commons.placements p join the_commons.filings f on f.id = p.filing
+    where f.status in ('approved', 'conditional') and f.schedule is not null
+      and p.impounded_at is null and p.placed_at < now() - interval '7 days' and (p.prop <> 'item' or p.label_ok)
+      and not the_commons.on_schedule(f.schedule, p.prop, p.label, p.room)
+      and not exists (select 1 from the_commons.tags g where g.placement = p.id and g.asked_at > now() - interval '7 days')
+      and not exists (select 1 from the_commons.tags g where g.filing = p.filing and g.status in ('asked', 'tagged', 'filed')
+        and (g.placement = p.id or lower(g.what) = lower(the_commons.thing_name(p.prop, p.label))))
+  loop
+    perform the_commons.add_fitting(t.filing, jsonb_build_object(
+      'name', case when t.prop = 'item' then btrim(t.label) else the_commons.thing_name(t.prop, t.label) end,
+      'key', t.prop, 'where', t.room, 'how', 'lawful', 'at', now()));
+    insert into the_commons.tags (filing, placement, what, question, status, closed_at, reply)
+      values (t.filing, t.id, the_commons.thing_name(t.prop, t.label), 'Certificate of Lawfulness', 'lawful', now(),
+        'It''s been up a week and nobody''s said anything, so it''s lawful now. It''s on the schedule.');
+  end loop;
+end $$;
+revoke execute on function the_commons.keep_tags() from public, anon, authenticated;
+
+select cron.schedule('the_commons_rounds', '0 */3 * * *', 'select the_commons.send_rounds(null)');
+select cron.schedule('the_commons_tags', '17 * * * *', 'select the_commons.keep_tags()');
+
 do $$
 begin
   if not exists (select 1 from pg_publication_tables
@@ -617,6 +819,14 @@ begin
     alter publication supabase_realtime add table the_commons.variations;
   end if;
 end $$;
+do $$
+begin
+  if not exists (select 1 from pg_publication_tables
+      where pubname = 'supabase_realtime' and schemaname = 'the_commons' and tablename = 'tags') then
+    alter publication supabase_realtime add table the_commons.tags;
+  end if;
+end $$;
+-- --- end of the letter --------------------------------------------------------
 
 -- Realtime, for the tables the map watches.
 do $$

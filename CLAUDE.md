@@ -26,6 +26,7 @@ Most files open with a comment saying what they own; read it before grepping.
 | The baked world and questions about it; regions | `src/world/` (baked by `scripts/world/`) |
 | Bylaws as shown to players | `src/rulebook.ts` (mirrors `api/gary.ts`) |
 | Gary's rulings, permits, inspections, audits, appeals, committee, drawings | `api/gary.ts` |
+| His rounds against the schedule: questions, red tags, the pound, lawful by time | `src/letter.ts`; the round in `api/gary.ts` ("the letter"), timings `keep_tags()` in `db/logic.sql` |
 | Logging in by name | `api/door.ts` |
 | The back office (hold the notice board 3s) | `src/backoffice.ts`, `api/backoffice.ts` |
 | Tables | `db/tables.sql` |
@@ -42,4 +43,7 @@ Most files open with a comment saying what they own; read it before grepping.
   Gary.
 - Vercel only has this repo, so art from cozy_sprites is copied into
   `src/content/canon/`, not imported.
+- `scheduled()` (src/schedule.ts) has an SQL twin, `on_schedule()` in
+  db/logic.sql, used by Gary's rounds and lawful-by-time. Change one without
+  the other and he asks about, or certifies, the wrong things.
 - Non-integer `ctx.scale()`/`ctx.rotate()` smears sprite art off the pixel grid.
