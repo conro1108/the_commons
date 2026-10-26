@@ -7,7 +7,8 @@
 // nightly for each referral, which five members debate (see sit()), and { committee_appeal: id } for each
 // appeal that's come up to them (sitAppeal()), and { audit: id } on his
 // daily round of plots built on since he last came (send_auditor(), audit()), and { appeal: id } when a
-// denied filer writes back to make their case (hear()). A decision model rules from enums; the scribe only
+// denied filer writes back to make their case (hear()), and { letter: id } / { tag: id } for his rounds against
+// the schedule and the answers to them (see "the letter"). A decision model rules from enums; the scribe only
 // writes the prose, and the decision model checks it before it goes out. The write is conditional on the filing still being
 // pending, so a retried request never overwrites a stored ruling.
 
@@ -16,6 +17,7 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { experimental_decide as decide, generateText, type Experimental_DecisionQuestion, type Experimental_DecisionState } from "ai";
 import world from "../src/world/plots.json" with { type: "json" };
 import type { PlotDef, Region, Side, World } from "../src/world/types.ts";
+import { scheduled, type Fitting, type Schedule, type Where } from "../src/schedule.ts";
 
 const JUDGE = "typesafe-ai/jev";
 const SCRIBE = "anthropic/claude-haiku-5.5";
@@ -1112,6 +1114,183 @@ export async function precedentFor(db: Db, id: number, plot: PlotDef) {
     .map((r) => ({ id: r.id, intent: r.intent, status: r.status, ground: `on ${regionOf(plotOf(r.plot)).name}` }));
 }
 
+// --- the letter ----------------------------------------------------------------
+
+// Gary's rounds against the schedule (plans/building-and-enforcement.md, "The
+// letter"). send_rounds() sends { letter: filing } for a plot with something
+// built that isn't on its schedule, and he asks about each kind of thing (a
+// tag). The holder's answer comes as { tag: id }: the decision model weighs
+// whether it's explained (ancillary, onto the schedule) or not (a red tag with
+// a date), and the scribe writes what he says back. Everything after that (the
+// pound, lawful by time) is keep_tags() in db/logic.sql, which needs no model.
+// It runs alongside the audit rather than replacing it: the audit reads the
+// plot whole against its intent and condition, and is all there is for filings
+// granted before schedules; the letter goes thing by thing.
+
+const DAY_MS = 864e5;
+const TAG_DAYS = 3; // a red tag's date, from when it's hung
+const PER_VISIT = 4; // questions in one visit; the rest keep for the next
+
+const ASK_OUT = [
+  (w: string) => `What's the ${w} for?`,
+  (w: string) => `And the ${w}? What's that for?`,
+  (w: string) => `I haven't got a ${w} on the schedule. What's it for?`,
+];
+const ASK_IN = [
+  (w: string) => `What's the ${w} doing in here?`,
+  (w: string) => `There's a ${w} in here that isn't on the schedule. What's it for?`,
+];
+/** His question about one thing: a form of words, the same for the same thing. */
+export const questionFor = (id: number, what: string, where: Where) =>
+  (where === "in" ? ASK_IN : ASK_OUT)[id % (where === "in" ? ASK_IN : ASK_OUT).length](what);
+
+/** What Gary calls a thing, bare. Mirrors thingName() in src/letter.ts. */
+const thingName = (prop: string, label?: string | null) =>
+  prop === "item" ? (label ?? "parcel").trim().replace(/^(a|an|the|some)\s+/i, "") : prop.replace(/_/g, " ");
+
+/** One visit: a question for each kind of thing off the schedule he hasn't already asked about. */
+async function round(db: Db, id: number): Promise<Response> {
+  const { data: f } = await db.from("filings").select("id, status, schedule").eq("id", id).single();
+  if (!f || !BUILT_STATUSES.includes(f.status) || !f.schedule) return Response.json({ skipped: true });
+  const { data: placed } = await db.from("placements").select("id, prop, label, label_ok, room").eq("filing", id).is("impounded_at", null).order("id");
+  const { data: open } = await db.from("tags").select("placement").eq("filing", id).in("status", ["asked", "tagged", "filed"]);
+  const asked = new Set((open ?? []).map((t) => t.placement as number));
+  // Three geese are one question: the first of each, and the answer covers the rest (the schedule goes by kind).
+  const kinds = new Map<string, { id: number; what: string; where: Where }>();
+  for (const p of (placed ?? []) as { id: number; prop: string; label: string | null; label_ok: boolean | null; room: Where }[]) {
+    if ((p.prop === "item" && !p.label_ok) || asked.has(p.id) || scheduled(f.schedule as Schedule, p)) continue;
+    const what = thingName(p.prop, p.label);
+    const key = `${p.room}:${what.toLowerCase()}`;
+    if (!kinds.has(key)) kinds.set(key, { id: p.id, what, where: p.room });
+  }
+  const ask = [...kinds.values()].slice(0, PER_VISIT);
+  let n = 0;
+  for (const k of ask) {
+    // One open tag per thing (tags_open): a visit retried alongside asks nothing twice.
+    const { error } = await db.from("tags").insert({ filing: id, placement: k.id, what: k.what, question: questionFor(k.id, k.what, k.where) });
+    if (!error) n++;
+  }
+  return Response.json({ asked: n });
+}
+const BUILT_STATUSES = ["approved", "conditional"];
+
+// How an answer stands against the use. Code decides what explains it, generously; the model only weighs.
+const KINDS = {
+  ancillary: "It serves the permitted use or the people who come for it: something such a place would plausibly have, or that helps it do what it's for (a kettle in a dojo, a coat hook, a bin, a bench for waiting parents, a lamp to read by).",
+  incidental: "It's small, ordinary and harmless, the sort of thing any garden or building might have whatever it's for (a plant pot, a bird box, a hedgehog hotel by the door, a doormat, a gnome), even if it has nothing to do with the use.",
+  separate: "It's a substantial thing with a use of its own that this permit doesn't cover, and would need its own permission (a hot tub at a karate studio, a second shop, a stage, a pony).",
+  unexplained: "The answer doesn't say what it's for: a shrug, a joke, nonsense, or about something else.",
+} as const;
+type Kind = keyof typeof KINDS;
+
+/** Whether an answer explains the thing. Generous: if the model half thinks it belongs, it belongs. An unfit answer explains nothing. */
+export function explainedBy(a: { unfit: number; kind: string; odds?: Record<string, number> }): boolean {
+  if (a.unfit > 0.5) return false;
+  if (!a.odds) return a.kind === "ancillary" || a.kind === "incidental";
+  return (a.odds.ancillary ?? 0) + (a.odds.incidental ?? 0) >= 0.35;
+}
+
+const LETTERER = `${GARY}
+
+You're going round a plot with its schedule: the list of what its permit lets the holder build ("schedule", for a place that is "use"). You found something that isn't on it ("thing"), asked what it was for ("question"), and they answered ("answer"). You've decided ("explained"). Write what you say back to them: one or two sentences, at most 40 words, plain text, no greeting, no markdown.
+If "explained" is true, it's fine: it can stay, and you'll put it on the schedule as part of the place. Say so in your own words, and react to the answer the way a person would.
+If it's false, it isn't part of the place: say so plainly, and that it's tagged, and by "due" they take it down or file for it, or it goes to the pound by your hut. No lecture; you don't mind them having it, it just needs permission.
+If "answer" says it was unfit to repeat, don't repeat or describe it.
+Never invent bylaws, rules, numbers or procedures that aren't in the input.
+
+For the feel (do not copy):
+a karate studio, a hot tub, "after training", not explained:
+That's not part of a karate studio. It's tagged: take it down or file for it by Thursday, or it comes to the pound.
+a karate studio, a kettle, "for the parents waiting", explained:
+Fair enough, they'll want a cup of tea. I'll put it on the schedule.`;
+
+const LETTER_CHECKS = {
+  contradicts: "Does the reply fail to make the decision clear, or say the opposite: that the thing can stay when \"explained\" is false, or that it's tagged or must go when \"explained\" is true?",
+  invents: "Does the reply cite a bylaw, number, fee, date or procedure that is not in the input? Saying it goes on the schedule, or that it's tagged until the date given and then goes to the pound, is in the input.",
+  unfit: REMARK_CHECKS.unfit,
+} as const;
+
+const longDay = (d: Date) => d.toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long", timeZone: "UTC" });
+
+/** Gary hears an answer: the decision model weighs it, code decides, the scribe replies, checked. */
+export async function hearAnswer(t: { what: string; question: string; answer: string }, s: Schedule, intent: string, where: Where, now = new Date()) {
+  const state = {
+    use: s.use || intent,
+    shell: s.shell.words,
+    schedule: s.fittings.map((x) => `${x.name} (${x.where === "in" ? "inside" : "outside"})`),
+    thing: `${t.what}, ${where === "in" ? "inside" : "outside"}`,
+    question: t.question,
+    answer: t.answer,
+  };
+  const { answers } = await ask("letter", state, {
+    unfit: { type: "boolean", instructions: UNFIT("answer") },
+    kind: {
+      type: "choice",
+      instructions: `Going by the answer, and by what "use" is, how does this thing stand? Be generous: most things people put about a place are fine, and an answer that makes any sense of it counts.`,
+      criteria: KINDS as Record<Kind, string>,
+    },
+  });
+  const unfit = answers.unfit.probability;
+  const explained = explainedBy({ unfit, kind: answers.kind.choice, odds: answers.kind.probabilities });
+  const due = explained ? null : new Date(now.getTime() + TAG_DAYS * DAY_MS);
+  const input = {
+    ...state,
+    answer: unfit > 0.5 ? "(an answer unfit to repeat)" : t.answer,
+    explained,
+    ...(due && { due: longDay(due) }),
+  };
+  const { text, drafts } = await note("letter reply", LETTERER, input, LETTER_CHECKS);
+  const reply = text ?? (explained
+    ? `Fine, the ${t.what} can stay. I'll put it on the schedule.`
+    : `The ${t.what} isn't part of ${state.use}. It's tagged: take it down or file for it by ${longDay(due!)}, or it comes to the pound.`);
+  return { explained, unfit: unfit > 0.5, due, reply, record: { answers, drafts, judge: JUDGE, scribe: SCRIBE } };
+}
+
+/** An answer's come in. Written once: the tag only moves on from 'asked'. */
+async function answered(db: Db, id: number): Promise<Response> {
+  const { data: t } = await db.from("tags").select("*").eq("id", id).maybeSingle();
+  if (!t || t.status !== "asked" || !t.answer) return Response.json({ skipped: true });
+  const { data: f } = await db.from("filings").select("id, intent, schedule").eq("id", t.filing).single();
+  const { data: p } = t.placement ? await db.from("placements").select("prop, label, room").eq("id", t.placement).maybeSingle() : { data: null };
+  if (!f?.schedule || !p) return Response.json({ skipped: true }); // taken down meanwhile: keep_tags() closes it
+  const h = await hearAnswer(t, f.schedule as Schedule, f.intent, p.room);
+  const at = new Date().toISOString();
+  const { data: done } = await db
+    .from("tags")
+    .update({
+      status: h.explained ? "ancillary" : "tagged",
+      reply: h.reply,
+      record: h.record,
+      due: h.due?.toISOString() ?? null,
+      closed_at: h.explained ? at : null,
+      ...(h.unfit && { answer: null }), // kept in the record, not on show
+    })
+    .eq("id", id)
+    .eq("status", "asked")
+    .select("id");
+  if (h.explained && done?.length) {
+    const fitting: Fitting = { name: p.prop === "item" ? p.label.trim() : t.what, key: p.prop, where: p.room, how: "ancillary", at };
+    await db.rpc("add_fitting", { p_filing: f.id, p_fitting: fitting });
+  }
+  return Response.json({ explained: h.explained });
+}
+
+/**
+ * Retrospective permission: filing for a red-tagged thing after Gary's
+ * noticed. Slice C owns variations, so this is a stub and nothing calls it
+ * yet. C's "file for it" (net.ts fileRetrospective) should come here, or into
+ * C's own variation ruling with { retrospective: tag }, and:
+ *  - set the tag to 'filed' while it waits (keep_tags() won't impound a filed
+ *    tag, and closes it as 'permitted' once the thing is on the schedule with
+ *    how 'variation');
+ *  - rule it dearer than a variation filed first: a condition attached unless
+ *    there's a strong reason not to (writeCondition, as for a grant);
+ *  - refused, set the tag back to 'tagged' with a fresh date.
+ */
+export async function retrospective(_db: Db, tag: number): Promise<Response> {
+  return Response.json({ stub: "retrospective permission waits on slice C's variations", tag }, { status: 501 });
+}
+
 export const deskDb = () =>
   createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SECRET_KEY!, {
     db: { schema: "the_commons" },
@@ -1129,8 +1308,10 @@ export async function POST(req: Request): Promise<Response> {
 /** Whatever's landed in the in-tray. */
 export async function desk(
   db: Db,
-  body: { id?: number; inspect?: number; item?: number; committee?: number; committee_appeal?: number; audit?: number; appeal?: number },
+  body: { id?: number; inspect?: number; item?: number; committee?: number; committee_appeal?: number; audit?: number; appeal?: number; letter?: number; tag?: number },
 ): Promise<Response> {
+  if (body.letter) return round(db, body.letter);
+  if (body.tag) return answered(db, body.tag);
   if (body.inspect) return inspectPlot(db, body.inspect);
   if (body.appeal) return hearAppeal(db, body.appeal);
   if (body.committee_appeal) return sitAppeal(db, body.committee_appeal);
