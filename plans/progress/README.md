@@ -22,7 +22,23 @@ its progress file, carry on from the first unticked step.
 | E. The spirit | `worktree-agent-a723058c2a972b2bb` | finished, awaiting merge |
 | F. The library | `worktree-agent-acc722659ac2419b9` | running |
 
-## Merge order (planned)
+## Integration
+
+Branch `integrate`, worktree `.claude/worktrees/integrate` (from main). Slices
+are merged there as they finish; it goes to main once A and F are in and the
+seams are wired. Merged so far (tick as done):
+
+- [x] C (b6565e3)
+- [x] D (3999601): both-sides resolution in gary/logic/tables/main/net; pound count line restored
+- [ ] E
+- [ ] B
+- [ ] wire seams C↔D (retrospective), C↔E (change of use, drift cleared)
+- [ ] F, then point B/C library seams at it
+- [ ] A, then point B door/finishes, C materials, D questionnaire at it
+- [ ] apply alters 3,4,5 (+A's) live, push to main, CI reruns logic.sql
+- [ ] verify Vercel bundles api/ runtime imports from src/ (preview or prod)
+
+## Merge order (planned, superseded by Integration above)
 
 F → A → C → B → D → E. Each merge: `git merge <branch>`, resolve, `npm run
 build && npm test`, apply its `db/alters/*.sql` by hand, push (CI reruns
