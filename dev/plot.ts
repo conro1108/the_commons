@@ -22,7 +22,7 @@ if (!q.get("bare")) {
 }
 const filing: Filing = {
   id: 1, filer: "me", plot: plot.id, intent: "a bench", status: "approved", condition: null, wants: null, bylaw: null, permit: null,
-  minutes: null, filed_at: "", stamped_at: "", built_at: null, inspected_at: null, remark: null, met_at: null, ground: g.join(""),
+  minutes: null, filed_at: "", stamped_at: "", built_at: null, inspected_at: null, remark: null, met_at: null, ground: g.join(""), schedule: null, shell: null,
 };
 const props = ["bench", "tree", "flowers", "beehive", "lamppost", "goose"];
 const built: Placement[] = q.get("bare") ? [] : props.map((prop, k) => ({ id: k + 1, filing: 1, x: 2 + ((k * 7) % Math.max(1, plot.w - 8)), y: Math.max(0, mid - 5 + (k % 2) * 7), prop }));

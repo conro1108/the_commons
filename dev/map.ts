@@ -17,7 +17,7 @@ const me = "a1b2c3d4-0000-0000-0000-000000000000";
 const other = "7f3e2a10-0000-0000-0000-000000000000";
 const filing = (id: number, plot: number, status: Filing["status"], filer = other, ground: string | null = null): Filing => ({
   id, filer, plot, intent: "a bench, for looking at the pond with", status, condition: null, wants: null, bylaw: null, permit: null,
-  minutes: null, filed_at: "", stamped_at: "", built_at: null, inspected_at: null, remark: null, met_at: null, ground,
+  minutes: null, filed_at: "", stamped_at: "", built_at: null, inspected_at: null, remark: null, met_at: null, ground, schedule: null, shell: null,
 });
 const held = new Map<number, Filing>();
 const built = new Map<number, Placement[]>();

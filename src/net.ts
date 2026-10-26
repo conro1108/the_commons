@@ -1,6 +1,7 @@
 import { createClient, isAuthRetryableFetchError, type PostgrestError } from "@supabase/supabase-js";
 import type { PropDef } from "./content/canon/props.ts";
 import { parseAvatar, type Avatar } from "./avatar.ts";
+import type { Schedule, Shell, Where } from "./schedule.ts";
 
 export const supabase = createClient(
   import.meta.env.VITE_SUPABASE_URL,
@@ -54,6 +55,8 @@ export interface Filing {
   remark: string | null;
   met_at: string | null;
   ground: string | null;
+  schedule: Schedule | null; // Gary's, once granted; null for filings from before schedules
+  shell: Shell | null; // the holder's building, once put up
 }
 
 /** Statuses that hold a plot; denied, refused and lost give it back. */
@@ -217,6 +220,9 @@ export interface Placement {
   label?: string | null; // a written-in item's name
   label_ok?: boolean | null; // Gary's read of it: null while he hasn't
   sprite?: PropDef | null; // and his drawing of it, once he's done one
+  room?: Where; // outdoors on the plot, or inside the shell
+  parent?: number | null; // held in or on another placement; x is the slot
+  impounded_at?: string | null; // in the pound at Gary's hut
 }
 
 export async function loadPlacements(): Promise<Placement[]> {
@@ -229,7 +235,7 @@ export async function loadPlacements(): Promise<Placement[]> {
   }
 }
 
-const COLUMNS = "id, filing, x, y, prop, size, label, label_ok, sprite";
+const COLUMNS = "id, filing, x, y, prop, size, label, label_ok, sprite, room, parent, impounded_at";
 
 export async function place(filing: number, x: number, y: number, prop: string, size: number, label?: string): Promise<Placement | string> {
   const { data, error } = await supabase.from("placements").insert({ filing, x, y, prop, size, label }).select(COLUMNS).single();

@@ -52,14 +52,18 @@ create table if not exists the_commons.filings (
   inspected_at timestamptz,
   remark       text,
   met_at       timestamptz,
-  audited_at   timestamptz -- when Gary last came back to audit it (send_auditor)
+  audited_at   timestamptz, -- when Gary last came back to audit it (send_auditor)
+  schedule     jsonb, -- Gary's: what the permit lets you build (Schedule, src/schedule.ts); null for filings granted before schedules
+  shell        jsonb  -- the holder's: the building as put up (Shell, src/schedule.ts)
 );
 create unique index if not exists filings_plot_held on the_commons.filings (plot)
   where status in ('pending', 'approved', 'conditional', 'committee');
 alter table the_commons.filings enable row level security;
 
--- Placements: what's been built. x/y are build cells of the plot's box, one
--- per map pixel. One prop anchored per cell; uncapped otherwise. The prop is
+-- Placements: what's been built. Outdoors (room 'out'), x/y are build cells of
+-- the plot's box, one per map pixel; inside the shell (room 'in'), cells of its
+-- room; in or on another thing (parent), x is the slot. One prop anchored per
+-- cell; uncapped otherwise. The prop is
 -- free text so new art is a client change; RLS can't judge art, only ownership.
 create table if not exists the_commons.placements (
   id        bigint generated always as identity primary key,
@@ -76,8 +80,12 @@ create table if not exists the_commons.placements (
   sprite    jsonb, -- Gary's drawing of it, {rows, palette}; reused for the same name
   sprite_drafts jsonb, -- every attempt at the drawing
   placed_at timestamptz not null default now(),
-  unique (filing, x, y)
+  room      text not null default 'out' check (room in ('out', 'in')),
+  parent    bigint references the_commons.placements on delete cascade,
+  impounded_at timestamptz -- in the pound at Gary's hut; null when it's where it was put
 );
+create unique index if not exists placements_cell on the_commons.placements (filing, room, coalesce(parent, 0), x, y)
+  where impounded_at is null;
 alter table the_commons.placements enable row level security;
 
 -- Inspections: every time Gary has come round about a condition, or to audit
