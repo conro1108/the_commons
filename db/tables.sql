@@ -80,7 +80,7 @@ create table if not exists the_commons.placements (
   sprite    jsonb, -- Gary's drawing of it, {rows, palette}; reused for the same name
   sprite_drafts jsonb, -- every attempt at the drawing
   placed_at timestamptz not null default now(),
-  room      text not null default 'out' check (room in ('out', 'in')),
+  room      text not null default 'out' check (room in ('out', 'in', 'store')), -- 'store': put away on a change of use, x a slot
   parent    bigint references the_commons.placements on delete cascade,
   impounded_at timestamptz -- in the pound at Gary's hut; null when it's where it was put
 );
@@ -143,3 +143,44 @@ create table if not exists the_commons.backoffice_runs (
 );
 create index if not exists backoffice_runs_session on the_commons.backoffice_runs (session, id);
 alter table the_commons.backoffice_runs enable row level security;
+
+-- --- Gary's schedule (slice C; db/alters/3-schedule.sql) ---------------------
+
+-- Pieces: a fitting Gary has drawn because nothing in the library was close,
+-- once per name (norm() in src/schedule.ts), so anyone scheduled for the same
+-- thing gets the same drawing. A written-in item of that name takes it too.
+-- Written only by /api/gary.
+create table if not exists the_commons.pieces (
+  name     text primary key check (name ~ '^[a-z0-9]' and length(name) <= 80),
+  sprite   jsonb, -- {rows, palette}; null if no drawing came out
+  drafts   jsonb, -- every attempt
+  drawn_at timestamptz not null default now()
+);
+alter table the_commons.pieces enable row level security;
+
+-- Variations: the holder going back to Gary about their permit. An addition
+-- ("a vending machine") is stamped the same day if small, or goes to the
+-- committee's nightly sitting if material (a second room, an extension, an
+-- interior larger than the exterior); granted, it joins the schedule. A change
+-- of use is a fresh ruling on the same plot: the shell stays, the schedule is
+-- rewritten. Clients insert filing, kind, what and room; the rest is Gary's.
+create table if not exists the_commons.variations (
+  id            bigint generated always as identity primary key,
+  filing        bigint not null references the_commons.filings on delete cascade,
+  filer         uuid not null default auth.uid() references auth.users on delete cascade,
+  kind          text not null default 'addition' check (kind in ('addition', 'use')),
+  what          text not null check (length(btrim(what)) between 3 and 80), -- the thing, or the new use
+  room          text check (room in ('out', 'in')), -- where the holder wants it; null leaves it to Gary
+  retrospective boolean not null default false, -- filed after a red tag (slice D): dearer, usually with a condition
+  status        text not null default 'pending' check (status in ('pending', 'granted', 'committee', 'denied', 'refused')),
+  scale         text check (scale in ('small', 'material')),
+  ok            boolean, -- fit for anyone else to read
+  condition     text, -- attached by Gary or the committee
+  reply         text, -- Gary's reply, or the committee's finding
+  minutes       jsonb, -- the committee's, for a material one
+  record        jsonb, -- the models' answers and drafts; stored, never regenerated
+  filed_at      timestamptz not null default now(),
+  heard_at      timestamptz
+);
+create index if not exists variations_filing on the_commons.variations (filing, id);
+alter table the_commons.variations enable row level security;
