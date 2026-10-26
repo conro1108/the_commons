@@ -3,8 +3,8 @@
 Slice D of plans/building-and-enforcement-slices.md. Resume from the first unticked step.
 
 - [x] 1. Read the design, slices, CLAUDE.md, and the code (gary.ts audit, logic.sql cron, main.ts presence, closeup/render).
-- [ ] 2. Schema: `db/alters/4-letter.sql` (tags table), folded into `db/tables.sql`.
-- [ ] 3. `db/logic.sql` section: tag policies, answer trigger -> desk, `on_schedule()`, `add_fitting()`, `reclaim()`, `send_rounds()` (daily), `keep_tags()` (hourly: lawful, overdue, unanswered), cron.
+- [x] 2. Schema: `db/alters/4-letter.sql` (tags table), folded into `db/tables.sql`.
+- [x] 3. `db/logic.sql` section: tag policies, answer trigger -> desk, `on_schedule()`, `add_fitting()`, `reclaim()`, `send_rounds()` (daily), `keep_tags()` (hourly: lawful, overdue, unanswered), cron.
 - [ ] 4. `src/letter.ts`: Tag type, open/overdue helpers, question wording, red tag + questionnaire pixel art, card HTML.
 - [ ] 5. `api/gary.ts` section: the round (`{ letter: filing }`) asks about unscheduled things.
 - [ ] 6. `api/gary.ts`: ruling on an answer (`{ tag: id }`): Jev (ancillary/incidental/separate/evasive, generous), scribe reply, checked, stored; ancillary -> schedule.
@@ -19,3 +19,4 @@ Slice D of plans/building-and-enforcement-slices.md. Resume from the first untic
 ## Notes
 
 - Step 1: the audit stays (see step 5 note for why). Round is its own cron.
+- Steps 2-3: `tags` table (status machine in the db/tables.sql comment). SQL in its own `-- --- the letter` section of logic.sql. Crons: `the_commons_rounds` every 3h (2 plots, latest built first: missing plots is how things get lawful), `the_commons_tags` hourly (no models). Answer trigger posts `{tag}` to the desk directly via `letter_post()` (didn't touch drain_gary). `summon_rounds()` RPC for double-clicking Gary. Not validated against a real Postgres (no local psql).

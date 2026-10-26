@@ -143,3 +143,36 @@ create table if not exists the_commons.backoffice_runs (
 );
 create index if not exists backoffice_runs_session on the_commons.backoffice_runs (session, id);
 alter table the_commons.backoffice_runs enable row level security;
+
+-- Tags: the letter (plans/building-and-enforcement.md). One row each time Gary,
+-- on his rounds, asks about something built that isn't on the filing's
+-- schedule, and what came of it:
+--   asked      waiting on the holder's answer (asked in person, or a questionnaire on the door)
+--   ancillary  explained, and added to the schedule as ancillary
+--   tagged     not explained: a red tag with a date (due)
+--   filed      filed for retrospectively, waiting on that
+--   permitted  on the schedule since, by a variation
+--   removed    taken down
+--   impounded  in the pound at Gary's hut (placements.impounded_at)
+--   returned   got back from the pound; he may ask again
+--   lawful     nobody asked for a week: a Certificate of Lawfulness, on the schedule as lawful
+-- Written by /api/gary and keep_tags(); the holder writes only the answer.
+create table if not exists the_commons.tags (
+  id          bigint generated always as identity primary key,
+  filing      bigint not null references the_commons.filings on delete cascade,
+  placement   bigint references the_commons.placements on delete set null, -- null once it's been taken down
+  what        text not null, -- the thing as Gary calls it, bare: "hot tub"
+  question    text not null,
+  asked_at    timestamptz not null default now(),
+  answer      text check (length(btrim(answer)) between 1 and 200),
+  answered_at timestamptz,
+  reply       text, -- Gary's, to the answer (or to the lack of one)
+  record      jsonb, -- the decision model's answers and the drafts; stored, never regenerated
+  due         timestamptz, -- a red tag's date: taken down, filed for, or to the pound
+  status      text not null default 'asked' check (status in
+                ('asked', 'ancillary', 'tagged', 'filed', 'permitted', 'removed', 'impounded', 'returned', 'lawful')),
+  closed_at   timestamptz
+);
+create unique index if not exists tags_open on the_commons.tags (placement) where status in ('asked', 'tagged', 'filed');
+create index if not exists tags_filing on the_commons.tags (filing);
+alter table the_commons.tags enable row level security;
