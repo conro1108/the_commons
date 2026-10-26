@@ -10,7 +10,7 @@ Slice B of `plans/building-and-enforcement-slices.md`. Resume from the first unt
 - [x] 6. Light: window pools by hour, time-of-day grade, lamps after dark.
 - [x] 7. `dev/room.html`: fake shell, fittings, held things; ?w ?h ?hour ?door ?windows ?material ?scale.
 - [x] 8. Look at it (screenshot) and tune.
-- [ ] 9. `db/logic.sql`: own section, `room_size()`/`placeable()`; placement policies and grants take room/parent.
+- [x] 9. `db/logic.sql`: own section, `room_size()`/`placeable()`; placement policies and grants take room/parent.
 - [ ] 10. `src/net.ts`: own section, placeInside / moveInside.
 - [ ] 11. `src/main.ts` hooks: regroup keeps inside things off the plot, frame draws the room, handlers step aside.
 - [ ] 12. `src/main.ts` own section: going in (door click, button) and out (door, button, Escape, wheel); visitors read-only.
@@ -23,3 +23,4 @@ Slice B of `plans/building-and-enforcement-slices.md`. Resume from the first unt
 - Steps 3-6: src/interior.ts. Room = min(44, max(8, 2w)) x min(32, max(6, 2h) + WALL), WALL = 5 rows of back wall at the top of the grid. Cutaway: PAD art px of wall top round it, door/windows sit in it ('n' ones on the back wall face). doorOutside() is the seam to A (middle of the door side). Anchors are top-left cells; wall things must sit in rows < WALL, floor things' foot on the floor. No overlap check (outdoors has none either).
 - Step 7: dev/room.html with knobs for hour/w/h; ?door ?windows ?material ?paint ?scale ?bare.
 - Step 8: screenshots via `npx playwright@1.61 screenshot` (matches the cached chromium) against `npx vite --port 5291`. Lighter timber walls; lamp glow clipped to the room and smaller.
+- Step 9: logic.sql section "Inside and in things (slice B)" before the placements block: room_size(jsonb) mirrors roomSize(); placeable(id, filing, room, parent, x, y) replaces in_plot in the insert/update policies. Grants add room, parent to insert and update. Not run against any database (no local postgres); check on merge.

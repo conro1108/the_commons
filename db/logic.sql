@@ -111,10 +111,40 @@ end $$;
 create trigger filings_ground_built before update of ground on the_commons.filings
   for each row execute function the_commons.ground_built();
 
+-- --- Inside and in things (slice B) ------------------------------------------
+-- A placement is outdoors on the plot (room 'out'), inside the shell's room
+-- (room 'in'), or in or on another thing (parent; x is the slot, y is 0).
+-- The room is sized off the shell as src/interior.ts roomSize() has it: rows
+-- 0-4 are the back wall, the rest the floor. A thing in a thing is in the same
+-- room as its holder, on the same filing, and the holder isn't in anything
+-- itself, nor is anything in a thing that's put in another: nesting stops there.
+create function the_commons.room_size(jsonb) returns int[]
+language sql immutable set search_path = '' as $$
+  select array[least(44, greatest(8, ($1 ->> 'w')::int * 2)), least(32, greatest(6, ($1 ->> 'h')::int * 2) + 5)]
+$$;
+grant execute on function the_commons.room_size(jsonb) to anon, authenticated;
+
+-- Whether a placement (id, filing, room, parent, x, y) may stand where it says.
+-- Positional parameters, so a column ever added can't shadow them.
+create function the_commons.placeable(bigint, bigint, text, bigint, int, int) returns boolean
+language sql stable security definer set search_path = '' as $$
+  select case
+    when $4 is not null then $6 = 0
+      and exists (select 1 from the_commons.placements h
+        where h.id = $4 and h.filing = $2 and h.room = $3 and h.parent is null and h.id <> $1)
+      and not exists (select 1 from the_commons.placements c where c.parent = $1)
+    when $3 = 'in' then exists (select 1 from the_commons.filings f
+      where f.id = $2 and f.shell is not null
+        and $5 < (the_commons.room_size(f.shell))[1] and $6 < (the_commons.room_size(f.shell))[2])
+    else exists (select 1 from the_commons.filings f where f.id = $2 and the_commons.in_plot(f.plot, $5, $6))
+  end
+$$;
+grant execute on function the_commons.placeable(bigint, bigint, text, bigint, int, int) to anon, authenticated;
+
 -- Placements: what's been built. Only on a plot you hold outright (approved or
 -- conditional) — building needs no paperwork, which Gary finds difficult. x/y
 -- are build cells of the plot's box, one per map pixel, and the anchor must be
--- on the plot itself (in_plot). One prop anchored per cell; uncapped otherwise. The prop is
+-- on the plot itself (in_plot), or inside or in things (placeable, above). One prop anchored per cell; uncapped otherwise. The prop is
 -- free text so new art is a client change; RLS can't judge art, only ownership.
 create policy "placements are public"
   on the_commons.placements for select using (true);
@@ -122,19 +152,19 @@ create policy "build on your own granted plot"
   on the_commons.placements for insert to authenticated
   with check (exists (select 1 from the_commons.filings f
     where f.id = filing and f.filer = auth.uid() and f.status in ('approved', 'conditional')
-      and the_commons.in_plot(f.plot, x, y)));
+      and the_commons.placeable(id, filing, room, parent, x, y)));
 create policy "move things about on your plot"
   on the_commons.placements for update to authenticated
   using (exists (select 1 from the_commons.filings f
     where f.id = filing and f.filer = auth.uid()))
   with check (exists (select 1 from the_commons.filings f
-    where f.id = filing and f.filer = auth.uid() and the_commons.in_plot(f.plot, x, y)));
+    where f.id = filing and f.filer = auth.uid() and the_commons.placeable(id, filing, room, parent, x, y)));
 create policy "take down what's on your plot"
   on the_commons.placements for delete to authenticated
   using (exists (select 1 from the_commons.filings f
     where f.id = filing and f.filer = auth.uid()));
 grant select on the_commons.placements to anon, authenticated;
-grant insert (filing, x, y, prop, label, size), update (x, y, size), delete on the_commons.placements to authenticated;
+grant insert (filing, x, y, prop, label, size, room, parent), update (x, y, size, room, parent), delete on the_commons.placements to authenticated;
 grant all on the_commons.placements to service_role;
 
 -- Anything built, moved or taken down marks the plot as changed, for Gary.
