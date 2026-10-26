@@ -5,7 +5,7 @@ Slice D of plans/building-and-enforcement-slices.md. Resume from the first untic
 - [x] 1. Read the design, slices, CLAUDE.md, and the code (gary.ts audit, logic.sql cron, main.ts presence, closeup/render).
 - [x] 2. Schema: `db/alters/4-letter.sql` (tags table), folded into `db/tables.sql`.
 - [x] 3. `db/logic.sql` section: tag policies, answer trigger -> desk, `on_schedule()`, `add_fitting()`, `reclaim()`, `send_rounds()` (daily), `keep_tags()` (hourly: lawful, overdue, unanswered), cron.
-- [ ] 4. `src/letter.ts`: Tag type, open/overdue helpers, question wording, red tag + questionnaire pixel art, card HTML.
+- [x] 4. `src/letter.ts`: Tag type, open/overdue helpers, question wording, red tag + questionnaire pixel art, card HTML.
 - [ ] 5. `api/gary.ts` section: the round (`{ letter: filing }`) asks about unscheduled things.
 - [ ] 6. `api/gary.ts`: ruling on an answer (`{ tag: id }`): Jev (ancillary/incidental/separate/evasive, generous), scribe reply, checked, stored; ancillary -> schedule.
 - [ ] 7. Retrospective permission stub (C's call site), client and server.
