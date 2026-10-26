@@ -266,3 +266,22 @@ export async function paint(filing: number, ground: string): Promise<string | nu
   const { error } = await supabase.from("filings").update({ ground }).eq("id", filing);
   return error && said(error);
 }
+
+// --- inside and in things (slice B) ------------------------------------------
+
+/** Put a thing inside the shell's room at (x, y), or in a holder's slot (x is the slot), in the holder's room. */
+export async function placeInside(filing: number, x: number, y: number, prop: string, holder: Placement | null): Promise<Placement | string> {
+  const row = { filing, x, y: holder ? 0 : y, prop, size: 1, room: holder?.room ?? "in", parent: holder?.id ?? null };
+  const { data, error } = await supabase.from("placements").insert(row).select(COLUMNS).single();
+  if (!error) return data;
+  if (error.code === "23505") return holder ? "That slot's taken." : "Something is already standing exactly there.";
+  return said(error);
+}
+
+/** Move a thing about inside: to (x, y) on its own, or into a holder's slot x. */
+export async function moveInside(id: number, x: number, y: number, parent: number | null): Promise<string | null> {
+  const { error } = await supabase.from("placements").update({ x, y, parent }).eq("id", id);
+  if (!error) return null;
+  if (error.code === "23505") return "Something is already there.";
+  return said(error);
+}

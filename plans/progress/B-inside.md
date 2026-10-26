@@ -11,7 +11,7 @@ Slice B of `plans/building-and-enforcement-slices.md`. Resume from the first unt
 - [x] 7. `dev/room.html`: fake shell, fittings, held things; ?w ?h ?hour ?door ?windows ?material ?scale.
 - [x] 8. Look at it (screenshot) and tune.
 - [x] 9. `db/logic.sql`: own section, `room_size()`/`placeable()`; placement policies and grants take room/parent.
-- [ ] 10. `src/net.ts`: own section, placeInside / moveInside.
+- [x] 10. `src/net.ts`: own section, placeInside / moveInside.
 - [ ] 11. `src/main.ts` hooks: regroup keeps inside things off the plot, frame draws the room, handlers step aside.
 - [ ] 12. `src/main.ts` own section: going in (door click, button) and out (door, button, Escape, wheel); visitors read-only.
 - [ ] 13. `src/main.ts`: laying out inside: place, move, take down, put in slots.
@@ -24,3 +24,4 @@ Slice B of `plans/building-and-enforcement-slices.md`. Resume from the first unt
 - Step 7: dev/room.html with knobs for hour/w/h; ?door ?windows ?material ?paint ?scale ?bare.
 - Step 8: screenshots via `npx playwright@1.61 screenshot` (matches the cached chromium) against `npx vite --port 5291`. Lighter timber walls; lamp glow clipped to the room and smaller.
 - Step 9: logic.sql section "Inside and in things (slice B)" before the placements block: room_size(jsonb) mirrors roomSize(); placeable(id, filing, room, parent, x, y) replaces in_plot in the insert/update policies. Grants add room, parent to insert and update. Not run against any database (no local postgres); check on merge.
+- Step 10: net.ts section at the end: placeInside(filing, x, y, prop, holder|null) and moveInside(id, x, y, parent).
