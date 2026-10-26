@@ -141,6 +141,22 @@
       #tool-line { display: flex; gap: 12px; margin: 0 0 6px; font-size: 12px; }
       #tool-line p { margin: 0; }
 
+      /* Inside a place (src/interior.ts). */
+      #go-in { position: absolute; top: 12px; right: 12px; margin: 0; }
+      #room { position: absolute; inset: 0; pointer-events: none; }
+      #room > * { pointer-events: auto; }
+      #room-leave { position: absolute; top: 12px; left: 12px; margin: 0; }
+      #room-info { top: 54px; left: 12px; width: 240px; transform: rotate(-.4deg); }
+      #room-tools { bottom: 12px; left: 50%; transform: translateX(-50%); max-width: calc(100% - 24px); padding: 8px 10px; }
+      #room-tools .line { display: flex; gap: 12px; margin: 0 0 6px; font-size: 12px; }
+      #room-tools .line p { margin: 0; }
+      #room-palette { display: flex; flex-wrap: wrap; gap: 4px; }
+      #room-palette button { margin: 0; min-width: 36px; height: 36px; padding: 2px 4px; background: #fffdf3; box-shadow: none;
+                             display: grid; place-items: center; font-weight: normal; font-size: 12px; }
+      #room-palette button:hover { background: #fff4c9; }
+      #room-palette button.on { background: #ffe9a8; box-shadow: inset 0 0 0 2px #402e3a; }
+      #room-palette img { image-rendering: pixelated; }
+
       /* Phones: papers out of the way of the map, and the toolbar one swipeable row. */
       @media (max-width: 600px), (max-height: 500px) {
         body { font-size: 13px; }
@@ -261,10 +277,19 @@
       <section id="build" hidden>
         <div id="labels"></div>
         <button id="leave">← Back to the commons</button>
+        <button id="go-in" hidden>Go inside →</button>
         <div id="build-info" class="paper"></div>
         <div id="tools" class="paper">
           <div id="tool-line"><p id="tool-hint" class="hint"></p><p id="build-problem" class="problem"></p></div>
           <div id="palette"></div>
+        </div>
+      </section>
+      <section id="room" hidden>
+        <button id="room-leave">← Back outside</button>
+        <div id="room-info" class="paper"></div>
+        <div id="room-tools" class="paper" hidden>
+          <div class="line"><p id="room-hint" class="hint"></p><p id="room-problem" class="problem"></p></div>
+          <div id="room-palette"></div>
         </div>
       </section>
       <div id="board" hidden></div>

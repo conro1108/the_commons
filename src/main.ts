@@ -7,7 +7,7 @@ import {
 } from "./world/index.ts";
 import {
   APPEALS, HELD, nextCourt, avatarOf, fileAppeal, fileClaim, handlesFor, isGuest, keepPapers, logIn, loadAppeals, loadFilings, loadPlacements, move, paint,
-  place, rehandle, saveProfile, signIn, summonGary, supabase, unplace,
+  place, placeInside, moveInside, rehandle, saveProfile, signIn, summonGary, supabase, unplace,
   type Appeal, type Filing, type Placement,
 } from "./net.ts";
 import type { RealtimeChannel } from "@supabase/supabase-js";
@@ -19,6 +19,9 @@ import { BOARD_BOX } from "./map/landmarks.ts";
 import { GARY_LINES, garyAt } from "./life.ts";
 import { looksLike } from "./avatar.ts";
 import { openDoor, openPapers, papersOpen } from "./papers.ts";
+import {
+  doorOutside, drawRoom, fitting, fittingKeys, onDoor, roomArt, roomSize, slotAt, spotFor, spriteOf, thingAt, type RoomScene,
+} from "./interior.ts";
 
 const SPEED = 40; // art pixels per second
 const ZOOM_MS = 520; // map <-> plot
@@ -538,6 +541,7 @@ function renderBuildInfo() {
     renderTools(f);
   }
   fitFocus(); // the info's height moves the plot on an upright screen
+  doorway();
 }
 
 /** On a phone the condition folds away, so the plot gets the screen; keep it as it was left. */
@@ -786,6 +790,7 @@ function resize() {
   ctx.imageSmoothingEnabled = false;
   mapView = fitMap();
   fitFocus();
+  fitRoom();
 }
 
 function toArt(e: MouseEvent, v: View) {
@@ -985,6 +990,7 @@ function paintTo(to: Cells) {
 }
 
 canvas.addEventListener("pointerdown", (e) => {
+  if (indoors !== null || knock(e)) return;
   if (!focus || zoom || !mineInFocus()) return;
   const [kind] = tool.split(":");
   placing = e.button === 0 && (kind === "prop" || kind === "item");
@@ -1007,6 +1013,7 @@ canvas.addEventListener("pointerdown", (e) => {
 });
 
 canvas.addEventListener("pointermove", (e) => {
+  if (indoors !== null) return;
   if (!focus && panning) {
     const dx = (e.clientX - panning.x) * dpr, dy = (e.clientY - panning.y) * dpr;
     if (!panning.moved && Math.hypot(dx, dy) > 8 * dpr) {
@@ -1038,6 +1045,7 @@ canvas.addEventListener("pointermove", (e) => {
 });
 
 canvas.addEventListener("pointerup", async (e) => {
+  if (indoors !== null) return;
   if (placing) {
     placing = false;
     const at = pointer;
@@ -1091,6 +1099,7 @@ window.addEventListener("keydown", (e) => {
     reading = null;
     renderBoard();
   } else if (!board.hidden) closeBoard();
+  else if (indoors !== null) leaveRoom();
   else if (focus) leaveFocus();
   else closeCard();
 });
@@ -1129,6 +1138,7 @@ function enterableAt(e: MouseEvent) {
 // by hand, since phones don't send dblclick once the canvas takes its own touches.
 let lastClick: { t: number; x: number; y: number } | null = null;
 canvas.addEventListener("click", (e) => {
+  if (indoors !== null) return;
   const touch = (e as PointerEvent).pointerType !== "mouse";
   const last = lastClick;
   lastClick = { t: e.timeStamp, x: e.clientX, y: e.clientY };
@@ -1146,6 +1156,7 @@ canvas.addEventListener("click", (e) => {
 
 // Scroll or pinch: in over a plot goes inside, out comes back to the commons.
 canvas.addEventListener("wheel", (e) => {
+  if (indoors !== null) return void roomWheel(e);
   // Pinches arrive as ctrl-wheel; keep the browser from zooming the page.
   if (e.ctrlKey || focus) e.preventDefault();
   if (zoom || Math.abs(e.deltaY) < 4) return;
@@ -1159,6 +1170,241 @@ canvas.addEventListener("wheel", (e) => {
   closeCard();
   enterFocus(f);
 }, { passive: false });
+
+// --- inside: through a shell's door into its room (src/interior.ts) ----------
+
+let indoors: number | null = null; // the filing whose room we're in; focus stays on its plot
+const insides = new Map<number, Placement[]>(); // filing -> what's inside and in things
+let roomView: View = { s: 1, ox: 0, oy: 0 };
+let roomTool = "move"; // a fitting to lay out, or "move" / "remove"
+let roomPointer: { x: number; y: number } | null = null; // art px of the room
+let roomDrag: { p: Placement; x: number; y: number; slot: { holder: Placement; slot: number } | null } | null = null;
+
+const indoorFiling = () => (indoors === null ? null : (filings.get(indoors) ?? null));
+const mineIndoors = () => indoorFiling()?.filer === me && !zoom;
+/** Small things go in slots; a thing with slots of its own never does. */
+const slotted = (prop: string) => !!fitting(prop)?.small && !fitting(prop)?.slots;
+
+function regroupInside(filing: number) {
+  insides.set(filing, [...placements.values()].filter((p) => p.filing === filing && (p.room === "in" || !!p.parent)));
+  if (filing === indoors) renderRoomInfo();
+}
+
+/** The "Go inside" button up close, for anyone, when there's a shell to go into. */
+function doorway() {
+  $("go-in").hidden = !focus?.shell;
+}
+$("go-in").addEventListener("click", () => focus && goInside(focus));
+
+/** A press on the shell's door up close goes in. */
+function knock(e: PointerEvent): boolean {
+  const f = focus;
+  if (!f?.shell || zoom || e.button !== 0) return false;
+  const b = toBuild(e);
+  if (!b) return false;
+  const d = doorOutside(f.shell);
+  const cx = Math.floor(b.x / ZOOM), cy = Math.floor(b.y / ZOOM);
+  if (cx < d.x || cy < d.y || cx >= d.x + d.w || cy >= d.y + d.h) return false;
+  e.stopImmediatePropagation(); // the room's own handler would take this press as a click inside
+  goInside(f);
+  return true;
+}
+
+function goInside(f: Filing) {
+  if (!f.shell || zoom) return;
+  indoors = f.id;
+  roomPointer = null;
+  roomDrag = null;
+  stroke = null;
+  drag = null;
+  placing = false;
+  $("build").hidden = true;
+  $("room").hidden = false;
+  $("room-problem").textContent = "";
+  renderRoomInfo();
+  renderRoomTools();
+}
+
+function leaveRoom() {
+  if (indoors === null) return;
+  indoors = null;
+  roomDrag = null;
+  $("room").hidden = true;
+  $("build").hidden = !focus;
+  renderBuildInfo();
+}
+
+$("room-leave").addEventListener("click", leaveRoom);
+
+function roomWheel(e: WheelEvent) {
+  e.preventDefault();
+  if (!zoom && e.deltaY > 4) leaveRoom();
+}
+
+function renderRoomInfo() {
+  const f = indoorFiling();
+  if (!f) return;
+  const n = (insides.get(f.id) ?? []).length;
+  const name = f.shell?.sign && f.shell.sign_ok ? f.shell.sign : f.intent;
+  $("room-info").innerHTML = `<h2>${esc(name)}</h2>
+    <p>${f.filer === me ? "Yours, inside." : `${esc(who(f.filer))}'s place. You're visiting.`}</p>
+    <p class="meta">${n ? `${n} thing${n === 1 ? "" : "s"} inside.` : "Nothing inside yet."} The door's the way out.</p>`;
+  fitRoom();
+}
+
+const ROOM_HINTS: Record<string, string> = {
+  move: "Drag things about. Drop a small thing on a rack, shelf or table to put it there.",
+  remove: `${touch ? "Tap" : "Click"} something to take it down.`,
+  wall: "Click the back wall to hang it.",
+  floor: "Click the floor to set it down.",
+  small: "Click a free slot on a rack, shelf or table, or the floor.",
+};
+
+function renderRoomTools() {
+  const mine = mineIndoors();
+  $("room-tools").hidden = !mine;
+  if (mine) {
+    const button = (t: string, title: string, inner: string) => `<button data-tool="${t}" title="${esc(title)}">${inner}</button>`;
+    $("room-palette").innerHTML = button("move", "move things", "move") + button("remove", "take down", "take down")
+      + fittingKeys().map((k) => {
+        const c = spriteOf({ prop: k, x: 0, parent: null });
+        return button(k, fitting(k)!.name, `<img src="${icon(`fitting:${k}`, () => c)}" width="${Math.min(c.width * 2, 40)}" alt="${esc(fitting(k)!.name)}">`);
+      }).join("");
+    for (const b of $("room-palette").querySelectorAll<HTMLButtonElement>("[data-tool]")) {
+      b.classList.toggle("on", b.dataset.tool === roomTool);
+      b.addEventListener("click", () => {
+        roomTool = b.dataset.tool!;
+        renderRoomTools();
+      });
+    }
+    const f = fitting(roomTool);
+    $("room-hint").textContent = ROOM_HINTS[!f ? roomTool : slotted(roomTool) ? "small" : f.on];
+  }
+  fitRoom();
+}
+
+/** The room as big as whole pixels allow, clear of the papers. */
+function fitRoom() {
+  const f = indoorFiling();
+  if (!f?.shell) return;
+  const art = roomArt(roomSize(f.shell));
+  const tools = $("room-tools"), info = $("room-info");
+  const below = !tools.hidden ? (tools.offsetHeight + 16) * dpr : 0;
+  const above = canvas.height > canvas.width ? (info.offsetTop + info.offsetHeight + 8) * dpr : 0;
+  roomView = fit(art.w, art.h, below, above);
+}
+
+/** What's in the room, with whatever's being placed or dragged shown where it would go. */
+function roomScene(f: Filing, ghosts = true): RoomScene {
+  const all = insides.get(f.id) ?? [];
+  const things = all.filter((p) => p.room === "in" && !p.parent);
+  const ids = new Set(things.map((p) => p.id));
+  const held = all.filter((p) => p.parent && ids.has(p.parent));
+  const scene: RoomScene = { shell: f.shell!, things, held, ghost: null, hover: null, door: false };
+  const at = roomPointer;
+  if (!at) return scene;
+  scene.door = onDoor(f.shell!, at.x, at.y);
+  if (!ghosts || !mineIndoors() || scene.door) return scene;
+  if (roomDrag) {
+    const d = roomDrag;
+    scene.things = things.filter((p) => p.id !== d.p.id);
+    scene.held = held.filter((p) => p.id !== d.p.id);
+    scene.ghost = d.slot ? { ...d.p, parent: d.slot.holder.id, x: d.slot.slot, y: 0 } : { ...d.p, parent: null, x: d.x, y: d.y };
+  } else if (fitting(roomTool)) {
+    const slot = slotted(roomTool) ? slotAt(scene, at.x, at.y) : null;
+    const spot = !slot && spotFor(roomSize(f.shell!), roomTool, at.x, at.y);
+    const ghost = { id: 0, filing: f.id, prop: roomTool, room: "in" as const };
+    if (slot) scene.ghost = { ...ghost, x: slot.slot, y: 0, parent: slot.holder.id };
+    else if (spot) scene.ghost = { ...ghost, ...spot, parent: null };
+  } else {
+    const p = thingAt(scene, at.x, at.y);
+    if (p) scene.hover = { p, colour: roomTool === "remove" ? "#e05c48" : "#fff8e0" };
+  }
+  return scene;
+}
+
+function drawInside(now: number) {
+  const f = indoorFiling();
+  if (!f?.shell) return leaveRoom();
+  fill(SURROUND);
+  viewport(roomView);
+  const scene = roomScene(f);
+  drawRoom(ctx, scene, now);
+  canvas.style.cursor = scene.door ? "pointer"
+    : !mineIndoors() || !roomPointer ? ""
+    : roomTool === "move" ? (roomDrag ? "grabbing" : scene.hover ? "grab" : "")
+    : roomTool === "remove" ? (scene.hover ? "pointer" : "") : "crosshair";
+}
+
+function roomProblem(text: string) {
+  $("room-problem").textContent = text;
+}
+
+async function layOut(f: Filing, prop: string, at: { x: number; y: number }) {
+  const scene = roomScene(f, false);
+  const slot = slotted(prop) ? slotAt(scene, at.x, at.y) : null;
+  const spot = slot ? null : spotFor(roomSize(f.shell!), prop, at.x, at.y);
+  if (!slot && !spot) return roomProblem("It won't go there.");
+  const result = slot ? await placeInside(f.id, slot.slot, 0, prop, slot.holder) : await placeInside(f.id, spot!.x, spot!.y, prop, null);
+  if (typeof result === "string") return roomProblem(result);
+  roomProblem("");
+  addPlacement(result);
+}
+
+/** Take a thing down, and whatever it held with it (the database cascades the same). */
+function takeOut(p: Placement) {
+  const gone = [p, ...(insides.get(p.filing) ?? []).filter((c) => c.parent === p.id)];
+  for (const g of gone) removePlacement(g.id);
+  unplace(p.id).then((ok) => ok || gone.forEach(addPlacement));
+}
+
+canvas.addEventListener("pointerdown", (e) => {
+  const f = indoorFiling();
+  if (!f?.shell || zoom) return;
+  const at = toArt(e, roomView);
+  roomPointer = at;
+  if (e.button === 0 && onDoor(f.shell, at.x, at.y)) return leaveRoom();
+  if (!mineIndoors()) return;
+  const p = thingAt(roomScene(f, false), at.x, at.y);
+  if (e.button === 2 || roomTool === "remove") return void (p && takeOut(p));
+  if (e.button !== 0) return;
+  if (roomTool === "move") {
+    if (!p) return;
+    roomDrag = { p, x: p.x, y: p.y, slot: null };
+    canvas.setPointerCapture(e.pointerId);
+  } else if (fitting(roomTool)) void layOut(f, roomTool, at);
+});
+
+canvas.addEventListener("pointermove", (e) => {
+  const f = indoorFiling();
+  if (!f?.shell) return;
+  const at = (roomPointer = toArt(e, roomView));
+  const d = roomDrag;
+  if (!d) return;
+  const scene = roomScene(f, false);
+  scene.held = scene.held.filter((p) => p.id !== d.p.id);
+  d.slot = slotted(d.p.prop) ? slotAt(scene, at.x, at.y) : null;
+  const spot = !d.slot && spotFor(roomSize(f.shell), d.p.prop, at.x, at.y);
+  if (spot) Object.assign(d, spot);
+});
+
+canvas.addEventListener("pointerup", async () => {
+  const d = roomDrag;
+  if (indoors === null || !d) return;
+  roomDrag = null;
+  const to = d.slot ? { x: d.slot.slot, y: 0, parent: d.slot.holder.id } : { x: d.x, y: d.y, parent: null };
+  if (to.x === d.p.x && to.y === d.p.y && to.parent === (d.p.parent ?? null)) return;
+  setPlacement({ ...d.p, ...to });
+  const err = await moveInside(d.p.id, to.x, to.y, to.parent);
+  if (err) {
+    setPlacement(d.p);
+    roomProblem(err);
+  } else roomProblem("");
+});
+
+canvas.addEventListener("pointerleave", () => {
+  if (!roomDrag) roomPointer = null;
+});
 
 // --- the map ---------------------------------------------------------------
 
@@ -1356,6 +1602,8 @@ function frame(now: number) {
   last = now;
   if (zoom) {
     drawZoom(now);
+  } else if (indoors !== null) {
+    drawInside(now);
   } else if (focus) {
     fill(SURROUND);
     viewport(focusView);
@@ -1414,7 +1662,8 @@ function upsert(f: Filing) {
 }
 
 function regroup(filing: number) {
-  built.set(filing, [...placements.values()].filter((p) => p.filing === filing));
+  built.set(filing, [...placements.values()].filter((p) => p.filing === filing && p.room !== "in" && !p.parent));
+  regroupInside(filing);
 }
 
 function addPlacement(p: Placement) {

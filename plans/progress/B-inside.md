@@ -12,10 +12,10 @@ Slice B of `plans/building-and-enforcement-slices.md`. Resume from the first unt
 - [x] 8. Look at it (screenshot) and tune.
 - [x] 9. `db/logic.sql`: own section, `room_size()`/`placeable()`; placement policies and grants take room/parent.
 - [x] 10. `src/net.ts`: own section, placeInside / moveInside.
-- [ ] 11. `src/main.ts` hooks: regroup keeps inside things off the plot, frame draws the room, handlers step aside.
-- [ ] 12. `src/main.ts` own section: going in (door click, button) and out (door, button, Escape, wheel); visitors read-only.
-- [ ] 13. `src/main.ts`: laying out inside: place, move, take down, put in slots.
-- [ ] 14. `npm run build`, `npm test`.
+- [x] 11. `src/main.ts` hooks: regroup keeps inside things off the plot, frame draws the room, handlers step aside.
+- [x] 12. `src/main.ts` own section: going in (door click, button) and out (door, button, Escape, wheel); visitors read-only.
+- [x] 13. `src/main.ts`: laying out inside: place, move, take down, put in slots.
+- [x] 14. `npm run build`, `npm test`.
 - [ ] 15. Final notes below, commit.
 
 ## Notes
@@ -25,3 +25,5 @@ Slice B of `plans/building-and-enforcement-slices.md`. Resume from the first unt
 - Step 8: screenshots via `npx playwright@1.61 screenshot` (matches the cached chromium) against `npx vite --port 5291`. Lighter timber walls; lamp glow clipped to the room and smaller.
 - Step 9: logic.sql section "Inside and in things (slice B)" before the placements block: room_size(jsonb) mirrors roomSize(); placeable(id, filing, room, parent, x, y) replaces in_plot in the insert/update policies. Grants add room, parent to insert and update. Not run against any database (no local postgres); check on merge.
 - Step 10: net.ts section at the end: placeInside(filing, x, y, prop, holder|null) and moveInside(id, x, y, parent).
+- Steps 11-13: main.ts section "inside" before "the map". Hooks elsewhere (one line each): imports; regroup() keeps room 'in' and held things off `built` (so off the plot and the mini) and calls regroupInside(); frame() draws the room when indoors; the plot's pointer/click handlers return when indoors, pointerdown tries knock() (door up close) first; wheel/Escape leave the room; resize() fits it; renderBuildInfo() shows the Go inside button. index.html: #go-in in #build, #room section and its CSS. Focus stays on the plot while indoors.
+- Step 14: build and tests pass.
