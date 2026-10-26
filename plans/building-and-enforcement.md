@@ -2,8 +2,9 @@
 
 Today you file for "a karate studio", and once it's granted you decorate the
 plot with geese and benches. The thing you filed for never gets built. This
-doc proposes that the filing becomes a place, and gives three ways to hold
-that place to its permit.
+doc proposes that the filing becomes a place, held to its permit in two
+ways: by the letter for what's built, and by the spirit for what it's used
+for.
 
 Two things hold throughout:
 
@@ -82,20 +83,23 @@ doesn't, he draws the piece, once, and anyone who files for the same thing
 later gets the same drawing. Drawn pieces will vary in quality, and the
 library has to be good enough to carry them.
 
-### Decisions, and which way I lean
+### Decisions
 
-- **How deep things nest:** plot, then inside, then in things, and no
-  deeper. Rooms within rooms is a lot of interface for not much play.
-- **Bigger on the inside:** the room is sized off the footprint, but
-  generously. An interior larger than its exterior is a variation for the
+- **Nesting stops at three levels:** the plot, the inside, and things in
+  things. Rooms within rooms is a lot of interface for not much play.
+- **Bigger on the inside** (my lean): the room is sized off the footprint,
+  but generously. An interior larger than its exterior is a variation for the
   committee.
-- **Does the place do anything:** classes at six, a library that lends, an
-  open sign. Not at first, but it's the next big layer, and B below needs it
-  eventually.
+- **What the place does:** to start, just enough for the spirit to read: an
+  open sign and a what's-on board (below). Real activities, like classes at
+  six, come later.
 
 ## Holding it to its permit
 
-### A. The letter: Gary checks the schedule
+Two layers. The letter governs what's built, and the spirit governs what it's
+used for.
+
+### The letter: what's built
 
 Gary comes round with the schedule, outside and in, and asks about anything
 that isn't on it. If you're there, he asks you then and there. If you're
@@ -121,38 +125,44 @@ variations the way a place grows. *Risk:* it can feel like inventory
 policing, so it lives or dies on Gary being reasonable about what's
 ancillary.
 
-### B. The spirit: Gary checks the use
+### The spirit: what it's used for
 
-The permit is for a use, not a list. Gary doesn't count things. Now and then
-he looks in and asks one question: is this still a karate studio?
+Gary doesn't count anything for this. He reads what's going on and asks one
+question: is this still a karate studio?
 
-- **Drift:** a few tables and a teapot are fine. When it's mostly tables and
-  teapots, it's a tea room, and that's a change of use without permission.
+- **What he reads:** the what's-on board by the door (the holder's own
+  notices, a line each: *Beginners' kata, Thursdays at six*), the visitors'
+  book, whether the place is open, and how it's laid out.
+- **Drift:** *Teas on Saturdays* is fine. It drifts when the board says teas
+  every day, the book says lovely scones, and the mats are under the tables.
+  Every table was permitted, one variation at a time, for parents waiting.
+  Now the place is a tea room, and that's a change of use without
+  permission. The spirit catches what the letter can't: a place that's
+  turned into something else one permitted step at a time.
 
   > **Gary:** This is a tea room. You've a permit for a karate studio.
 
 - **Notice:** put it back, or file for a change of use. Filed before the
-  drift ("the studio's doing teas on Saturdays"), it might be granted as a
+  drift (*the studio's doing teas on Saturdays*), it might be granted as a
   mixed use.
-- **Shown on the permit:** his last reading sits under it, so the line is
-  visible before you cross it: *Mostly a karate studio. Some tea.*
-- **Disuse:** a place nobody has opened or changed in a long while gets
-  boarded up, intact. If someone else files for the plot, the holder gets a
-  week's notice to reopen it. This also answers what to do about plots held
-  by people who've left.
+- **Shown on the permit:** his last reading sits under it, so you can see
+  the line before you cross it: *Mostly a karate studio. Some tea.*
+- **Disuse:** a place with nothing on, no visitors and no changes in a long
+  while gets boarded up, intact. If someone else files for the plot, the
+  holder gets a week's notice to reopen it. This also answers what to do
+  about plots held by people who've left.
 
 *Why:* this is the judgement the model is best at, and it's the comedy of a
-tired man telling you your dojo has become a tea room. It doesn't care about
-one hot tub. *Risk:* it's fuzzy, which is why the reading on the permit
-matters.
+tired man telling you your dojo has become a tea room. *Risk:* it's fuzzy,
+which is why the reading on the permit matters.
 
-### C. The visitors: the commons checks itself
+### Later: the visitors
 
-Places are open, so visitors see insides Gary hasn't.
+Once there are enough residents visiting each other's places, the commons
+can check itself:
 
-- **The visitors' book:** every place has one. Visitors leave a line, and
-  the support adds up: two neighbours vouching for a variation all but
-  carries it.
+- **Support:** lines in a place's visitors' book count when its holder files
+  a variation. Two neighbours vouching all but carries it.
 - **Reports:** a visitor can report something they found, citing the
   schedule, never the person. Reports carry the visitor's name and are
   limited in number, and Gary goes round to see. A frivolous one goes on the
@@ -164,15 +174,3 @@ Places are open, so visitors see insides Gary hasn't.
 - **The file:** everyone has one at the hut. Good standing brings quicker
   rulings, fewer conditions, and eventually a resident's seat on the
   committee with a real vote.
-
-*Why:* being visited is the point of building a place, and this makes other
-people's opinions part of the game. *Risk:* spite in a small place. Reports
-are read before anyone else sees them, and they're only ever about a thing.
-
-## A pick
-
-A, as the base. The schedule only means something if unscheduled things are
-unauthorised, and that's what makes going back to Gary the way a place grows.
-Take change of use from B as the big variation, since it's the funniest
-filing in the game. Add C once there are enough residents visiting each
-other's places for it to matter.
