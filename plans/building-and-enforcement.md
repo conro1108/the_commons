@@ -87,7 +87,7 @@ library has to be good enough to carry them.
 
 - **Nesting stops at three levels:** the plot, the inside, and things in
   things. Rooms within rooms is a lot of interface for not much play.
-- **Bigger on the inside** (my lean): the room is sized off the footprint,
+- **Bigger on the inside:** the room is sized off the footprint,
   but generously. An interior larger than its exterior is a variation for the
   committee.
 - **What the place does:** to start, just enough for the spirit to read: an
