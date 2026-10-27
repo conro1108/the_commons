@@ -5,6 +5,7 @@
 import { CANON, K, type PropDef } from "./canon/props.ts";
 import { ZOOM } from "../world/index.ts";
 import { FEATURES } from "./features.ts";
+import { FITTINGS } from "./fittings.ts";
 
 const COMMONS: Record<string, PropDef> = {
   item: {
@@ -355,9 +356,12 @@ const COMMONS: Record<string, PropDef> = {
 };
 
 // Features join as "feature:boulder" and so on: drawable, never on the palette.
+// Library fittings join under their own keys, so a placement of one draws anywhere.
 const PROPS: Record<string, PropDef> = Object.assign(
   Object.create(null), CANON, COMMONS, Object.fromEntries(Object.entries(FEATURES).map(([k, v]) => [`feature:${k}`, v])),
 );
+for (const k in FITTINGS) if (k in PROPS) throw new Error(`fitting "${k}" is already a prop`); // test/fittings.test.ts trips this
+Object.assign(PROPS, FITTINGS);
 
 /** The build palette, in groups. Gary keeps the notice. */
 export const PALETTE: { group: string; props: string[] }[] = [
