@@ -1,0 +1,35 @@
+# B. Inside: progress
+
+Slice B of `plans/building-and-enforcement-slices.md`. Resume from the first unticked step.
+
+- [x] 1. Progress file. Read the design, slices, foundation (`src/schedule.ts`, `db/alters/0-foundation.sql`).
+- [x] 2. Fittings stand-in behind one seam (`src/interior-fittings.ts`, read only through `fitting()` in interior.ts).
+- [x] 3. `src/interior.ts` geometry: room size off the shell, wall rows, cells to art, doors in and out.
+- [x] 4. Drawing the room: floor, back and side walls, front lip, windows, door.
+- [x] 5. Things in the room, and things in things (slots), with hit tests.
+- [x] 6. Light: window pools by hour, time-of-day grade, lamps after dark.
+- [x] 7. `dev/room.html`: fake shell, fittings, held things; ?w ?h ?hour ?door ?windows ?material ?scale.
+- [x] 8. Look at it (screenshot) and tune.
+- [x] 9. `db/logic.sql`: own section, `room_size()`/`placeable()`; placement policies and grants take room/parent.
+- [x] 10. `src/net.ts`: own section, placeInside / moveInside.
+- [x] 11. `src/main.ts` hooks: regroup keeps inside things off the plot, frame draws the room, handlers step aside.
+- [x] 12. `src/main.ts` own section: going in (door click, button) and out (door, button, Escape, wheel); visitors read-only.
+- [x] 13. `src/main.ts`: laying out inside: place, move, take down, put in slots.
+- [x] 14. `npm run build`, `npm test`.
+- [x] 15. Final notes below, commit.
+
+## Notes
+- Step 2: stand-in is src/interior-fittings.ts (18 pieces). RoomFitting = PropDef + on floor|wall, flat, slots [cx, bottom y], small, lamp, vary. Delete on merge with F.
+- Steps 3-6: src/interior.ts. Room = min(44, max(8, 2w)) x min(32, max(6, 2h) + WALL), WALL = 5 rows of back wall at the top of the grid. Cutaway: PAD art px of wall top round it, door/windows sit in it ('n' ones on the back wall face). doorOutside() is the seam to A (middle of the door side). Anchors are top-left cells; wall things must sit in rows < WALL, floor things' foot on the floor. No overlap check (outdoors has none either).
+- Step 7: dev/room.html with knobs for hour/w/h; ?door ?windows ?material ?paint ?scale ?bare.
+- Step 8: screenshots via `npx playwright@1.61 screenshot` (matches the cached chromium) against `npx vite --port 5291`. Lighter timber walls; lamp glow clipped to the room and smaller.
+- Step 9: logic.sql section "Inside and in things (slice B)" before the placements block: room_size(jsonb) mirrors roomSize(); placeable(id, filing, room, parent, x, y) replaces in_plot in the insert/update policies. Grants add room, parent to insert and update. Not run against any database (no local postgres); check on merge.
+- Step 10: net.ts section at the end: placeInside(filing, x, y, prop, holder|null) and moveInside(id, x, y, parent).
+- Steps 11-13: main.ts section "inside" before "the map". Hooks elsewhere (one line each): imports; regroup() keeps room 'in' and held things off `built` (so off the plot and the mini) and calls regroupInside(); frame() draws the room when indoors; the plot's pointer/click handlers return when indoors, pointerdown tries knock() (door up close) first; wheel/Escape leave the room; resize() fits it; renderBuildInfo() shows the Go inside button. index.html: #go-in in #build, #room section and its CSS. Focus stays on the plot while indoors.
+- Step 14: build and tests pass.
+- Step 15: done. For the merge:
+  - Seam F: `src/interior.ts` imports FITTINGS from `src/interior-fittings.ts` (marked SEAM). Point it at `src/content/fittings.ts`, adapt in `fitting()` (needs rows/palette, on floor|wall, slots [cx, bottom y], small, flat, lamp, vary), delete the stand-in. Placed keys must still match `^[a-z_]{1,24}$`.
+  - Seam A: `doorOutside(shell)` in interior.ts guesses the door is mid-side, 2 cells; swap for A's own door cells. Material keys guessed: timber/wood/log, brick, stone/flint, else plaster (finishOf()). `paint` is the wall-top colour if it's a hex.
+  - Things held by an outdoor holder aren't drawn on the plot yet: closeup.ts (A's) can call `drawHeld()` from interior.ts.
+  - Not tried in the live app (no shell can exist until A lands, and no network here); dev/room.html is the check.
+  - No schema change; policies/grants only (db/logic.sql), nothing to hand-run.

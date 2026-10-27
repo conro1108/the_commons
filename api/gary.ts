@@ -943,7 +943,7 @@ export type Db = SupabaseClient<any, any, any>;
 export async function survey(db: Db, f: { id: number; plot: number; ground: string | null }): Promise<Evidence> {
   const plot = plotOf(f.plot);
   const { w: W, h: H } = plot;
-  const { data: placed } = await db.from("placements").select("prop, size, x, y, label, label_ok, sprite").eq("filing", f.id).order("id");
+  const { data: placed } = await db.from("placements").select("prop, size, x, y, label, label_ok, sprite").eq("filing", f.id).eq("room", "out").is("parent", null).is("impounded_at", null).order("id");
   // Each thing by the cells it covers, not just its anchor, so "beside" can be judged.
   const boxes = [
     ...plot.features.map((x) => ({ name: `${x.kind.replace("_", " ")} (already there)`, x0: x.x, y0: x.y, x1: x.x + x.w - 1, y1: x.y + x.h - 1 })),
