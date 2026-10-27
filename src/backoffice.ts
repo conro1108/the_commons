@@ -13,7 +13,7 @@ interface Call { step: string; model: string; sent: any; got?: any; reasoning?: 
 const FLOWS = {
   life: ["File it", "Gary rules, and the committee sits if he refers it. Denied, you write back."],
   committee: ["Straight to committee", "As if Gary referred it: five councillors, Jev hears the votes, the clerk writes it up."],
-  draw: ["Draw", "Sonnet plans its silhouette, then draws it as a sprite, taking the filing as the thing's name."],
+  draw: ["Draw", "Haiku plans its silhouette, draws it as a sprite, then looks it over, taking the filing as the thing's name."],
 } as const;
 type Flow = keyof typeof FLOWS;
 const STATUS: Record<string, string> = {

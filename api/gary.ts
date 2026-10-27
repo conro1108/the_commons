@@ -20,12 +20,14 @@ import world from "../src/world/plots.json" with { type: "json" };
 import type { PlotDef, Region, Side, World } from "../src/world/types.ts";
 // The first runtime imports from src/ (pure, DOM-free): see "the schedule" below.
 import { LIBRARY, MATERIALS, closest } from "../src/library.ts";
+import { spritePng } from "../src/png.ts";
 import { changeUse, isFitting, norm, scheduled, vary, type Addition, type Fate, type Fitting, type Schedule, type Where, useOf } from "../src/schedule.ts";
 
 const JUDGE = "typesafe-ai/jev";
 const SCRIBE = "anthropic/claude-haiku-5.5";
-const CAREFUL = "anthropic/claude-sonnet-5.5"; // the clerk's second go, once Haiku's first has been sent back
-const DRAWER_MODEL = "anthropic/claude-sonnet-5.5"; // no reasoning, but the silhouette planned first: picked by eye over Haiku thinking, and a fifth of the time
+const CAREFUL_THINKING = "high"; // the clerk's second go, once the first has been sent back. Haiku throughout: Sonnet cost more than everything else together
+const DRAW_THINKING = "xhigh"; // drawing is spatial, off the hot path, and Haiku's cheap: about 40s a go
+const LOOK_THINKING = "high"; // looking it over. Together they run 40s to 4min, near Vercel's 300s with retries
 const LIGHT_THINKING = "medium"; // short prose, but some thought keeps it on the facts
 
 // Run inside transcript.run() (the back office does), every model call is
@@ -58,7 +60,7 @@ function ask<const Q extends Record<string, Experimental_DecisionQuestion>>(step
 }
 
 /** A model writes prose from an input: the scribe, unless another's named. */
-function write(step: string, o: { model?: string; reasoning: "none" | "low" | "medium" | "high"; system: string; prompt: object; maxOutputTokens: number }) {
+function write(step: string, o: { model?: string; reasoning: "none" | "low" | "medium" | "high" | "xhigh"; system: string; prompt: object; maxOutputTokens: number }) {
   const model = o.model ?? SCRIBE;
   return minuted(
     step, model, { system: o.system, prompt: o.prompt },
@@ -665,8 +667,7 @@ export async function sit(
     const last = drafts.at(-1);
     // The finding is the record, so a draft sent back goes to the more careful clerk.
     const { text } = await write(`clerk's finding, draft ${attempt + 1}`, {
-      ...(last && { model: CAREFUL }),
-      reasoning: LIGHT_THINKING,
+      reasoning: last ? CAREFUL_THINKING : LIGHT_THINKING,
       system: CLERK,
       prompt: last ? { ...input, rejected: last.text, rejected_because: last.problems } : input,
       maxOutputTokens: 4000,
@@ -703,7 +704,7 @@ export async function sit(
     verdict,
     written,
     minutes: { outcome: `The committee has met, and the filing is ${OUTCOME(verdict)}, ${verdict.count}.`, finding, members },
-    record: { heard, answers, drafts, conditions: written?.tries, judge: JUDGE, clerk: SCRIBE, careful_clerk: CAREFUL },
+    record: { heard, answers, drafts, conditions: written?.tries, judge: JUDGE, clerk: SCRIBE },
   };
 }
 
@@ -1142,23 +1143,35 @@ function spriteProblems(raw: string): { sprite?: Sprite; problems: string[] } {
   return { sprite: { rows, palette: { ...s.palette, k: INK } }, problems };
 }
 
-/** Draw a written-in item. Every attempt is kept; null if none was usable. */
+/** Draw a written-in item, then look at it rendered and fix what stops it reading. Every attempt is kept; null if none was usable. */
 export async function draw(label: string): Promise<{ sprite: Sprite | null; drafts: { text: string; problems: string[] }[] }> {
   const drafts: { text: string; problems: string[] }[] = [];
   for (let i = 0; i < 3; i++) {
     const last = drafts.at(-1);
     const { text } = await write(`sprite, draft ${i + 1}`, {
-      model: DRAWER_MODEL,
-      reasoning: "none",
+      reasoning: DRAW_THINKING,
       system: DRAWER,
       prompt: last ? { draw: label, rejected: last.text, rejected_because: last.problems } : { draw: label },
-      maxOutputTokens: 2000,
+      maxOutputTokens: 32000, // reasoning counts against it
     });
     const { sprite, problems } = spriteProblems(text);
     drafts.push({ text, problems });
-    if (sprite && !problems.length) return { sprite, drafts };
+    if (sprite && !problems.length) return { sprite: (await lookOver(label, sprite, drafts)) ?? sprite, drafts };
   }
   return { sprite: null, drafts };
+}
+
+/** One look at the drawing rendered: corrected if it doesn't read, else as it was. Null if the correction won't do. */
+async function lookOver(label: string, sprite: Sprite, drafts: { text: string; problems: string[] }[]) {
+  const text = `You drew "${label}" as this sprite:\n${JSON.stringify(sprite)}\nHere it is rendered (white is transparent). Does it read as ${label} at a glance? If not, fix whatever stops it reading. Reply with the JSON only, corrected, or unchanged if it already reads.`;
+  const { text: got } = await minuted("sprite, looked over", SCRIBE, { system: DRAWER, prompt: text },
+    () => generateText({ model: SCRIBE, reasoning: LOOK_THINKING, system: DRAWER, maxOutputTokens: 32000, messages: [{ role: "user", content: [
+      { type: "text", text }, { type: "file", data: spritePng(sprite), mediaType: "image/png" },
+    ] }] }),
+    (r) => ({ got: r.text, reasoning: r.reasoningText }));
+  const looked = spriteProblems(got);
+  drafts.push({ text: got, problems: looked.problems });
+  return looked.sprite && !looked.problems.length ? looked.sprite : null;
 }
 
 /** Audit one granted plot. Sent by send_auditor() once it's been built on since he last came. */
