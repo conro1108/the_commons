@@ -26,8 +26,8 @@ import { changeUse, isFitting, norm, scheduled, vary, type Addition, type Fate, 
 const JUDGE = "typesafe-ai/jev";
 const SCRIBE = "anthropic/claude-haiku-5.5";
 const CAREFUL_THINKING = "high"; // the clerk's second go, once the first has been sent back. Haiku throughout: Sonnet cost more than everything else together
-const DRAW_THINKING = "xhigh"; // drawing is spatial, off the hot path, and Haiku's cheap: about 40s a go
-const LOOK_THINKING = "high"; // looking it over. Together they run 40s to 4min, near Vercel's 300s with retries
+const DRAW_THINKING = "high"; // drawing is spatial and off the hot path. xhigh was ~40s a draft, minutes with retries
+const LOOK_THINKING = "high"; // looking it over, rendered
 const LIGHT_THINKING = "medium"; // short prose, but some thought keeps it on the facts
 
 // Run inside transcript.run() (the back office does), every model call is
