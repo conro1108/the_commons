@@ -18,6 +18,6 @@ Branch `worktree-agent-acc722659ac2419b9`. Resume from the first unticked step.
 - [x] 13b. Matched slice B's shape (coordinator's note): `small` (= held), `flat` (Underfoot), `lamp`, `vary` (palette overrides per slot, cycled), `slotAt()` turns a slot box into [centre x, bottom y]. Slots themselves stay boxes (size + hang); see final note.
 - [x] 14. Register fittings as props (one line in props.ts) so placements draw; throws on a key collision. Notes: props.ts imports FITTINGS and merges after a collision check; props.footprint() is wrong for fittings (uses sprite height), use f.w/f.d.
 - [x] 15. (done early, to judge as I go) `dev/library.html` + `dev/library.ts`: every piece on a floor/wall patch, footprint and slots marked; ?scale ?floor ?wall ?stock ?slots ?only ?group ?room.
-- [ ] 16. Look at it by eye (headless Chrome screenshot via a /tmp script, vite on :5199) and fix what looks off.
-- [ ] 17. test/fittings.test.ts (written early as the validator; the matching test fails until all pieces exist).
+- [x] 16. Look at it by eye (headless Chrome screenshot via a /tmp script, vite on :5199) and fix what looks off. Fixed: quieter boards and parquet, bigger quarry tiles, softer checker, clock rim, dev card room for hung things.
+- [x] 17. test/fittings.test.ts (written early as the validator; the matching test fails until all pieces exist). Passes: keys, art, slots, stock fits, and the design's schedule lines match.
 - [ ] 18. `npm run build`, `npm test`, final commit, note for B and C.

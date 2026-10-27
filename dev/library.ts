@@ -98,7 +98,7 @@ if (q.get("room") !== "0" && !only && !group) {
   tile(ctx, FLOORS[floorKey], 0, WALL, W, H - WALL);
   // [key, cell x, cell y of the footprint's back row]; wall pieces: y is px up the wall from the floor line
   const room: [string, number, number][] = [
-    ["chalkboard", 25, 16], ["wall_clock", 12, 22], ["picture", 17, 16], ["coat_hooks", 6, 9],
+    ["chalkboard", 25, 16], ["wall_clock", 12, 22], ["picture", 17, 16],
     ["bookcase", 1, 0], ["shelf_unit", 6, 0], ["fireplace", 12, 0], ["pot_plant", 19, 0], ["dresser", 21, 0],
     ["rug", 9, 6], ["armchair", 4, 6], ["side_table", 1, 7], ["table", 15, 7], ["chair", 13, 8], ["chair", 19, 8],
     ["floor_lamp", 1, 11], ["sofa", 8, 12], ["punching_bag", 27, 6], ["tatami", 24, 12], ["tatami", 28, 12],
@@ -128,7 +128,8 @@ for (const [name, list] of groups) {
   for (const [k, f] of list) {
     const pw = f.rows[0].length, ph = f.rows.length, pad = 4;
     const lift = Math.max(0, ...(f.slots ?? []).map((s) => -s.y)); // room for things stood on tops
-    const W = pw + pad * 2, H = ph + pad * 2 + lift;
+    const drop = f.on === "wall" ? Math.max(0, ...(f.slots ?? []).map((s) => s.y + s.h - ph)) : 0; // and for things hung below
+    const W = pw + pad * 2, H = ph + pad * 2 + lift + drop;
     const info = f.held ? `held (${f.held})` : `${f.on} ${f.w}×${f.d}`;
     const slots = f.slots ? ` · ${f.slots.length} slot${f.slots.length > 1 ? "s" : ""}${f.stock ? ` of ${f.stock}` : ""}` : "";
     const ctx = card(g, W, H, `<b>${k}</b><br>${f.name}<br><small>${info}${slots}</small>`);
