@@ -34,10 +34,10 @@ test("a draft goes out only if it has no link and the checker flags nothing", ()
 
 test("the committee needs a quorum; a majority against denies under the most-cited bylaw; a split carries on condition", () => {
   assert.equal(tally(["approved", "b2", null, null, null], "flag"), null);
-  assert.deepEqual(tally(["b3", "b1", "b3", "approved", null], "flag"), { status: "denied", condition: null, bylaw: 3, count: "1 to 3, 1 abstaining" });
+  assert.deepEqual(tally(["b3", "b1", "b3", "approved", null], "flag"), { status: "denied", condition: null, bylaw: 3, count: "1 for, 3 against, 1 abstaining" });
   assert.equal(tally(["approved", "approved", "approved", "b2", "conditional"], "flag")?.status, "approved");
-  assert.deepEqual(tally(["against", "b7", "against", "approved", "abstain"], "flag"), { status: "denied", condition: null, bylaw: 7, count: "1 to 3, 1 abstaining" });
-  assert.deepEqual(tally(["against", "against", "approved", "abstain", null], "flag"), { status: "denied", condition: null, bylaw: null, count: "1 to 2, 2 abstaining" });
+  assert.deepEqual(tally(["against", "b7", "against", "approved", "abstain"], "flag"), { status: "denied", condition: null, bylaw: 7, count: "1 for, 3 against, 1 abstaining" });
+  assert.deepEqual(tally(["against", "against", "approved", "abstain", null], "flag"), { status: "denied", condition: null, bylaw: null, count: "1 for, 2 against, 2 abstaining" });
   assert.equal(tally(["abstain", "abstain", "abstain", "approved", "conditional"], "flag")?.returned, true);
   assert.equal(tally(["approved", "approved", "conditional", "b2", "b4"], "flag")?.condition, "flag");
 });

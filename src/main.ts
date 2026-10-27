@@ -641,7 +641,7 @@ function renderTools(f: Filing) {
   const wants = new Set(f.wants && !f.met_at ? [f.wants] : []);
   for (const b of $("palette").querySelectorAll<HTMLButtonElement>("[data-tool]")) {
     b.classList.toggle("on", b.dataset.tool === tool);
-    b.classList.toggle("wanted", wants.has(b.dataset.tool!.slice(5)));
+    b.classList.toggle("wanted", wants.has(b.dataset.tool!.replace(/^prop:/, "")));
   }
   $("palette").querySelector(".write-in")?.classList.toggle("on", tool.startsWith("item:"));
   for (const b of $("palette").querySelectorAll<HTMLButtonElement>("[data-size]")) b.classList.toggle("on", Number(b.dataset.size) === size);
