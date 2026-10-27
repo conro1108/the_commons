@@ -1172,7 +1172,7 @@ begin
   x := (s->>'x')::int; y := (s->>'y')::int; w := (s->>'w')::int; h := (s->>'h')::int;
   big := coalesce(s->>'kind', 'building') = 'enclosure';
   if coalesce(s->>'kind', 'building') not in ('building', 'enclosure')
-      or w < 3 or h < 3 or w > case when big then 32 else 20 end or h > case when big then 26 else 14 end then
+      or w < 3 or h < 3 or w > (case when big then 32 else 20 end) or h > (case when big then 26 else 14 end) then
     raise exception 'That footprint is the wrong size.' using errcode = '23514';
   end if;
   if exists (select 1 from generate_series(x, x + w - 1) cx, generate_series(y, y + h - 1) cy
