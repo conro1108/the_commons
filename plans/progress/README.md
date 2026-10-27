@@ -36,7 +36,7 @@ seams are wired. Merged so far (tick as done):
 - [x] F merged clean; B and C pointed at FITTINGS/bestFitting, stand-ins deleted (322f466)
 - [x] A merged (7bb699b); B door -> doorAt, C materials mirror A's keys; D questionnaire still by the gatepost (left as is)
 - [x] alters 3-6 applied live; logic.sql applied twice by hand (fixed CASE-in-IF in A's shell_built); integrate merged to main and pushed
-- [ ] verify Vercel bundles api/ runtime imports from src/ (preview or prod)
+- [x] Vercel loads api/gary.ts with its src/ runtime imports (prod answers 401, not 500)
 
 ## Merge order (planned, superseded by Integration above)
 
@@ -61,3 +61,4 @@ logic.sql), tick it below.
 - A finished (no alters file; logic.sql section 'The shell (slice A)' + a branch in drain_gary for signs, expect conflict). Merge notes: B use doorCell()/doorAt()/shell.windows from src/shell.ts instead of its doorOutside() guess; B filter clicks to outdoor placements up close; D anchor tags with shellBox(); C's schedule material must use A's MATERIALS keys (timber, brick, stone, render, tin, glass, picket, wattle, hedge) — replace src/library.ts stand-in materials; B's finishOf() keys likewise.
 - F finished; A and F merged. Remaining: library seams, apply alters, push, Vercel check.
 - Integration complete and on main. Remaining: confirm Vercel loads api/gary.ts with its src/ runtime imports.
+- Done. CI db run green after committing the CASE fix to main (it had only been applied by hand). Worktrees kept under .claude/worktrees (now gitignored); branches kept.
