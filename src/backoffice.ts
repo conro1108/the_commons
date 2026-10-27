@@ -176,7 +176,6 @@ const STYLE = `
   #dev h3 { margin: 12px 0 4px; }
   #dev textarea, #dev input, #dev select { font: inherit; border: 2px solid #402e3a; background: #fbf4dc; padding: 4px 8px; }
   #dev textarea { display: block; width: 100%; box-sizing: border-box; padding: 8px 10px; resize: vertical; }
-  #dev .picker { margin-top: 16px; }
   #dev .picker canvas { display: block; width: 100%; image-rendering: pixelated; cursor: pointer; border: 2px solid #402e3a; }
   #dev .picker .card { min-height: 9em; margin-top: 10px; }
   #dev .picker .card h3 { margin: 0; text-transform: none; letter-spacing: 0; font-size: 14px; color: inherit; }
@@ -186,7 +185,8 @@ const STYLE = `
   #dev .flow:has(input:checked) { border-color: #402e3a; background: #ffe9a8; box-shadow: 2px 2px 0 #402e3a; }
   #dev .flow input { position: absolute; opacity: 0; pointer-events: none; }
   #dev .flow b { display: block; } #dev .flow span { display: block; font-size: 12px; color: #7a6a8a; line-height: 1.35; }
-  #dev .go { margin-top: 20px; padding: 8px 26px; font-size: 15px; }
+  #dev .flows + textarea { margin-top: 14px; }
+  #dev .go { margin-top: 12px; padding: 8px 26px; font-size: 15px; }
   #dev .dim, #dev .k { color: #8a7a98; } #dev .k { margin-right: 6px; }
   #dev blockquote { margin: 10px 0 14px; padding: 10px 14px; background: #fbf4dc; border: 1px dashed #c9b88f; white-space: pre-wrap; }
   #dev .stamp { display: inline-block; padding: 1px 8px; border: 2px solid; font-weight: bold; font-size: 12px; text-transform: uppercase; letter-spacing: .06em; }
@@ -225,18 +225,16 @@ function mount(first: number): HTMLElement {
   panel.innerHTML = `<button class="close" aria-label="Close">×</button>
     <h1>Back office</h1>
     <p class="dim">A dry run: nothing is written to the commons.</p>
-    <section>
-      <h2>The filing</h2>
-      <textarea name="intent" rows="3" maxlength="120" placeholder="a bench, for looking at the pond with"></textarea>
-      <div class="picker" data-for="life committee">
-        <canvas width="${MAP_W}" height="${MAP_H}"></canvas>
-        <div class="card"></div>
-      </div>
+    <section class="picker" data-for="life committee">
+      <h2>The plot</h2>
+      <canvas width="${MAP_W}" height="${MAP_H}"></canvas>
+      <div class="card"></div>
     </section>
     <section>
-      <h2>What happens to it</h2>
+      <h2>The filing, and what happens to it</h2>
       <div class="flows">${Object.entries(FLOWS).map(([k, [name, blurb]], i) =>
         `<label class="flow"><input type="radio" name="flow" value="${k}"${i ? "" : " checked"}><b>${name}</b><span>${blurb}</span></label>`).join("")}</div>
+      <textarea name="intent" rows="3" maxlength="120" placeholder="a bench, for looking at the pond with"></textarea>
       <button class="go">Run</button>
     </section>
     <section class="out" hidden>
