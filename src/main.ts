@@ -1780,9 +1780,10 @@ function wireLetter(paper: HTMLElement) {
       unplace(p.id).then((ok) => ok || setPlacement(p));
     });
     box.querySelector(".file-for")?.addEventListener("click", async () => {
-      const problem = await fileRetrospective(t);
-      box.querySelector(".problem")!.textContent = problem ?? "";
-      if (!problem) renderAll();
+      const got = await fileRetrospective(t);
+      if (typeof got === "string") return void (box.querySelector(".problem")!.textContent = got);
+      setVariation(got);
+      renderAll();
     });
   }
 }

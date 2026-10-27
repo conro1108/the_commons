@@ -193,7 +193,8 @@ create table if not exists the_commons.variations (
   minutes       jsonb, -- the committee's, for a material one
   record        jsonb, -- the models' answers and drafts; stored, never regenerated
   filed_at      timestamptz not null default now(),
-  heard_at      timestamptz
+  heard_at      timestamptz,
+  tag           bigint -- the red tag it's filed for (retrospective); references tags, added below them
 );
 create index if not exists variations_filing on the_commons.variations (filing, id);
 create unique index if not exists variations_open on the_commons.variations (filing)
@@ -232,6 +233,10 @@ create table if not exists the_commons.tags (
 create unique index if not exists tags_open on the_commons.tags (placement) where status in ('asked', 'tagged', 'filed');
 create index if not exists tags_filing on the_commons.tags (filing);
 alter table the_commons.tags enable row level security;
+-- A retrospective variation's tag (db/alters/6-retrospective.sql): tags come after variations here.
+do $$ begin
+  alter table the_commons.variations add constraint variations_tag_fkey foreign key (tag) references the_commons.tags on delete set null;
+exception when duplicate_object then null; end $$;
 -- The spirit: the what's-on board by a place's door (the holder's notices, a line
 -- each), its visitors' book (a line per visitor per day), and Gary's readings of
 -- what it's used for. Lines are read for fitness (ok) before anyone else sees

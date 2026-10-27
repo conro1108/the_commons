@@ -565,7 +565,7 @@ create policy "vary your own permit"
   with check (filer = auth.uid() and not coalesce((auth.jwt() ->> 'is_anonymous')::boolean, false)
     and the_commons.can_vary(filing));
 grant select on the_commons.variations to anon, authenticated;
-grant insert (filing, kind, what, room) on the_commons.variations to authenticated;
+grant insert (filing, kind, what, room, tag) on the_commons.variations to authenticated;
 grant all on the_commons.variations to service_role;
 
 -- Their own in-tray, drained like Gary's: until heard, backing off to hourly
@@ -652,9 +652,9 @@ select cron.schedule('the_commons_committee_variations', '0 4 * * *', 'select th
 -- Whether a thing is on the schedule: src/schedule.ts scheduled(), in SQL. A null schedule holds nothing.
 create function the_commons.on_schedule(s jsonb, p_prop text, p_label text, p_room text) returns boolean
 language sql immutable set search_path = '' as $$
-  select s is null or exists (select 1 from jsonb_array_elements(coalesce(s->'fittings', '[]')) f
+  select s is null or p_room = 'store' or exists (select 1 from jsonb_array_elements(coalesce(s->'fittings', '[]')) f
     where f->>'where' = coalesce(p_room, 'out')
-      and case when p_prop = 'item' then f->>'key' = 'item' and lower(btrim(f->>'name')) = lower(btrim(p_label))
+      and case when p_prop = 'item' then f->>'key' = 'item' and the_commons.norm(f->>'name') = the_commons.norm(p_label)
                else f->>'key' = p_prop end)
 $$;
 
@@ -857,6 +857,46 @@ begin
   end if;
 end $$;
 -- --- end of the letter --------------------------------------------------------
+
+-- --- retrospective permission (the letter meets the variations) ---------------
+-- Filing for a red-tagged thing is a variation carrying its tag. It's marked
+-- retrospective (dearer: Gary usually attaches a condition) and the tag waits
+-- as 'filed', which keep_tags() never impounds. Granted, the thing joins the
+-- schedule and keep_tags() closes the tag as permitted; denied or refused, the
+-- tag goes back up with a fresh date.
+create function the_commons.retro_variation() returns trigger
+language plpgsql security definer set search_path = '' as $$
+declare
+  t record;
+begin
+  select tg.status, tg.what, p.room into t
+    from the_commons.tags tg left join the_commons.placements p on p.id = tg.placement
+    where tg.id = new.tag and tg.filing = new.filing;
+  if t is null or t.status not in ('asked', 'tagged') then
+    raise exception 'that tag can''t be filed for' using errcode = '42501';
+  end if;
+  new.kind := 'addition';
+  new.retrospective := true;
+  new.room := coalesce(t.room, new.room);
+  return new;
+end $$;
+revoke execute on function the_commons.retro_variation() from public, anon, authenticated;
+create trigger variations_retro before insert on the_commons.variations
+  for each row when (new.tag is not null) execute function the_commons.retro_variation();
+
+create function the_commons.retro_filed() returns trigger
+language plpgsql security definer set search_path = '' as $$
+begin
+  if tg_op = 'INSERT' then
+    update the_commons.tags set status = 'filed' where id = new.tag and status in ('asked', 'tagged');
+  elsif new.status in ('denied', 'refused') then
+    update the_commons.tags set status = 'tagged', due = now() + interval '3 days' where id = new.tag and status = 'filed';
+  end if;
+  return null;
+end $$;
+revoke execute on function the_commons.retro_filed() from public, anon, authenticated;
+create trigger variations_retro_filed after insert or update of status on the_commons.variations
+  for each row when (new.tag is not null) execute function the_commons.retro_filed();
 
 -- --- the spirit ----------------------------------------------------------------
 -- What a place is used for (plans/building-and-enforcement.md, "The spirit").

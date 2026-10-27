@@ -302,7 +302,7 @@ export async function loadVariations(): Promise<Variation[]> {
   return data;
 }
 
-async function vary(row: { filing: number; kind: Variation["kind"]; what: string; room?: Where | null }): Promise<Variation | string> {
+async function vary(row: { filing: number; kind: Variation["kind"]; what: string; room?: Where | null; tag?: number }): Promise<Variation | string> {
   const { data, error } = await supabase.from("variations").insert(row).select(VARIATION_COLUMNS).single();
   if (!error) return data;
   if (error.code === "23514") return "A variation must be between 3 and 80 characters.";
@@ -353,14 +353,12 @@ export async function summonRounds(): Promise<number | null> {
 }
 
 /**
- * File for a red-tagged thing: retrospective permission. A stub until slice C's
- * variations land: C files a variation for the thing here, marked as for this
- * tag, and api/gary.ts retrospective() says what's owed (dearer than asking
- * first: usually a condition). Returns a clerk's explanation, or null if filed.
+ * File for a red-tagged thing: retrospective permission. A variation carrying
+ * the tag; the database marks it retrospective and the tag 'filed' (see
+ * "retrospective permission" in db/logic.sql).
  */
-export async function fileRetrospective(_tag: Tag): Promise<string | null> {
-  return "The variations desk isn't open yet. Take it down for now, or wait and see.";
-}
+export const fileRetrospective = (t: Tag) =>
+  vary({ filing: t.filing, kind: "addition", what: t.what.length < 3 ? `a ${t.what}` : t.what.slice(0, 80), tag: t.id });
 
 // --- the spirit: the open sign, the what's-on board, the visitors' book -------
 

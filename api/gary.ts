@@ -1705,21 +1705,6 @@ async function answered(db: Db, id: number): Promise<Response> {
   return Response.json({ explained: h.explained });
 }
 
-/**
- * Retrospective permission: filing for a red-tagged thing after Gary's
- * noticed. Slice C owns variations, so this is a stub and nothing calls it
- * yet. C's "file for it" (net.ts fileRetrospective) should come here, or into
- * C's own variation ruling with { retrospective: tag }, and:
- *  - set the tag to 'filed' while it waits (keep_tags() won't impound a filed
- *    tag, and closes it as 'permitted' once the thing is on the schedule with
- *    how 'variation');
- *  - rule it dearer than a variation filed first: a condition attached unless
- *    there's a strong reason not to (writeCondition, as for a grant);
- *  - refused, set the tag back to 'tagged' with a fresh date.
- */
-export async function retrospective(_db: Db, tag: number): Promise<Response> {
-  return Response.json({ stub: "retrospective permission waits on slice C's variations", tag }, { status: 501 });
-}
 
 // --- the spirit ----------------------------------------------------------------
 
