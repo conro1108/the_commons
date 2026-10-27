@@ -5,6 +5,7 @@ import { LANDMARKS, MAP_H, MAP_W, PLOTS, REGIONS, ZOOM, inPlot, type PlotDef } f
 import type { Boundary } from "./world/types.ts";
 import type { Filing, Placement } from "./net.ts";
 import { mini } from "./closeup.ts";
+import { drawBoarded } from "./spirit.ts";
 import { paintGround } from "./map/ground.ts";
 import { bakeScenery, oakCanopy } from "./map/scenery.ts";
 import { drawBoard, drawHut, drawOak } from "./map/landmarks.ts";
@@ -240,6 +241,7 @@ function drawPlot(ctx: CanvasRenderingContext2D, p: PlotDef, f: Filing | undefin
     return notice(ctx, p);
   }
   if (BUILT.includes(f.status)) ctx.drawImage(mini(p, f, built), p.x, p.y);
+  if (f.boarded_at) drawBoarded(ctx, p); // the spirit: boarded up for disuse
   boundary(ctx, p, style, mine);
   permit(ctx, p);
   if (mine) pennant(ctx, p, colourOf(f.filer));

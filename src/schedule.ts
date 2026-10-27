@@ -101,3 +101,6 @@ export function changeUse(old: Schedule, fresh: Schedule, fates: Fate[]): Schedu
     ...((old.stored?.length || stored.length) ? { stored: [...(old.stored ?? []), ...stored] } : {}),
   };
 }
+
+/** What a place is for, as the spirit reads it: the schedule's use, or for a filing from before schedules, its intent. */
+export const useOf = (f: { schedule: Schedule | null; intent: string }): string => f.schedule?.use || f.intent;

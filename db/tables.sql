@@ -54,7 +54,20 @@ create table if not exists the_commons.filings (
   met_at       timestamptz,
   audited_at   timestamptz, -- when Gary last came back to audit it (send_auditor)
   schedule     jsonb, -- Gary's: what the permit lets you build (Schedule, src/schedule.ts); null for filings granted before schedules
-  shell        jsonb  -- the holder's: the building as put up (Shell, src/schedule.ts)
+  shell        jsonb, -- the holder's: the building as put up (Shell, src/schedule.ts)
+  -- The spirit (what the place is used for): the holder's open sign; the last
+  -- sign of life that isn't building (sign, board, book: trigger-set); boarded up
+  -- for disuse, and the week's notice to reopen once someone asks for the plot;
+  -- Gary's latest reading of the use (in full in readings), and what it's drifted to.
+  open_sign  boolean not null default false,
+  stirred_at timestamptz,
+  boarded_at timestamptz,
+  quit_by    timestamptz,
+  quit_for   uuid references auth.users on delete set null,
+  reading    text,
+  read_at    timestamptz,
+  drift      text,
+  read_sent  timestamptz
 );
 create unique index if not exists filings_plot_held on the_commons.filings (plot)
   where status in ('pending', 'approved', 'conditional', 'committee');
@@ -219,3 +232,48 @@ create table if not exists the_commons.tags (
 create unique index if not exists tags_open on the_commons.tags (placement) where status in ('asked', 'tagged', 'filed');
 create index if not exists tags_filing on the_commons.tags (filing);
 alter table the_commons.tags enable row level security;
+-- The spirit: the what's-on board by a place's door (the holder's notices, a line
+-- each), its visitors' book (a line per visitor per day), and Gary's readings of
+-- what it's used for. Lines are read for fitness (ok) before anyone else sees
+-- them, like item labels; sent_at/tries are the reader's own bookkeeping.
+create table if not exists the_commons.notices (
+  id        bigint generated always as identity primary key,
+  filing    bigint not null references the_commons.filings on delete cascade,
+  line      text not null check (length(btrim(line)) between 3 and 80),
+  posted_at timestamptz not null default now(),
+  ok        boolean,
+  checked   jsonb,
+  sent_at   timestamptz,
+  tries     smallint not null default 0
+);
+create index if not exists notices_filing on the_commons.notices (filing);
+alter table the_commons.notices enable row level security;
+
+create table if not exists the_commons.visits (
+  id      bigint generated always as identity primary key,
+  filing  bigint not null references the_commons.filings on delete cascade,
+  visitor uuid not null default auth.uid() references auth.users on delete cascade,
+  line    text not null check (length(btrim(line)) between 3 and 140),
+  day     date not null default current_date,
+  at      timestamptz not null default now(),
+  ok      boolean,
+  checked jsonb,
+  sent_at timestamptz,
+  tries   smallint not null default 0,
+  unique (filing, visitor, day)
+);
+alter table the_commons.visits enable row level security;
+
+create table if not exists the_commons.readings (
+  id       bigint generated always as identity primary key,
+  filing   bigint not null references the_commons.filings on delete cascade,
+  at       timestamptz not null default now(),
+  use      text not null,
+  verdict  text not null check (verdict in ('yes', 'mostly', 'drifted', 'boarded', 'freed')),
+  other    text,
+  line     text not null,
+  evidence jsonb,
+  answers  jsonb
+);
+create index if not exists readings_filing on the_commons.readings (filing, id);
+alter table the_commons.readings enable row level security;

@@ -58,6 +58,13 @@ export interface Filing {
   ground: string | null;
   schedule: Schedule | null; // Gary's, once granted; null for filings from before schedules
   shell: Shell | null; // the holder's building, once put up
+  // The spirit's columns (see the spirit, at the end): optional so made-up filings needn't give them.
+  open_sign?: boolean;
+  boarded_at?: string | null;
+  quit_by?: string | null; // someone's asked for it while boarded: reopen by then or it's freed
+  reading?: string | null; // Gary's latest reading of the use
+  read_at?: string | null;
+  drift?: string | null; // what he found it's become instead, while it has
 }
 
 /** Statuses that hold a plot; denied, refused and lost give it back. */
@@ -354,3 +361,59 @@ export async function summonRounds(): Promise<number | null> {
 export async function fileRetrospective(_tag: Tag): Promise<string | null> {
   return "The variations desk isn't open yet. Take it down for now, or wait and see.";
 }
+
+// --- the spirit: the open sign, the what's-on board, the visitors' book -------
+
+/** A notice on the what's-on board by a place's door. ok: Gary's read of it, null while he hasn't. */
+export interface Notice { id: number; filing: number; line: string; posted_at: string; ok: boolean | null }
+/** A line in a place's visitors' book; one a visitor a day. */
+export interface Visit { id: number; filing: number; visitor: string; line: string; day: string; at: string; ok: boolean | null }
+
+/** The board and the last month of the book for one place. Unread lines come back only to whoever wrote them. */
+export async function loadSpirit(filing: number): Promise<{ notices: Notice[]; visits: Visit[] }> {
+  const [n, v] = await Promise.all([
+    supabase.from("notices").select("id, filing, line, posted_at, ok").eq("filing", filing).order("posted_at"),
+    supabase.from("visits").select("id, filing, visitor, line, day, at, ok").eq("filing", filing).order("at", { ascending: false }).limit(30),
+  ]);
+  return { notices: n.data ?? [], visits: v.data ?? [] };
+}
+
+export async function flipSign(filing: number, open: boolean): Promise<string | null> {
+  const { error } = await supabase.from("filings").update({ open_sign: open }).eq("id", filing);
+  return error && said(error);
+}
+
+export async function pinNotice(filing: number, line: string): Promise<Notice | string> {
+  const { data, error } = await supabase.from("notices").insert({ filing, line }).select("id, filing, line, posted_at, ok").single();
+  if (!error) return data;
+  if (error.code === "23514") return "A notice is a line: between 3 and 80 characters.";
+  if (error.code === "42501") return "The board's full. Take one down first.";
+  return said(error);
+}
+
+export async function unpinNotice(id: number): Promise<boolean> {
+  const { error } = await supabase.from("notices").delete().eq("id", id);
+  return !error;
+}
+
+export async function signBook(filing: number, line: string): Promise<Visit | string> {
+  const { data, error } = await supabase.from("visits").insert({ filing, line }).select("id, filing, visitor, line, day, at, ok").single();
+  if (!error) return data;
+  if (error.code === "23505") return "You've signed it today already.";
+  if (error.code === "23514") return "A line in the book: between 3 and 140 characters.";
+  if (error.code === "42501") return "The book's not open to you here.";
+  return said(error);
+}
+
+/** Ask Gary to come and read the place again (after putting it back). How many he's gone to, or null. */
+export async function summonReader(): Promise<number | null> {
+  const { data, error } = await supabase.rpc("summon_reader");
+  return error ? null : data;
+}
+
+/** Ask for a boarded-up plot: its holder gets a week's notice. When it runs out, or null if it can't be asked for. */
+export async function askForPlot(plot: number): Promise<string | null> {
+  const { data, error } = await supabase.rpc("ask_for_plot", { p_plot: plot });
+  return error ? null : data;
+}
+
