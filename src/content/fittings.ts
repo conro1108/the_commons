@@ -1545,7 +1545,7 @@ const PIECES: Record<string, Piece> = {
     pal: { p: "#e88aa0" },
   },
   books: {
-    name: "a pile of books", aliases: ["books", "book", "ledger", "register", "visitors' book", "stack of books"], group: "Held", on: "floor", w: 2, d: 1, held: "sit",
+    name: "a pile of books", aliases: ["books", "book", "ledger", "visitors' book", "stack of books"], group: "Held", on: "floor", w: 2, d: 1, held: "sit",
     rows: [".kkkkk", ".krrck", "kkkkkk", "kuuuck", "kkkkkk", "knnnck", "kkkkkk"],
   },
   till: {
@@ -1779,7 +1779,8 @@ export const fitting = (key: string): FittingDef | undefined => (Object.hasOwn(F
 
 // --- Matching what Gary wrote to a key
 
-const STOP = new Set(["a", "an", "the", "some", "of", "for", "with", "and", "by", "in", "on", "to", "at", "set", "pair", "few", "couple", "one", "two", "three", "small", "large", "big", "little", "old", "new"]);
+const PREP = new Set(["of", "from", "for", "with", "by", "in", "on", "to", "at", "under", "over", "beside", "near"]);
+const STOP = new Set([...PREP, "a", "an", "the", "some", "and", "set", "pair", "few", "couple", "one", "two", "three", "small", "large", "big", "little", "old", "new"]);
 
 const word = (w: string) =>
   w.endsWith("ies") && w.length > 4 ? w.slice(0, -3) + "y"
@@ -1791,7 +1792,7 @@ const word = (w: string) =>
 /** The words that matter, singular, and the head noun ("rack" in "a rack of practice swords"). */
 function words(s: string): { all: Set<string>; head: string } {
   const raw = s.toLowerCase().replace(/['’]s\b/g, "").replace(/[^a-z ]+/g, " ").split(/\s+/).filter(Boolean);
-  const of = raw.indexOf("of");
+  const of = raw.findIndex((w) => PREP.has(w)); // "a rack of swords", "a trophy from the kata": the head comes before
   const before = (of > 0 ? raw.slice(0, of) : raw).filter((w) => !STOP.has(w));
   const all = new Set(raw.filter((w) => !STOP.has(w)).map(word));
   return { all, head: word(before.at(-1) ?? [...all].at(-1) ?? "") };

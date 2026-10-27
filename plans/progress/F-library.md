@@ -20,4 +20,4 @@ Branch `worktree-agent-acc722659ac2419b9`. Resume from the first unticked step.
 - [x] 15. (done early, to judge as I go) `dev/library.html` + `dev/library.ts`: every piece on a floor/wall patch, footprint and slots marked; ?scale ?floor ?wall ?stock ?slots ?only ?group ?room.
 - [x] 16. Look at it by eye (headless Chrome screenshot via a /tmp script, vite on :5199) and fix what looks off. Fixed: quieter boards and parquet, bigger quarry tiles, softer checker, clock rim, dev card room for hung things.
 - [x] 17. test/fittings.test.ts (written early as the validator; the matching test fails until all pieces exist). Passes: keys, art, slots, stock fits, and the design's schedule lines match.
-- [ ] 18. `npm run build`, `npm test`, final commit, note for B and C.
+- [x] 18. `npm run build`, `npm test`, final commit, note for B and C. Also: any preposition now ends the head phrase ("a trophy from the kata" -> trophy); "register" left only on till. Done.
