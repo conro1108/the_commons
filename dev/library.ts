@@ -48,9 +48,9 @@ function tile(ctx: CanvasRenderingContext2D, s: Surface | undefined, x: number, 
 function drawPiece(ctx: CanvasRenderingContext2D, f: FittingDef, x: number, y: number, marks: boolean) {
   ctx.drawImage(raster(f), x, y);
   const st = f.stock ? FITTINGS[f.stock] : undefined;
-  for (const s of f.slots ?? []) {
+  for (const [i, s] of (f.slots ?? []).entries()) {
     if (st && showStock && !!s.hang === (st.held === "hang")) {
-      const c = raster(st);
+      const c = raster({ rows: st.rows, palette: { ...st.palette, ...f.vary?.[i % f.vary.length] } });
       if (c.width <= s.w && c.height <= s.h)
         ctx.drawImage(c, x + s.x + Math.floor((s.w - c.width) / 2), y + (s.hang ? s.y : s.y + s.h - c.height));
     }

@@ -33,8 +33,15 @@ export interface FittingDef extends PropDef {
   d: number; // cells deep; 0 on a wall
   slots?: Slot[]; // where held things go
   held?: "sit" | "hang"; // small enough to go in a slot, and which kind
+  small: boolean; // the same as having `held`: goes in slots
+  flat: boolean; // lies on the floor (rugs, mats): draw before everything else, never blocks a cell
+  lamp?: true; // gives light after dark
   stock?: string; // what usually fills its slots, a key here
+  vary?: Record<string, string>[]; // palette overrides for what's in slot i (cycling), so a row of belts isn't one belt
 }
+
+/** A slot as a point: [centre x, the y a held thing stands on] for sitting, [centre x, the y it hangs from] for hanging. */
+export const slotAt = (s: Slot): [number, number] => [s.x + s.w / 2, s.hang ? s.y : s.y + s.h];
 
 /** A tileable interior surface: rows repeat both ways; skirt, if any, runs along the foot of a wall. */
 export interface Surface extends PropDef {
@@ -67,7 +74,7 @@ const C: Record<string, string> = {
   x: "#e8907e", z: "#c26a5e", Z: "#8a4448",
 };
 
-interface Piece extends Omit<FittingDef, "palette"> {
+interface Piece extends Omit<FittingDef, "palette" | "small" | "flat"> {
   pal?: Record<string, string>;
 }
 
@@ -348,6 +355,7 @@ const PIECES: Record<string, Piece> = {
       { x: 3, y: 19, w: 5, h: 7 }, { x: 8, y: 19, w: 5, h: 7 },
     ],
     stock: "jar",
+    vary: [{}, { p: "#74b356", y: "#f59a3e", u: "#e06a7c" }, { p: "#f59a3e", y: "#c98add", R: "#4a6fa0" }],
   },
   cupboard: {
     name: "a cupboard", aliases: ["cabinet", "kitchen cupboard", "store cupboard", "press", "linen cupboard"], group: "Storage", on: "floor", w: 4, d: 2,
@@ -559,6 +567,7 @@ const PIECES: Record<string, Piece> = {
     pal: { P: "#d6b476" },
     slots: [{ x: 2, y: 4, w: 5, h: 10, hang: true }, { x: 7, y: 4, w: 5, h: 10, hang: true }, { x: 12, y: 4, w: 5, h: 10, hang: true }, { x: 17, y: 4, w: 5, h: 10, hang: true }],
     stock: "belt",
+    vary: [{ y: "#f7ecd8", Y: "#c8bca4" }, { y: "#e8c56a", Y: "#b8923e" }, { y: "#5a9440", Y: "#3e6e30" }, { y: "#7a5230", Y: "#5c3d22" }],
   },
   coat_hooks: {
     name: "a row of coat hooks", aliases: ["coat hooks", "hooks", "coat pegs", "hat pegs", "hook rail"], group: "Racks", on: "wall", w: 4, d: 0,
@@ -571,6 +580,7 @@ const PIECES: Record<string, Piece> = {
     ],
     slots: [{ x: 0, y: 2, w: 5, h: 12, hang: true }, { x: 5, y: 2, w: 5, h: 12, hang: true }, { x: 10, y: 2, w: 5, h: 12, hang: true }],
     stock: "coat",
+    vary: [{}, { u: "#7a6aa0", U: "#544870" }, { u: "#c06a5a", U: "#8a4440" }],
   },
   coat_stand: {
     name: "a coat stand", aliases: ["hat stand", "hatstand", "coat rack", "hall stand"], group: "Racks", on: "floor", w: 3, d: 1,
@@ -599,6 +609,7 @@ const PIECES: Record<string, Piece> = {
     ],
     slots: [{ x: 0, y: 3, w: 5, h: 14, hang: true }, { x: 7, y: 3, w: 5, h: 14, hang: true }],
     stock: "coat",
+    vary: [{}, { u: "#6a8a5a", U: "#465e40" }],
   },
   shoe_rack: {
     name: "a shoe rack", aliases: ["shoe rack by the door", "rack of shoes", "shoes", "boot rack", "shoe shelf"], group: "Racks", on: "floor", w: 3, d: 1,
@@ -670,6 +681,7 @@ const PIECES: Record<string, Piece> = {
     pal: { b: "#5a4a58", a: "#c8e8e8" },
     slots: [{ x: 3, y: 5, w: 5, h: 8 }, { x: 8, y: 5, w: 5, h: 8 }, { x: 3, y: 14, w: 5, h: 8 }, { x: 8, y: 14, w: 5, h: 8 }],
     stock: "trophy",
+    vary: [{ y: "#e8c56a", Y: "#b8923e", h: "#ffd884" }, { y: "#c8ccd8", Y: "#888ca0", h: "#f4f4f4" }, { y: "#c98a52", Y: "#8a5a34", h: "#e8b07a" }, {}],
   },
   display_case: {
     name: "a display case", aliases: ["glass counter", "display counter", "cake counter", "showcase", "jewellery case"], group: "Racks", on: "floor", w: 5, d: 2,
@@ -706,6 +718,7 @@ const PIECES: Record<string, Piece> = {
     ],
     slots: [{ x: 0, y: 2, w: 5, h: 10, hang: true }, { x: 5, y: 2, w: 5, h: 10, hang: true }, { x: 10, y: 2, w: 5, h: 10, hang: true }, { x: 15, y: 2, w: 5, h: 10, hang: true }],
     stock: "saucepan",
+    vary: [{}, { S: "#e8a070", s: "#c87850", g: "#9a5a3c" }],
   },
 
   // --- Underfoot
@@ -1104,6 +1117,7 @@ const PIECES: Record<string, Piece> = {
   // --- Light and warmth
   floor_lamp: {
     name: "a standard lamp", aliases: ["floor lamp", "lamp", "reading lamp", "standard lamp", "uplighter"], group: "Light and warmth", on: "floor", w: 2, d: 1,
+    lamp: true,
     rows: [
       "..kkkk..",
       ".kLLLLk.",
@@ -1131,10 +1145,12 @@ const PIECES: Record<string, Piece> = {
   },
   wall_lamp: {
     name: "a wall lamp", aliases: ["sconce", "wall light", "bracket lamp", "gas lamp"], group: "Light and warmth", on: "wall", w: 1, d: 0,
+    lamp: true,
     rows: [".kk.", "kLhk", "kLhk", "khyk", "kkkk", ".kYk", "kYYk", ".kk."],
   },
   fireplace: {
     name: "a fireplace", aliases: ["hearth", "fire", "open fire", "mantelpiece", "chimney piece", "grate"], group: "Light and warmth", on: "floor", w: 5, d: 1,
+    lamp: true,
     rows: [
       "kkkkkkkkkkkkkkkkkkkk",
       "kWWWWWWWWWWWWWWWWWWk",
@@ -1161,6 +1177,7 @@ const PIECES: Record<string, Piece> = {
   },
   wood_stove: {
     name: "a wood stove", aliases: ["stove", "pot-bellied stove", "burner", "log burner", "boiler"], group: "Light and warmth", on: "floor", w: 3, d: 2,
+    lamp: true,
     rows: [
       "....kmgk....",
       "....kmgk....",
@@ -1322,6 +1339,7 @@ const PIECES: Record<string, Piece> = {
     ],
     slots: [{ x: 1, y: -8, w: 7, h: 10 }, { x: 8, y: -8, w: 7, h: 10 }],
     stock: "books",
+    vary: [{}, { r: "#5a9440", u: "#e8c56a", n: "#a8403a" }],
   },
 
   // --- Odds
@@ -1548,10 +1566,12 @@ const PIECES: Record<string, Piece> = {
   },
   table_lamp: {
     name: "a table lamp", aliases: ["desk lamp", "bedside lamp", "little lamp", "oil lamp"], group: "Held", on: "floor", w: 2, d: 1, held: "sit",
+    lamp: true,
     rows: [".kkk.", "kLLhk", "kLhhk", "kkkkk", ".kmk.", ".kmk.", "kmmmk", "kkkkk"],
   },
   candle: {
     name: "a candle", aliases: ["candles", "candlestick", "night light", "taper"], group: "Held", on: "floor", w: 1, d: 1, held: "sit",
+    lamp: true,
     rows: [".h.", ".o.", "kck", "kck", "kck", "kYk", "kkk"],
   },
   flower_pot: {
@@ -1575,7 +1595,7 @@ const PIECES: Record<string, Piece> = {
 
 /** Every fitting, by key, palettes filled in. */
 export const FITTINGS: Record<string, FittingDef> = Object.fromEntries(
-  Object.entries(PIECES).map(([key, { pal, ...p }]) => [key, { ...p, palette: { ...C, ...pal } }]),
+  Object.entries(PIECES).map(([key, { pal, ...p }]) => [key, { ...p, small: !!p.held, flat: p.group === "Underfoot", palette: { ...C, ...pal } }]),
 );
 
 const SURFACES = (s: Record<string, Omit<Surface, "palette"> & { pal?: Record<string, string> }>): Record<string, Surface> =>
