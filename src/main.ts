@@ -14,7 +14,7 @@ import {
 import { fileChangeOfUse, fileVariation, loadVariations, type Variation } from "./net.ts";
 import { scheduleHtml, variationForm, variationHtml } from "./permit.ts";
 import { askForPlot, flipSign, loadSpirit, pinNotice, signBook, summonReader, unpinNotice, type Notice, type Visit } from "./net.ts";
-import { spiritCardHtml, spiritHtml, styleSpirit } from "./spirit.ts";
+import { hasDoor, spiritCardHtml, spiritHtml, styleSpirit } from "./spirit.ts";
 import type { RealtimeChannel } from "@supabase/supabase-js";
 import { VOID, colourOf, draw, letterPhase, type Letter, type Walker } from "./render.ts";
 import {
@@ -201,19 +201,22 @@ function exchange(f: Filing, fresh = false) {
   return `<p class="meta">Filing ${pad(f.id)}, ${esc(labelOf(f.plot))}. Filed by ${esc(who(f.filer))}, ${when(f.filed_at)}.</p>
     <p><q>${esc(f.intent)}</q></p>
     ${ruling(f, fresh)}
-    ${conditionHtml(f)}
+    ${conditionHtml(f, true)}
     ${f.stamped_at && !unread.has(f.id) ? `<p class="meta">Stamped ${when(f.stamped_at)}.</p>` : ""}`;
 }
 
-/** The condition on a plot, and what Gary made of it when he last came round. */
-function conditionHtml(f: Filing) {
+/** The condition on a plot, and what Gary made of it when he last came round. Under a permit
+ *  that already quotes it (the card), only whether it's met. */
+function conditionHtml(f: Filing, underPermit = false) {
   if (!f.condition || unread.has(f.id)) return "";
-  if (!BUILT.includes(f.status)) return `<p><b>Condition.</b> ${esc(f.condition)}</p>`;
+  const quoted = underPermit && !!f.permit?.includes(f.condition);
+  const said = quoted ? "" : ` ${esc(f.condition)}`;
+  if (!BUILT.includes(f.status)) return quoted ? "" : `<p><b>Condition.</b>${said}</p>`;
   const coming = !f.met_at && f.built_at && f.built_at > (f.inspected_at ?? "");
   const note = f.remark
     ? `Gary, on his last visit: <q>${esc(f.remark)}</q>`
     : esc(f.filer === me ? "Gary will come round once you've built something." : "Gary has not yet been round.");
-  return `<div class="condition"><p><b>Condition.</b> ${esc(f.condition)}</p>
+  return `<div class="condition"><p><b>Condition.</b>${said}</p>
     <p class="stamp ${f.met_at ? "approved" : "pending"}">${f.met_at ? "Met" : "Outstanding"}</p> <span class="meta">${note}</span>
     ${coming ? `<p class="meta">He has noticed more building and will be round again once it settles.</p>` : ""}</div>`;
 }
@@ -327,7 +330,7 @@ function renderCard() {
   } else if (f) {
     body = `<h2>${esc(plotLabel(def))}</h2><p class="meta where">${esc(REGIONS[def.region].name)}</p>
       <p>Held by ${esc(who(f.filer))}: <q>${esc(f.intent)}</q></p>
-      ${enter}${ruling(f, fresh)}${spiritCardHtml(f, me, guest)}${worksHtml(f)}${conditionHtml(f)}${letterFor(f)}${variationsHtml(f)}<p class="meta">Filing ${pad(f.id)}</p>`;
+      ${ruling(f, fresh)}${conditionHtml(f, true)}${spiritCardHtml(f, me, guest)}${letterFor(f)}${worksHtml(f)}${variationsHtml(f)}${enter}<p class="meta">Filing ${pad(f.id)}</p>`;
   } else {
     const denial = appealableOn(plot);
     body = `${particulars(def)}
@@ -541,7 +544,9 @@ function setVariation(v: Variation) {
   variations.set(v.filing, [...list, v].sort((a, b) => a.id - b.id));
 }
 
-const worksHtml = (f: Filing) => (f.schedule && BUILT.includes(f.status) && !unread.has(f.id) ? scheduleHtml(f.schedule) : "");
+// What the permit covers, folded: it's a reference, not a to-do list. Only its holder needs it.
+const worksHtml = (f: Filing) => (f.schedule && f.filer === me && BUILT.includes(f.status) && !unread.has(f.id)
+  ? `<details class="fold"><summary>What your permit covers</summary>${scheduleHtml(f.schedule)}</details>` : "");
 
 /** What's been filed against a permit, the latest few; and the form, if it's ours and nothing's before Gary. */
 function variationsHtml(f: Filing) {
@@ -608,9 +613,7 @@ function renderBuildInfo() {
     <p>${f.filer === me ? "Yours" : `Held by ${esc(who(f.filer))}`}: <q>${esc(f.intent)}</q></p>
     ${foldCondition(f)}
     ${letterFor(f)}
-    ${f.filer === me
-      ? `<p class="hint">Building on a granted plot needs no further paperwork. Gary finds this difficult.</p>`
-      : `<p class="meta">${count ? `${count} thing${count === 1 ? "" : "s"} built.` : "Nothing built yet."}</p>`}
+    ${f.filer === me ? "" : `<p class="meta">${count ? `${count} thing${count === 1 ? "" : "s"} built.` : "Nothing built yet."}</p>`}
     ${spiritUp(f)}`;
   wireLetter($("build-info"));
   wireSpirit(f);
@@ -810,7 +813,7 @@ async function loadSpiritFor(f: Filing) {
 function spiritUp(f: Filing) {
   const html = spiritHtml({ f, notices: spirit?.filing === f.id ? spirit.notices : [], visits: spirit?.filing === f.id ? spirit.visits : [], me, guest, who });
   if (!phone.matches) return html;
-  return `<details class="fold spirit-fold"${spiritOpen ? " open" : ""}><summary>${f.open_sign ? "Open" : "Closed"}${f.boarded_at ? ", boarded up" : f.drift ? ", a notice from Gary" : ""}</summary>${html}</details>`;
+  return `<details class="fold spirit-fold"${spiritOpen ? " open" : ""}><summary>${hasDoor(f) ? (f.open_sign ? "Open" : "Closed") : "Visitors"}${f.boarded_at ? ", boarded up" : f.drift ? ", a notice from Gary" : ""}</summary>${html}</details>`;
 }
 
 /** What's being typed into the board or the book, kept across a re-render. */

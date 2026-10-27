@@ -56,7 +56,10 @@ export function spiritCardHtml(f: Filing, me: string, guest: boolean): string {
   return `${readingHtml(f)}${boardedHtml(f, f.filer === me, guest)}`;
 }
 
-/** Up close: the sign, the board, the book, the reading, and any notice from Gary. */
+/** Only a building has a door to hang an open sign on; a garden just has visitors. */
+export const hasDoor = (f: Filing) => f.schedule?.shell.kind === "building";
+
+/** Up close: the sign (a building's), the board, the book, the reading, and any notice from Gary. */
 export function spiritHtml(v: SpiritView): string {
   const { f, me, guest } = v;
   const mine = f.filer === me;
@@ -71,7 +74,7 @@ export function spiritHtml(v: SpiritView): string {
       ? `<ul>${notices.map((n) => `<li class="${n.ok === false ? "unfit" : n.ok === null ? "unread" : ""}">${esc(n.line)}${
           mine ? `${n.ok === null ? ` <span class="meta">(with Gary)</span>` : n.ok === false ? ` <span class="meta">(Gary won't have it up)</span>` : ""}<button class="spirit-unpin" data-unpin="${n.id}" aria-label="Take it down">×</button>` : ""}</li>`).join("")}</ul>`
       : `<p class="meta">${mine ? "Nothing up. Pin a line: what's on, and when." : "Nothing on."}</p>`}
-    ${mine && v.notices.length < 8 ? `<form class="spirit-pin"><input maxlength="80" placeholder="${f.boarded_at ? "Reopening Saturday" : "Beginners' kata, Thursdays at six"}" required><button>Pin</button></form>` : ""}</div>`;
+    ${mine && v.notices.length < 8 ? `<form class="spirit-pin"><input maxlength="80" placeholder="${f.boarded_at ? "Reopening Saturday" : "Tea on Sundays, from three"}" required><button>Pin</button></form>` : ""}</div>`;
 
   const lines = v.visits.filter((l) => l.ok || l.visitor === me).slice(0, 6);
   const signed = v.visits.some((l) => l.visitor === me && l.day === today());
@@ -90,7 +93,7 @@ export function spiritHtml(v: SpiritView): string {
     : "";
 
   return `<div class="spirit">${boardedHtml(f, mine, guest)}${drift}
-    <div class="spirit-door">${sign}<span class="meta">${esc(useOf(f))}</span></div>
+    ${hasDoor(f) ? `<div class="spirit-door">${sign}<span class="meta">${esc(useOf(f))}</span></div>` : ""}
     ${readingHtml(f)}${board}${book}<p class="problem spirit-problem"></p></div>`;
 }
 
