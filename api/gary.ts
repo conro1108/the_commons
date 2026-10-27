@@ -24,6 +24,7 @@ import { changeUse, isFitting, norm, scheduled, vary, type Addition, type Fate, 
 
 const JUDGE = "typesafe-ai/jev";
 const SCRIBE = "anthropic/claude-haiku-5.5";
+const CAREFUL = "anthropic/claude-sonnet-5.5"; // the clerk's second go, once Haiku's first has been sent back
 const LIGHT_THINKING = "medium"; // short prose, but some thought keeps it on the facts
 const THINKING = "medium"; // drawing is spatial; worth the wait
 
@@ -641,7 +642,9 @@ export async function sit(
   let finding: string | null = null;
   for (let attempt = 0; attempt < 2 && !finding; attempt++) {
     const last = drafts.at(-1);
+    // The finding is the record, so a draft sent back goes to the more careful clerk.
     const { text } = await write(`clerk's finding, draft ${attempt + 1}`, {
+      ...(last && { model: CAREFUL }),
       reasoning: LIGHT_THINKING,
       system: CLERK,
       prompt: last ? { ...input, rejected: last.text, rejected_because: last.problems } : input,
@@ -673,7 +676,7 @@ export async function sit(
     verdict,
     written,
     minutes: { outcome: `The committee has met, and the filing is ${OUTCOME(verdict)}, ${verdict.count}.`, finding, members },
-    record: { heard, answers, drafts, conditions: written?.tries, judge: JUDGE, clerk: SCRIBE },
+    record: { heard, answers, drafts, conditions: written?.tries, judge: JUDGE, clerk: SCRIBE, careful_clerk: CAREFUL },
   };
 }
 

@@ -19,7 +19,7 @@ type Flow = keyof typeof FLOWS;
 const STATUS: Record<string, string> = {
   approved: "Approved", conditional: "Approved on condition", committee: "Referred to committee", denied: "Denied", refused: "Refused",
 };
-const WHO: Record<string, string> = { "typesafe-ai/jev": "Jev", "anthropic/claude-haiku-5.5": "Haiku" };
+const WHO: Record<string, string> = { "typesafe-ai/jev": "Jev", "anthropic/claude-haiku-5.5": "Haiku", "anthropic/claude-sonnet-5.5": "Sonnet" };
 
 const esc = (s: unknown) => String(s).replace(/[&<>"]/g, (c) => `&${{ "&": "amp", "<": "lt", ">": "gt", '"': "quot" }[c]};`);
 const pre = (v: unknown) => `<pre>${esc(typeof v === "string" ? v : JSON.stringify(v, null, 2))}</pre>`;
