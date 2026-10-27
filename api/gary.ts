@@ -184,8 +184,9 @@ export function verdictOf(answers: { unacceptable: number; ruling: string; condi
   return { status, condition: status === "conditional" ? answers.condition : null, bylaw: null, ...(status === "conditional" && concern && { concern }) };
 }
 
+// Grown-ups play here: rude is fine, only what's actually nasty is over the line.
 const UNFIT = (what: string) =>
-  `Is this ${what} unfit for a public notice board read by all ages: crude, sexual, hateful, harassing, containing personal information or a link, or spam? Silly, eccentric or impractical is fine, and so is mild swearing used for emphasis ("a big ass shed", "a damn good bench"): judge what it is, not how it's said.`;
+  `Is this ${what} over the line for the Commons, where grown-ups play: hateful or a slur, a threat, aimed at a real person, describing sex acts, containing personal information or a link, or spam? Nothing else is: rude words, swearing, bums, boobs and willies, innuendo and juvenile jokes are all fine, and so is silly, eccentric or impractical. Judge what it is, not how it's said.`;
 
 // Who Gary is, for everything he writes. A person with a job, not a bit.
 const GARY = `You are Gary. You administer the Commons, a shared patch of land: people file to build on its plots, and you rule on the filings, hear their appeals, and go round to check what's been built. It's a job. You've done it a long time, it isn't very rewarding, and you're tired the ordinary way people get tired at work.
