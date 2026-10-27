@@ -262,7 +262,7 @@ function mount(first: number): HTMLElement {
   // The case, while it's open to appeal: what it's denied under (or that it was refused), and what's been said.
   // Denied, it's two pleas to Gary, then a third to the committee; refused, Gary won't hear it, so straight to the committee.
   let open: {
-    intent: string; plot: number; bylaw: number | null; refused: boolean; exchange: { plea: string; reply: string | null }[]; finding?: string;
+    intent: string; plot: number; bylaw: number | null; refused: boolean; exchange: { plea: string; reply: string | null }[]; finding?: string; said?: Record<string, string>;
   } | null = null;
   let busy = false;
   let session = crypto.randomUUID(); // one case, filing to last appeal, as kept in backoffice_runs
@@ -387,11 +387,12 @@ function mount(first: number): HTMLElement {
       if (!sat) return close("No quorum, so it'd sit again tomorrow night. The case is closed here.");
       if (sat.verdict.status !== "denied" && sat.verdict.status !== "refused") return close("Allowed on appeal. The case is closed.");
       c.finding = sat.minutes.finding ?? sat.minutes.outcome;
+      c.said = Object.fromEntries(sat.minutes.members.filter((m: { speech: string | null }) => m.speech).map((m: { seat: string; speech: string }) => [m.seat, m.speech]));
       standing();
     }
 
     if (c.finding) {
-      await stage("Final appeal, to the committee", "escalate", { ...base(), against: { finding: c.finding, plea } }, pleaded(plea));
+      await stage("Final appeal, to the committee", "escalate", { ...base(), against: { finding: c.finding, plea, said: c.said } }, pleaded(plea));
       close("That was final.");
     } else if (c.refused || c.exchange.length === 2) {
       c.exchange.push({ plea, reply: null });

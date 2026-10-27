@@ -7,7 +7,7 @@ import * as gary from "./gary.js";
 
 type Body = {
   what: string; session?: string; step?: string; id?: number; plot?: number; intent?: string; label?: string;
-  bylaw?: number | null; refused?: boolean; plea?: string; earlier?: { plea: string; reply: string | null }[]; against?: { finding: string; plea: string };
+  bylaw?: number | null; refused?: boolean; plea?: string; earlier?: { plea: string; reply: string | null }[]; against?: { finding: string; plea: string; said?: Record<string, string> };
 };
 
 export async function POST(req: Request): Promise<Response> {
