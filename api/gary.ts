@@ -737,7 +737,7 @@ const HEARING = `${GARY}
 
 You turned a filing down, and the filer has written back to argue their case ("plea"). You've reconsidered, and the decision is made ("ruling"). Write back: one or two sentences, at most 60 words, plain text, no greeting, no sign-off, no markdown.
 Answer what they actually said, the way you would if they'd said it to you across the counter. If they've got a point, say so; if they haven't, tell them straight what still stands in the way.
-Make the outcome clear. If it's allowed on a condition, quote the condition; if there's no condition, don't mention one. If it's dismissed, name the bylaw by its number (or the covenant of that ground) and what it forbids. If the plea asks for something new rather than explaining what was filed, tell them to file that as a new filing.
+Make the outcome clear. If it's allowed on a condition, quote the condition; if there's no condition, don't mention one. If it's dismissed, name the bylaw by its number (or the covenant of that ground) and what it forbids. Only if "ruling" says the plea asks for something other than what was filed, tell them to file it as a new filing.
 If the misunderstanding was theirs, you needn't take the blame for it.
 "earlier" is what's been said already: don't repeat yourself. Leave the plot ("site") out unless it's what decided it.
 Never invent bylaws, numbers, filings or procedures that are not in the input.`;
@@ -805,7 +805,7 @@ export async function hear(
     bylaw: !refile && verdict.bylaw !== null ? bylawText(verdict.bylaw, plot) : null,
     site: { ground: site.ground, weather: site.weather, particulars: site.particulars },
   };
-  const { text, drafts } = await note("reply", HEARING, input, askable(REPLY_CHECKS, input) as Record<string, string>);
+  const { text, drafts } = await note("reply", HEARING, input, askable(REPLY_CHECKS, input) as Record<string, string>, 60);
   const reply = text ?? `On appeal: ${formPermit(filing.id, verdict, input.condition, plot)}`;
   return { ok: true, verdict, written, reply, record: { answers, drafts, conditions: written?.tries, judge: JUDGE, scribe: SCRIBE } };
 }
@@ -911,7 +911,7 @@ export async function inspect(filing: { id: number; intent: string; condition: s
     },
   });
   const met = answers.met.probability > 0.5;
-  const { text, drafts } = await note("inspection note", INSPECTOR, { ...state, met }, REMARK_CHECKS);
+  const { text, drafts } = await note("inspection note", INSPECTOR, { ...state, met }, REMARK_CHECKS, 35);
   const remark = text ?? (met
     ? "Been round. The condition's met, thanks."
     : "Been round. The condition isn't met yet; I'll come and look again.");
@@ -919,7 +919,8 @@ export async function inspect(filing: { id: number; intent: string; condition: s
 }
 
 /** Gary's note of a visit: the scribe writes, the decision model checks it saw only what's there. One more go, then null. */
-async function note(what: string, system: string, input: object, checks: Record<string, string>) {
+// Never cut: what's checked is what goes out. Well over "max" words gets another go; long but sound twice stands.
+async function note(what: string, system: string, input: object, checks: Record<string, string>, max: number) {
   const drafts: { text: string; checks: Record<string, number>; problems: string[] }[] = [];
   for (let attempt = 0; attempt < 2; attempt++) {
     const last = drafts.at(-1);
@@ -929,8 +930,9 @@ async function note(what: string, system: string, input: object, checks: Record<
       prompt: last ? { ...input, rejected: last.text, rejected_because: last.problems } : input,
       maxOutputTokens: 4000, // reasoning counts against it
     });
-    const draft = trim(text, 2);
-    let problems = problemsWith(draft, {});
+    const draft = text.trim();
+    const long = words(draft) > max * 1.25 ? [`it ran to ${words(draft)} words; keep it to ${max}`] : [];
+    let problems = [...problemsWith(draft, {}), ...long];
     if (/\d\s*[,x×–-]\s*\d|\b(row|column|cell|tile|across|down)\s+\d/i.test(draft)) problems = ["it gave coordinates or cell numbers"];
     let scores: Record<string, number> = {};
     if (!problems.length) {
@@ -940,10 +942,10 @@ async function note(what: string, system: string, input: object, checks: Record<
         Object.fromEntries(Object.entries(checks).map(([k, instructions]) => [k, { type: "boolean" as const, instructions }])),
       );
       scores = Object.fromEntries(Object.entries(a).map(([k, v]) => [k, (v as { probability: number }).probability]));
-      problems = Object.entries(scores).filter(([, p]) => p > FAILS).map(([k]) => checks[k]);
+      problems = [...Object.entries(scores).filter(([, p]) => p > FAILS).map(([k]) => checks[k]), ...long];
     }
     drafts.push({ text: draft, checks: scores, problems });
-    if (!problems.length) return { text: draft, drafts };
+    if (!problems.length || (attempt === 1 && problems.every((p) => long.includes(p)))) return { text: draft, drafts };
   }
   return { text: null, drafts };
 }
@@ -998,7 +1000,7 @@ export async function audit(f: { id: number; plot: number; intent: string; condi
   const condition = fellBack && lapsed ? lapsed : written.condition;
   const wants = fellBack && lapsed ? null : written.wants;
   const findings = { departs, lapsed, condition };
-  const { text, drafts } = await note("audit notice", AUDITOR, { filing: pad(f.id), intent: f.intent, evidence, ...findings }, NOTICE_CHECKS);
+  const { text, drafts } = await note("audit notice", AUDITOR, { filing: pad(f.id), intent: f.intent, evidence, ...findings }, NOTICE_CHECKS, 45);
   const remark = text ?? `Audited. ${lapsed ? "An earlier condition is no longer met" : "The plot has strayed from its permit"}, and the permit is amended: ${condition}`;
   return { compliant: false as const, condition, wants, remark, answers: { ...answers, conditions: written.tries, drafts } };
 }
@@ -1480,7 +1482,7 @@ export async function ruleVariation(
     bylaw: ruled.bylaw !== null ? bylawText(ruled.bylaw, plot) : null,
   };
   const refused = ruled.status === "refused";
-  const { text, drafts } = refused ? { text: null, drafts: [] } : await note("variation reply", VARIER, input, askable(VARIATION_CHECKS, input) as Record<string, string>);
+  const { text, drafts } = refused ? { text: null, drafts: [] } : await note("variation reply", VARIER, input, askable(VARIATION_CHECKS, input) as Record<string, string>, 45);
   const reply = text ?? formVariation(ruled, v.what, use, input.condition, plot);
   return { ...ruled, addition, condition: written?.condition ?? null, wants: written?.wants ?? null, reply, record: { answers, drafts, conditions: written?.tries, addition } };
 }
@@ -1750,7 +1752,7 @@ export async function hearAnswer(t: { what: string; question: string; answer: st
     explained,
     ...(due && { due: longDay(due) }),
   };
-  const { text, drafts } = await note("letter reply", LETTERER, input, LETTER_CHECKS);
+  const { text, drafts } = await note("letter reply", LETTERER, input, LETTER_CHECKS, 40);
   const reply = text ?? (explained
     ? `Fine, the ${t.what} can stay. I'll put it on the schedule.`
     : `The ${t.what} isn't part of ${state.use}. It's tagged: take it down or file for it by ${longDay(due!)}, or it comes to the pound.`);
