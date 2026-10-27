@@ -157,6 +157,7 @@ export interface Verdict {
   condition: Condition | null;
   bylaw: number | null; // 0: the covenant
   concern?: string | null; // why an approval came with a condition: the plot doesn't suit it
+  returned?: boolean; // the committee mostly wouldn't vote on it: back to the filer, undecided (a denial under no bylaw)
 }
 
 /** The ruling to apply. Approved and conditional are both a yes, so they're weighed together against
@@ -286,8 +287,17 @@ export function problemsWith(draft: string, checks: Partial<Record<Check, number
 }
 
 /** Two sentences (a refusal gets to fall apart over a few more), at most 400 characters: the scribe is chatty. */
-const trim = (text: string, sentences = 2, max = 400) =>
-  (text.trim().match(/[^.!?]+(?:[.!?]+["'”’)]*|$)/g) ?? [text.trim()]).slice(0, sentences).join("").trim().slice(0, max);
+// Whole sentences, as many as fit; only a first sentence too long on its own is cut, at a word.
+const trim = (text: string, sentences = 2, max = 400) => {
+  let out = "";
+  for (const s of (text.trim().match(/[^.!?]+(?:[.!?]+["'”’)]*|$)/g) ?? [text.trim()]).slice(0, sentences)) {
+    if (out && (out + s).trim().length > max) break;
+    out += s;
+  }
+  out = out.trim();
+  return out.length <= max ? out : `${out.slice(0, max).replace(/\s+\S*$/, "")}…`;
+};
+const words = (text: string) => text.trim().split(/\s+/).length;
 
 /** Rule on one filing. Exported so a ruling can be tried from a script. */
 export async function rule(
@@ -407,7 +417,9 @@ Make it about this filing in particular: what you'd actually want to see before 
 It must be something the filer can meet on their own plot: by what they put there and where, how they paint the ground ("ground"), or by having a neighbour on a plot next door.
 "plot" describes the plot: its size and shape, its ground and weather, the features already on it, and what lies along each side (north is the top). Suit the condition to the plot where you can: it may ask for things along a side ("a hedge along its west side, against the wind"), beside a feature already there ("beside the spring"), or on a kind of ground. Features stay as they are: nothing can be built on them or painted under them. Never ask for anything off the plot.
 If "concern" is given, the filing was approved only on condition because it does not suit this plot: "cramped" means it is too big or ambitious for the plot's size, "against the grain" means it is wrong for the plot's ground or weather. Make the condition put that right on the plot; a cramped filing may be held to a number of things ("no more than four trees").
+"idea" is the sort of condition that came to mind for this filing: a starting point, not an order. Make it particular, or go somewhere better if the filing suggests it.
 If "debate" is given, the Commons Committee has argued over this filing: make the condition answer the concerns its members raised, recast as something the plot can show (a worry about noise might become a hedge between it and the neighbours).
+A condition may ask for something to be left off the plot, or kept clear, as well as put on it, if that suits the filing better.
 If "amend" is given, you've audited the plot since it was granted and found it out of order: "amend.departs" means what's built has strayed from the intent, "amend.lapsed" is an earlier condition no longer met, and "amend.on_the_plot" is what's there now. Write an amended condition, up to 30 words: it requires putting right what's wrong (restoring the lapsed condition, or bringing the plot back to its intent) and one small further requirement while you're at it. Ask for what's missing rather than for things to be taken away: extra things may stay.
 If "write_in" is false, any things it asks for must be from "things". If it is true, it must ask for one particular thing that is not in "things", specific and a little unexpected, suited to the intent: the filer will write it in by name, and you will draw it.
 Never require anything off the plot, anything only you could do, or anything that can't be seen.
@@ -420,7 +432,7 @@ Must stand beside the water, with a tree near enough to shade whoever sits there
 const CONDITION_CHECKS = {
   irrelevant: "Does the condition have nothing to do with what the filing's intent describes?",
   unmeetable:
-    "Is the condition impossible to meet by putting things on the plot (listed ones, or any item written in by name), arranging them, painting its ground, or having a neighbour next door? It is, if it depends on which way something faces, or on its size, colour, wording or state: none of those are recorded. It is, if it needs anything done off the plot, or a feature the plot does not have. A limit on how many of something there may be is meetable: they can be counted.",
+    "Is the condition impossible to meet by what is or isn't on the plot (listed things, or any item written in by name), how they're arranged, how its ground is painted, or having a neighbour next door? Keeping things off the plot, or a part of it clear, is meetable. It is, if it depends on which way something faces, or on its size, colour, wording or state: none of those are recorded. It is, if it needs anything done off the plot, or a feature the plot does not have. A limit on how many of something there may be is meetable: they can be counted.",
   unfit: "Is the condition crude or unkind, or does it contain a link, a handle or personal information?",
 } as const;
 
@@ -439,7 +451,7 @@ export async function writeCondition(
 ) {
   const { plot, debate, amend, concern, writeIn = Math.random() < 0.2 } = opts;
   const input = {
-    filing: pad(filing.id), intent: filing.intent, things: PROPS, ground: Object.values(groundKey(plot)), write_in: writeIn,
+    filing: pad(filing.id), intent: filing.intent, idea: stockText(stock, plot), things: PROPS, ground: Object.values(groundKey(plot)), write_in: writeIn,
     plot: { ...siteOf(plot), features: plot.features.map((f) => f.kind.replace("_", " ")), sides: plot.edges },
     ...(debate && { debate }), ...(amend && { amend }), ...(concern && { concern }),
   };
@@ -466,15 +478,15 @@ export async function writeCondition(
         ) as Record<keyof typeof CONDITION_CHECKS, { type: "boolean"; instructions: string }>),
         wants: {
           type: "choice",
-          instructions: "Which one of the listed things would most help meet this condition?",
-          criteria: Object.fromEntries(PROPS.map((p) => [p, p])),
+          instructions: "Which one of the listed things would most help meet this condition? \"nothing\" if it asks for things to be left off or kept clear rather than put there.",
+          criteria: { ...Object.fromEntries(PROPS.map((p) => [p, p])), nothing: "nothing: it asks for less, not more" },
         },
       },
     );
     const checks = Object.fromEntries(Object.keys(CONDITION_CHECKS).map((k) => [k, answers[k as keyof typeof CONDITION_CHECKS].probability]));
     const problems = Object.entries(checks).filter(([, p]) => p > 0.5).map(([k]) => CONDITION_CHECKS[k as keyof typeof CONDITION_CHECKS]);
     tries.push({ text: condition, checks, problems });
-    if (!problems.length) return { condition, wants: writeIn ? null : (answers.wants.choice as string), tries };
+    if (!problems.length) return { condition, wants: writeIn || answers.wants.choice === "nothing" ? null : (answers.wants.choice as string), tries };
   }
   return { condition: stockText(stock, plot), wants: stockWants(stock, plot), tries };
 }
@@ -522,13 +534,14 @@ export type Vote = "approved" | "conditional" | "covenant" | "refused" | "agains
 
 /** Count the committee's votes; null without a quorum of three present, or if nobody votes either way. Code decides; Jev only heard them. */
 export function tally(votes: (Vote | null)[], condition: Condition): (Verdict & { count: string }) | null {
-  if (votes.filter((v) => !!v).length < 3) return null;
+  const present = votes.filter((v) => !!v);
+  if (present.length < 3) return null;
   const cast = votes.filter((v): v is Vote => !!v && v !== "abstain");
-  if (!cast.length) return null;
   const against = cast.filter((v) => v.startsWith("b") || v === "covenant" || v === "refused" || v === "against");
   const ayes = cast.filter((v) => v === "approved").length;
   const abstaining = votes.length - cast.length;
   const count = `${cast.length - against.length} to ${against.length}${abstaining ? `, ${abstaining} abstaining` : ""}`;
+  if (present.length - cast.length > present.length / 2) return { status: "denied", condition: null, bylaw: null, returned: true, count };
   if (against.length > cast.length / 2) {
     // Under whatever was cited most; with nothing cited, under no bylaw.
     const cited = against.filter((v) => v !== "against").map((v) => (v === "covenant" ? 0 : v === "refused" ? -1 : Number(v.slice(1)))); // -1: unfit
@@ -540,7 +553,7 @@ export function tally(votes: (Vote | null)[], condition: Condition): (Verdict & 
 }
 
 const OUTCOME = (v: Verdict) =>
-  v.status === "refused" ? "refused as unfit for the notice board" : v.status === "denied" ? (v.bylaw ? `denied under Bylaw ${v.bylaw}` : v.bylaw === 0 ? "denied under the covenant" : "denied, under no bylaw in particular") : v.status === "conditional" ? "approved on condition" : "approved";
+  v.returned ? "returned to the filer undecided, most of the committee declining to vote on it" : v.status === "refused" ? "refused as unfit for the notice board" : v.status === "denied" ? (v.bylaw ? `denied under Bylaw ${v.bylaw}` : v.bylaw === 0 ? "denied under the covenant" : "denied, under no bylaw in particular") : v.status === "conditional" ? "approved on condition" : "approved";
 
 /** The committee sits on one filing, or on an appeal against its denial. Null if it can't make quorum: it sits again the next night. */
 export async function sit(
@@ -634,8 +647,10 @@ export async function sit(
       prompt: last ? { ...input, rejected: last.text, rejected_because: last.problems } : input,
       maxOutputTokens: 4000,
     });
-    const draft = trim(text, 6, 900);
-    let problems = problemsWith(draft, {});
+    // Checked whole, so nothing hides past a cut; only well over length is worth another go.
+    const draft = trim(text, 8, 1400);
+    const long = words(text) > 170 ? [`it ran to ${words(text)} words; keep it to about 130`] : [];
+    let problems = [...problemsWith(draft, {}), ...long];
     let checks: Record<string, number> = {};
     if (!problems.length) {
       const { answers: a } = await ask(
@@ -646,10 +661,12 @@ export async function sit(
         ) as Record<keyof typeof FINDING_CHECKS, { type: "boolean"; instructions: string }>,
       );
       checks = Object.fromEntries(Object.entries(a).map(([k, v]) => [k, v.probability]));
-      problems = Object.entries(checks).filter(([, p]) => p > 0.5).map(([k]) => FINDING_CHECKS[k as keyof typeof FINDING_CHECKS]);
+      problems = [...Object.entries(checks).filter(([, p]) => p > 0.5).map(([k]) => FINDING_CHECKS[k as keyof typeof FINDING_CHECKS]), ...long];
     }
     drafts.push({ text: draft, checks, problems });
     if (!problems.length) finding = draft;
+    // Long but otherwise sound, twice: keep it, cut at a sentence.
+    else if (attempt === 1 && problems.every((p) => long.includes(p))) finding = trim(draft, 7, 1000);
   }
 
   return {

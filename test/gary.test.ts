@@ -38,6 +38,7 @@ test("the committee needs a quorum; a majority against denies under the most-cit
   assert.equal(tally(["approved", "approved", "approved", "b2", "conditional"], "flag")?.status, "approved");
   assert.deepEqual(tally(["against", "b7", "against", "approved", "abstain"], "flag"), { status: "denied", condition: null, bylaw: 7, count: "1 to 3, 1 abstaining" });
   assert.deepEqual(tally(["against", "against", "approved", "abstain", null], "flag"), { status: "denied", condition: null, bylaw: null, count: "1 to 2, 2 abstaining" });
+  assert.equal(tally(["abstain", "abstain", "abstain", "approved", "conditional"], "flag")?.returned, true);
   assert.equal(tally(["approved", "approved", "conditional", "b2", "b4"], "flag")?.condition, "flag");
 });
 
