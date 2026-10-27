@@ -1581,11 +1581,161 @@ export const FITTINGS: Record<string, FittingDef> = Object.fromEntries(
 const SURFACES = (s: Record<string, Omit<Surface, "palette"> & { pal?: Record<string, string> }>): Record<string, Surface> =>
   Object.fromEntries(Object.entries(s).map(([key, { pal, ...v }]) => [key, { ...v, palette: { ...C, ...pal } }]));
 
-/** Interior floors. */
-export const FLOORS: Record<string, Surface> = SURFACES({});
+const FLAGS = [
+  "SSSSSSSgSSSSSSSg",
+  "SssssssgSssssssg",
+  "SsssssGgSssssssg",
+  "SsssssGgSsssssGg",
+  "SGGGGGGgSGGGGGGg",
+  "gggggggggggggggg",
+  "SSSSSSSSSSSgSSSg",
+  "SssssssssssgSssg",
+  "SssssssssGsgSsGg",
+  "SssssssssssgSsGg",
+  "SGGGGGGGGGGgSGGg",
+  "gggggggggggggggg",
+  "SSSSgSSSSSSSSSSg",
+  "SssGgSssssssssGg",
+  "SGGGgSGGGGGGGGGg",
+  "gggggggggggggggg",
+];
+const SKIRTING = ["kkkkkkkk", "WWWWWWWW", "tttttttt", "bbbbbbbb"];
 
-/** Interior wall finishes. */
-export const WALLS: Record<string, Surface> = SURFACES({});
+/** Interior floors: tiles that repeat both ways. */
+export const FLOORS: Record<string, Surface> = SURFACES({
+  boards: {
+    name: "floorboards", aliases: ["boards", "wooden floor", "planks", "timber floor"],
+    rows: [
+      "WWWWWWWWWbWWWWWW",
+      "WWtWWWWWWbWWWWWW",
+      "WWWWWWWWWbWWWWtW",
+      "bbbbbbbbbbbbbbbb",
+      "tttbtttttttttttt",
+      "tttbttttttWttttt",
+      "tttbtttttttttttt",
+      "bbbbbbbbbbbbbbbb",
+    ],
+    pal: { W: "#a4784e", t: "#98704a", b: "#82603f" }, // quieter than the furniture, so pieces stand off it
+  },
+  parquet: {
+    name: "parquet", aliases: ["parquet floor", "wood block", "herringbone", "dance floor"],
+    rows: ["WWWWtPtP", "bbbbtPtP", "WWWWtPtP", "bbbbtPtP", "tPtPWWWW", "tPtPbbbb", "tPtPWWWW", "tPtPbbbb"],
+    pal: { P: "#d6b476" },
+  },
+  checker: {
+    name: "chequered tiles", aliases: ["chequerboard", "black and white tiles", "checkered floor", "tiles"],
+    rows: ["wwwwmmmm", "wwwwmmmm", "wwwwmmmm", "wwwwmmmm", "mmmmwwww", "mmmmwwww", "mmmmwwww", "mmmmwwww"],
+    pal: { w: "#ece2cc", m: "#5a5068" },
+  },
+  quarry: {
+    name: "quarry tiles", aliases: ["terracotta tiles", "red tiles", "kitchen tiles", "clay tiles"],
+    rows: ["qqqgrrrg", "qqqgrrrg", "qqqgrrrg", "gggggggg", "rrrgqqqg", "rrrgqqqg", "rrrgqqqg", "gggggggg"],
+    pal: { q: "#b8604e", r: "#c87058", g: "#8a5a4e" },
+  },
+  flagstones: {
+    name: "flagstones", aliases: ["stone floor", "flags", "slabs", "paving"],
+    rows: FLAGS,
+    pal: { S: "#d2cebc", s: "#aca8a6", G: "#86828e", g: "#645e72" },
+  },
+  carpet: {
+    name: "carpet", aliases: ["fitted carpet", "red carpet", "wall to wall carpet", "pile"],
+    rows: ["rrrrrrrr", "rrryrrrr", "rryRyrrr", "rrryrrrr", "rrrrrrrr", "rrrrrrry", "yrrrrryR", "rrrrrrry"],
+    pal: { r: "#a8484a", R: "#7a3438", y: "#c9a050" },
+  },
+  matting: {
+    name: "tatami flooring", aliases: ["matting", "rush matting", "tatami floor", "straw mats"],
+    rows: [
+      "NNNNNNNNNNNNNNNN",
+      "fffffffffffffffF",
+      "fFffffFffffffFfF",
+      "fffffffffffffffF",
+      "ffffFfffffFffffF",
+      "fffffffffffffffF",
+      "fFfffffFffffffFF",
+      "fffffffffffffffF",
+    ],
+    pal: { N: "#2f4a36", f: "#cfc684", F: "#aaa262" },
+  },
+  lino: {
+    name: "linoleum", aliases: ["lino", "vinyl", "school floor", "hospital floor"],
+    rows: ["llllllll", "llLlllcl", "llllllll", "lcllllLl", "llllllll", "llllLlll", "lLllllcl", "llllllll"],
+    pal: { l: "#a8b890", L: "#8ea078", c: "#c8d0b0" },
+  },
+  concrete: {
+    name: "concrete", aliases: ["cement floor", "screed", "garage floor", "bare concrete"],
+    rows: ["ssssssss", "ssgsssSs", "ssssssss", "sSssssgs", "ssssssss", "ssssgsss", "sgssSsss", "ssssssss"],
+    pal: { s: "#aca8a6", g: "#968f96", S: "#c0bcb4" },
+  },
+  earth: {
+    name: "beaten earth", aliases: ["earth floor", "dirt floor", "mud floor", "straw on the floor"],
+    rows: ["eeeeeeee", "eeEeeeye", "eeeeeeee", "eyeeeeEe", "eeeeeeee", "eeeeEeee", "eEeeeyye", "eeeeeeee"],
+    pal: { e: "#a88456", E: "#8a644e", y: "#d6c07a" },
+  },
+});
+
+/** Interior wall finishes: tiles that repeat both ways; a skirt, if any, runs along the foot. */
+export const WALLS: Record<string, Surface> = SURFACES({
+  plaster: {
+    name: "plaster", aliases: ["painted plaster", "cream walls", "distemper", "painted walls"],
+    rows: ["pppppppp", "ppPppppp", "pppppppp", "pppppPpp", "pppppppp", "pPpppppp", "pppppppp", "ppppPppp"],
+    pal: { p: "#e8dcc0", P: "#dccfb0" },
+    skirt: SKIRTING,
+  },
+  whitewash: {
+    name: "whitewash", aliases: ["limewash", "white walls", "whitewashed brick", "white paint"],
+    rows: ["wwwwwwwp", "wwwwwwwp", "pppppppp", "wwwpwwww", "wwwpwwww", "pppppppp"],
+    pal: { w: "#f0ece0", p: "#ddd6c6" },
+    skirt: SKIRTING,
+  },
+  stripes: {
+    name: "striped wallpaper", aliases: ["wallpaper", "regency stripe", "stripes", "papered walls"],
+    rows: ["cccccnsn", "cccccnsn", "cccccnsn", "cccccnsn"],
+    pal: { c: "#efe2c4", n: "#9aae8a", s: "#b8c4a0" },
+    skirt: SKIRTING,
+  },
+  floral: {
+    name: "flowered wallpaper", aliases: ["floral wallpaper", "chintz", "rose wallpaper", "patterned wallpaper"],
+    rows: ["BBBBBBBB", "BBpBBBBB", "BpypBBBB", "BBpnBBBB", "BBBBBBBB", "BBBBBBpB", "BBBBBpyp", "BBBBBnpB"],
+    pal: { B: "#e6cfb8", p: "#c86a7a", y: "#f0d080", n: "#7a9a60" },
+    skirt: SKIRTING,
+  },
+  panelling: {
+    name: "wood panelling", aliases: ["panelling", "oak panels", "wainscot", "panelled walls"],
+    rows: [
+      "WWWWWWWWWWWWWWWW",
+      "tbbbbbbbtbbbbbbb",
+      "tbWttttbtbWttttb",
+      "tbWttttbtbWttttb",
+      "tbWttttbtbWttttb",
+      "tbWttttbtbWttttb",
+      "tbWttttbtbWttttb",
+      "tbWttttbtbWttttb",
+      "tbWttttbtbWttttb",
+      "tbWttttbtbWttttb",
+      "tbbbbbbbtbbbbbbb",
+      "dddddddddddddddd",
+    ],
+  },
+  brick: {
+    name: "bare brick", aliases: ["brick", "brickwork", "exposed brick", "red brick"],
+    rows: ["rrrrrrrmrrrrrrrm", "rrRrrrrmrrrrrRrm", "RRRRRRRmRRRRRRRm", "mmmmmmmmmmmmmmmm", "rrrmrrrrrrrmrrrr", "rrrmrRrrrrrmrrRr", "RRRmRRRRRRRmRRRR", "mmmmmmmmmmmmmmmm"],
+    pal: { r: "#b8604e", R: "#94483e", m: "#d8c8b0" },
+  },
+  stonework: {
+    name: "stone walls", aliases: ["stonework", "stone", "dressed stone", "rubble wall"],
+    rows: FLAGS,
+    pal: { S: "#b6ae9c", s: "#968f88", G: "#7a7280", g: "#4e485c" },
+  },
+  wall_tiles: {
+    name: "wall tiles", aliases: ["tiled walls", "white tiles", "metro tiles", "bathroom tiles"],
+    rows: ["cccgcccg", "gggggggg", "cgcccgcc", "gggggggg"],
+    pal: { c: "#f4f0e6", g: "#b8c4c8" },
+  },
+  timber: {
+    name: "timber boarding", aliases: ["boarding", "tongue and groove", "wooden walls", "shiplap", "log walls"],
+    rows: ["WWtbWWtbWWtbWWtb", "WWtbWWtbWWtbWWtb", "WWtbWWtbWbtbWWtb", "WbtbWWtbWWtbWWtb", "WWtbWWtbWWtbWWtb", "WWtbWWtbWWtbWbtb", "WWtbWWtbWWtbWWtb", "WWtbWbtbWWtbWWtb"],
+  },
+});
 
 /** A fitting by key, or undefined. */
 export const fitting = (key: string): FittingDef | undefined => (Object.hasOwn(FITTINGS, key) ? FITTINGS[key] : undefined);

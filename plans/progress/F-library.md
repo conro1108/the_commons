@@ -14,7 +14,7 @@ Branch `worktree-agent-acc722659ac2419b9`. Resume from the first unticked step.
 - [x] 10. Walls: chalkboard, cork board, mirror, picture, clock, shelves.
 - [x] 11. Odds: punching bag, gong, piano, easel, fish tank, etc.
 - [x] 12. More small held things (books, cups, kettle...).
-- [ ] 13. Floors and wall finishes (tileable).
+- [x] 13. Floors and wall finishes (tileable). Notes: 10 floors, 9 walls (plaster, whitewash, stripes, floral get a wood skirt); FLAGS rows shared by flagstones and stonework.
 - [ ] 14. Register fittings as props (one line in props.ts) so placements draw; throws on a key collision.
 - [x] 15. (done early, to judge as I go) `dev/library.html` + `dev/library.ts`: every piece on a floor/wall patch, footprint and slots marked; ?scale ?floor ?wall ?stock ?slots ?only ?group ?room.
 - [ ] 16. Look at it by eye (headless Chrome screenshot via a /tmp script, vite on :5199) and fix what looks off.

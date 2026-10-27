@@ -1,7 +1,7 @@
 // Every piece in the library at scale, stood on a patch of floor or hung on a
 // patch of wall, footprint dashed, slots boxed (sit cyan, hang pink) and filled
 // with their stock. ?scale=4, ?floor=boards, ?wall=plaster, ?stock=0, ?slots=0,
-// ?only=key, ?group=Tables, ?room=0 for no sample room. No network.
+// ?only=key, ?group=Tables (or surfaces), ?room=0 for no sample room. No network.
 
 import { FITTINGS, FLOORS, WALLS, type FittingDef, type Surface } from "../src/content/fittings.ts";
 import type { PropDef } from "../src/content/canon/props.ts";
@@ -98,7 +98,7 @@ if (q.get("room") !== "0" && !only && !group) {
   tile(ctx, FLOORS[floorKey], 0, WALL, W, H - WALL);
   // [key, cell x, cell y of the footprint's back row]; wall pieces: y is px up the wall from the floor line
   const room: [string, number, number][] = [
-    ["chalkboard", 1, 14], ["wall_clock", 12, 22], ["picture", 17, 16], ["coat_hooks", 27, 16],
+    ["chalkboard", 25, 16], ["wall_clock", 12, 22], ["picture", 17, 16], ["coat_hooks", 6, 9],
     ["bookcase", 1, 0], ["shelf_unit", 6, 0], ["fireplace", 12, 0], ["pot_plant", 19, 0], ["dresser", 21, 0],
     ["rug", 9, 6], ["armchair", 4, 6], ["side_table", 1, 7], ["table", 15, 7], ["chair", 13, 8], ["chair", 19, 8],
     ["floor_lamp", 1, 11], ["sofa", 8, 12], ["punching_bag", 27, 6], ["tatami", 24, 12], ["tatami", 28, 12],
@@ -149,7 +149,7 @@ for (const [name, list] of groups) {
   }
 }
 
-if (!only && !group) {
+if (!only && (!group || group === "surfaces")) {
   const g = section(`Floors (${Object.keys(FLOORS).length})`);
   for (const [k, s] of Object.entries(FLOORS)) tile(card(g, 64, 40, `<b>${k}</b><br>${s.name}`), s, 0, 0, 64, 40);
   const h = section(`Walls (${Object.keys(WALLS).length})`);
