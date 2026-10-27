@@ -190,14 +190,14 @@ export interface Appeal {
 }
 
 /** A denied filing gets this many goes at Gary before it goes up to the committee. The database counts too. */
-export const APPEALS = 3;
+export const APPEALS = 2; // to Gary; the next goes to the committee
 
 /** Which court would hear the next appeal, as the database's next_appeal() reckons it (bar the plot being free). */
 export function nextCourt(status: string, made: Appeal[]): Appeal["court"] | null {
   const toGary = made.filter((a) => a.court === "gary").length;
   const upstairs = made.filter((a) => a.court === "committee").length;
   if (status === "denied" && toGary < APPEALS) return "gary";
-  if ((status === "refused" && upstairs === 0) || upstairs === 1) return "committee";
+  if (upstairs < 2) return "committee";
   return null;
 }
 

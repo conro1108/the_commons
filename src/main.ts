@@ -168,6 +168,7 @@ function appealForm(f: Filing) {
   const toGary = made.filter((a) => a.court === "gary").length;
   const [label, note] = next === "gary" ? ["Not quite understood? Make your case", `${APPEALS - toGary} of ${APPEALS} left`]
     : made.some((a) => a.court === "committee") ? ["One last plea, against the committee's finding", "This one's final."]
+    : f.status === "denied" ? ["Gary's dismissed it twice. Put your case to the committee", "It sits overnight."]
     : ["Gary won't hear an appeal on this himself. Put your case to the committee", "It sits overnight."];
   return `<form class="appeal"><label class="intent">${label}
       <textarea rows="3" maxlength="280" placeholder="it isn't a business: the lemonade is free" required></textarea></label>

@@ -1,6 +1,6 @@
 // The back office, behind a 3s hold on the notice board: write a filing, pick
 // what happens to it, and read the whole exchange between the models. Denied,
-// or refused, you can write back: three appeals to Gary (a refusal skips him), then the committee, then one plea
+// or refused, you can write back: two appeals to Gary (a refusal skips him), then a third to the committee, then one plea
 // against them (the escalation is a proposal, not yet in the game). A dry run;
 // api/backoffice.ts runs it and nothing is written. Loaded only when opened.
 
@@ -260,7 +260,7 @@ function mount(first: number): HTMLElement {
   const chosen = picker($(".picker"), first, $(".picker .card"));
 
   // The case, while it's open to appeal: what it's denied under (or that it was refused), and what's been said.
-  // Denied, it's three pleas to Gary, then the committee; refused, Gary won't hear it, so straight to the committee.
+  // Denied, it's two pleas to Gary, then a third to the committee; refused, Gary won't hear it, so straight to the committee.
   let open: {
     intent: string; plot: number; bylaw: number | null; refused: boolean; exchange: { plea: string; reply: string | null }[]; finding?: string;
   } | null = null;
@@ -335,10 +335,11 @@ function mount(first: number): HTMLElement {
     $(".closed").hidden = !!open || !why;
     $(".closed").textContent = why ?? "";
     if (!open) return;
-    $(".to").textContent = open.finding ? "Final appeal, against the committee" : open.refused ? "Appeal, to the committee" : `Appeal ${n + 1} of 3, to Gary`;
+    $(".to").textContent = open.finding ? "Final appeal, against the committee" : open.refused ? "Appeal, to the committee" : n < 2 ? `Appeal ${n + 1} of 2, to Gary` : "Appeal, to the committee";
     $(".why").textContent = open.finding ? "The committee has ruled on appeal. One last plea, and that's final."
       : open.refused ? "Refused as unfit. Gary won't hear an appeal himself, so this goes straight to the committee."
-      : `Denied under ${bylawName(open.bylaw)}. Write back to make your case.${n === 2 ? " If this is dismissed too, it goes up to the committee." : ""}`;
+      : n === 2 ? "Gary's dismissed it twice. This goes to the committee."
+      : `Denied under ${bylawName(open.bylaw)}. Write back to make your case.${n === 1 ? " If this is dismissed too, the next goes to the committee." : ""}`;
     field<HTMLTextAreaElement>("plea").focus({ preventScroll: true });
   }
 
@@ -392,7 +393,7 @@ function mount(first: number): HTMLElement {
     if (c.finding) {
       await stage("Final appeal, to the committee", "escalate", { ...base(), against: { finding: c.finding, plea } }, pleaded(plea));
       close("That was final.");
-    } else if (c.refused) {
+    } else if (c.refused || c.exchange.length === 2) {
       c.exchange.push({ plea, reply: null });
       await upstairs(pleaded(plea));
     } else {
@@ -403,8 +404,7 @@ function mount(first: number): HTMLElement {
       else {
         c.exchange.push({ plea, reply: h.reply });
         c.bylaw = h.verdict.bylaw;
-        if (c.exchange.length < 3) standing();
-        else await upstairs();
+        standing();
       }
     }
     busy = false;

@@ -206,9 +206,9 @@ begin
   if exists (select 1 from the_commons.appeals a where a.filing = f.id and a.heard_at is null) then return null; end if;
   select count(*) filter (where court = 'gary'), count(*) filter (where court = 'committee')
     into to_gary, upstairs from the_commons.appeals where filing = f.id;
-  if f.status = 'denied' and to_gary < 3 then return 'gary'; end if;
-  -- A refusal goes straight up; a denial got there by itself after Gary's third. Then one last plea.
-  if f.status = 'refused' and upstairs = 0 or upstairs = 1 then return 'committee'; end if;
+  if f.status = 'denied' and to_gary < 2 then return 'gary'; end if;
+  -- A refusal goes straight up; a denial after Gary's second dismissal. Then one last plea.
+  if upstairs < 2 then return 'committee'; end if;
   return null;
 end $$;
 grant execute on function the_commons.next_appeal(bigint) to authenticated;
@@ -239,7 +239,7 @@ create trigger appeals_number before insert on the_commons.appeals
   for each row execute function the_commons.number_appeal();
 
 -- A hearing, written down in one go: heard only once, and allowed only if the
--- plot is still free. Gary's third dismissal sends it up to the committee.
+-- plot is still free.
 -- /api/gary's alone.
 create function the_commons.apply_appeal(
   p_id bigint, p_ok boolean, p_allowed boolean, p_bylaw smallint, p_reply text, p_record jsonb,
@@ -254,13 +254,7 @@ begin
     where id = p_id and heard_at is null
     returning filing into f;
   if f is null then return false; end if;
-  if not p_allowed then
-    if (select count(*) from the_commons.appeals where filing = f and court = 'gary') = 3
-        and not exists (select 1 from the_commons.appeals where filing = f and court = 'committee') then
-      insert into the_commons.appeals (filing, court) values (f, 'committee');
-    end if;
-    return false;
-  end if;
+  if not p_allowed then return false; end if;
   begin
     update the_commons.filings
       set status = p_status, condition = p_condition, wants = p_wants, stamped_at = now()
