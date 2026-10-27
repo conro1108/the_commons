@@ -7,18 +7,33 @@ import {
 } from "./world/index.ts";
 import {
   APPEALS, HELD, nextCourt, avatarOf, fileAppeal, fileClaim, handlesFor, isGuest, keepPapers, logIn, loadAppeals, loadFilings, loadPlacements, move, paint,
-  place, rehandle, saveProfile, signIn, summonGary, supabase, unplace,
+  place, placeInside, moveInside, rehandle, saveProfile, signIn, summonGary, supabase, unplace,
+  answerTag, fileRetrospective, loadTags, reclaim, summonRounds,
   type Appeal, type Filing, type Placement,
 } from "./net.ts";
+import { fileChangeOfUse, fileVariation, loadVariations, type Variation } from "./net.ts";
+import { scheduleHtml, variationForm, variationHtml } from "./permit.ts";
+import { askForPlot, flipSign, loadSpirit, pinNotice, signBook, summonReader, unpinNotice, type Notice, type Visit } from "./net.ts";
+import { spiritCardHtml, spiritHtml, styleSpirit } from "./spirit.ts";
 import type { RealtimeChannel } from "@supabase/supabase-js";
 import { VOID, colourOf, draw, letterPhase, type Letter, type Walker } from "./render.ts";
 import {
   FOCUS_PAD, SURROUND, canPaint, canPlace, drawFocus, focusSize, land, placementAt, type Cells, type FocusScene,
 } from "./closeup.ts";
+import {
+  DEFAULT_MATERIAL, DEFAULT_PAINT, MATERIALS, PAINTS, defaultWindows, footprintProblem, frontWallAt, kindOf, materialSwatch, materialsFor,
+  onShell, raise, scheduledMaterial, shellKind, windowFits, type Kind as ShellKind,
+} from "./shell.ts";
+import { saveShell } from "./net.ts";
+import type { Shell } from "./schedule.ts";
 import { BOARD_BOX } from "./map/landmarks.ts";
 import { GARY_LINES, garyAt } from "./life.ts";
 import { looksLike } from "./avatar.ts";
 import { openDoor, openPapers, papersOpen } from "./papers.ts";
+import { isWaiting, letterHtml, poundHtml, thingName, type Tag } from "./letter.ts";
+import {
+  doorOutside, drawRoom, fitting, fittingKeys, onDoor, roomArt, roomSize, slotAt, spotFor, spriteOf, thingAt, type RoomScene,
+} from "./interior.ts";
 
 const SPEED = 40; // art pixels per second
 const ZOOM_MS = 520; // map <-> plot
@@ -311,7 +326,7 @@ function renderCard() {
   } else if (f) {
     body = `<h2>${esc(plotLabel(def))}</h2><p class="meta where">${esc(REGIONS[def.region].name)}</p>
       <p>Held by ${esc(who(f.filer))}: <q>${esc(f.intent)}</q></p>
-      ${enter}${ruling(f, fresh)}${conditionHtml(f)}<p class="meta">Filing ${pad(f.id)}</p>`;
+      ${enter}${ruling(f, fresh)}${spiritCardHtml(f, me, guest)}${worksHtml(f)}${conditionHtml(f)}${letterFor(f)}${variationsHtml(f)}<p class="meta">Filing ${pad(f.id)}</p>`;
   } else {
     const denial = appealableOn(plot);
     body = `${particulars(def)}
@@ -331,10 +346,13 @@ function renderCard() {
     renderCard();
   });
   if (f) card.querySelector(".enter")?.addEventListener("click", () => walkInto(f));
+  if (f) wireAsk(card, f);
   card.querySelector(".door")?.addEventListener("click", door);
   card.querySelector<HTMLButtonElement>("[data-reply]")?.addEventListener("click", (e) =>
     openCard(plot, Number((e.currentTarget as HTMLButtonElement).dataset.reply)));
-  const form = card.querySelector("form");
+  if (f) wireVariation(f, typed, typing);
+  wireLetter(card);
+  const form = card.querySelector<HTMLFormElement>("form:not(.vary):not(.answer)");
   if (form) {
     const box = form.querySelector("textarea")!;
     box.value = typed;
@@ -511,6 +529,62 @@ board.addEventListener("click", (e) => {
   if (e.target === board) closeBoard();
 });
 
+// --- the schedule and variations (slice C) ------------------------------------
+// A granted plot's card shows its schedule (src/permit.ts), what's been filed
+// against it, and, to its holder, room to go back to Gary.
+
+const variations = new Map<number, Variation[]>(); // filing -> its variations, in order
+
+function setVariation(v: Variation) {
+  const list = (variations.get(v.filing) ?? []).filter((x) => x.id !== v.id);
+  variations.set(v.filing, [...list, v].sort((a, b) => a.id - b.id));
+}
+
+const worksHtml = (f: Filing) => (f.schedule && BUILT.includes(f.status) && !unread.has(f.id) ? scheduleHtml(f.schedule) : "");
+
+/** What's been filed against a permit, the latest few; and the form, if it's ours and nothing's before Gary. */
+function variationsHtml(f: Filing) {
+  if (!BUILT.includes(f.status) || unread.has(f.id)) return "";
+  const all = variations.get(f.id) ?? [];
+  const open = all.some((v) => v.status === "pending" || v.status === "committee");
+  const mine = f.filer === me && !guest;
+  return all.slice(-3).map(variationHtml).join("") + (mine && !open ? variationForm(f.schedule?.shell.kind !== "none") : "");
+}
+
+function wireVariation(f: Filing, typed: string, typing: boolean) {
+  const form = card.querySelector<HTMLFormElement>("form.vary");
+  if (!form) return;
+  const box = form.querySelector("textarea")!;
+  const use = form.querySelector<HTMLInputElement>("[name=use]")!;
+  const room = form.querySelector<HTMLSelectElement>("[name=room]");
+  box.value = typed;
+  if (typing) box.focus();
+  use.addEventListener("change", () => {
+    box.placeholder = use.checked ? "a tea room" : "a vending machine";
+    if (room) room.hidden = use.checked;
+  });
+  box.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
+      e.preventDefault();
+      form.requestSubmit();
+    }
+  });
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const what = box.value.trim();
+    form.querySelector("button")!.disabled = true;
+    const got = use.checked ? await fileChangeOfUse(f.id, what) : await fileVariation(f.id, what, (room?.value || null) as "in" | "out" | null);
+    if (typeof got === "string") {
+      form.querySelector("button")!.disabled = false;
+      form.querySelector(".problem")!.textContent = got;
+      return;
+    }
+    box.value = "";
+    setVariation(got);
+    renderCard();
+  });
+}
+
 // --- up close: the plot's card and the toolbar --------------------------------
 
 const HINTS: Record<string, string> = {
@@ -519,6 +593,8 @@ const HINTS: Record<string, string> = {
   move: "Drag things about.",
   remove: `${touch ? "Tap" : "Click"} something to take it down.`,
   item: `${touch ? "Touch, slide and let go" : "Click"} to set it down. Gary reads the label before anyone else does.`,
+  shell: "Drag out where it stands. Drag it to move it. The door faces your gate; Gary reads the sign first.",
+  window: `${touch ? "Tap" : "Click"} the front wall to put a window in, or take one out.`,
 };
 
 function renderBuildInfo() {
@@ -526,18 +602,25 @@ function renderBuildInfo() {
   const f = focus;
   const p = plotOf(f);
   const count = built.get(f.id)?.length ?? 0;
+  const restoreTyping = keepSpiritTyping();
   $("build-info").innerHTML = `<h2>${esc(plotLabel(p))}</h2><p class="meta where">${esc(REGIONS[p.region].name)}, ${Math.round(p.area / 10) * 10} sq. yd.</p>
     <p>${f.filer === me ? "Yours" : `Held by ${esc(who(f.filer))}`}: <q>${esc(f.intent)}</q></p>
     ${foldCondition(f)}
+    ${letterFor(f)}
     ${f.filer === me
       ? `<p class="hint">Building on a granted plot needs no further paperwork. Gary finds this difficult.</p>`
-      : `<p class="meta">${count ? `${count} thing${count === 1 ? "" : "s"} built.` : "Nothing built yet."}</p>`}`;
+      : `<p class="meta">${count ? `${count} thing${count === 1 ? "" : "s"} built.` : "Nothing built yet."}</p>`}
+    ${spiritUp(f)}`;
+  wireLetter($("build-info"));
+  wireSpirit(f);
+  restoreTyping();
   $("tool-hint").textContent = HINTS[tool.split(":")[0]];
   if (f.filer === me) {
     if (drawnHere(f).map((d) => d.look).join() !== drawnKey) renderPalette();
     renderTools(f);
   }
   fitFocus(); // the info's height moves the plot on an upright screen
+  doorway();
 }
 
 /** On a phone the condition folds away, so the plot gets the screen; keep it as it was left. */
@@ -567,6 +650,7 @@ function renderTools(f: Filing) {
     $("tabs").querySelector(`[data-tab="${g.dataset.group}"]`)?.classList.toggle("wanted", !!g.querySelector(".wanted"));
   }
   for (const b of $("tabs").querySelectorAll<HTMLButtonElement>("[data-tab]")) b.classList.toggle("on", b.dataset.tab === openGroup);
+  renderShellTools(f);
 }
 
 const icons = new Map<string, string>();
@@ -624,9 +708,10 @@ function renderPalette() {
     // Anything not in the palette, by name: it goes down as a labelled parcel. What Gary has drawn here, again in a tap.
     group("Write in", drawnHere(focus!).map((d) => button(`item:${esc(d.label)}`, esc(d.label), `<img src="${propCanvas(d.look).toDataURL()}" width="${Math.min(propSize(d.look).w * 2, 40)}" alt="${esc(d.label)}">`)).join("")
       + `<form class="write-in"><input maxlength="24" placeholder="a lobster" aria-label="something of your own" required><button>Use</button></form>`),
+    shellGroupHtml(focus!, group, button),
   ].join("");
   // On a phone the groups are tabs, one open at a time; Tools stays out.
-  const names = ["Ground", ...PALETTE.map((g) => g.group), "Write in"];
+  const names = ["Ground", ...PALETTE.map((g) => g.group), "Write in", ...(shellKindHere(focus!) ? ["Building"] : [])];
   $("tabs").innerHTML = names.map((n) => `<button data-tab="${n}">${n}</button>`).join("");
   for (const b of $("tabs").querySelectorAll<HTMLButtonElement>("[data-tab]")) {
     b.addEventListener("click", () => {
@@ -652,6 +737,7 @@ function renderPalette() {
       renderBuildInfo();
     });
   }
+  bindShellGroup(focus!);
 }
 
 function showPanels() {
@@ -673,6 +759,7 @@ function enterFocus(f: Filing) {
   heading = null;
   $("build-problem").textContent = "";
   showPanels();
+  void loadSpiritFor(f);
   renderPalette();
   renderBuildInfo();
   fitFocus();
@@ -684,6 +771,7 @@ function leaveFocus() {
   focus = null;
   stroke = null;
   drag = null;
+  shellDrag = null;
   selected = null;
   showPanels();
   renderAll();
@@ -696,6 +784,134 @@ function renderAll() {
   renderTag();
   renderCard();
   renderBoard();
+  renderPound();
+}
+
+// --- the spirit: the sign, the board, the book, Gary's reading ---------------
+// The HTML is src/spirit.ts; this loads a place's board and book when we go up
+// close, keeps them current, and wires the buttons, up close and on the card.
+
+let spirit: { filing: number; notices: Notice[]; visits: Visit[] } | null = null;
+let spiritOpen = false; // on a phone it folds away like the condition
+
+styleSpirit();
+
+async function loadSpiritFor(f: Filing) {
+  spirit = { filing: f.id, notices: [], visits: [] };
+  const got = await loadSpirit(f.id);
+  if (spirit?.filing !== f.id) return;
+  spirit = { filing: f.id, ...got };
+  handles = await handlesFor(got.visits.map((v) => v.visitor));
+  renderBuildInfo();
+}
+
+/** The spirit's part of the build info, for the plot up close. */
+function spiritUp(f: Filing) {
+  const html = spiritHtml({ f, notices: spirit?.filing === f.id ? spirit.notices : [], visits: spirit?.filing === f.id ? spirit.visits : [], me, guest, who });
+  if (!phone.matches) return html;
+  return `<details class="fold spirit-fold"${spiritOpen ? " open" : ""}><summary>${f.open_sign ? "Open" : "Closed"}${f.boarded_at ? ", boarded up" : f.drift ? ", a notice from Gary" : ""}</summary>${html}</details>`;
+}
+
+/** What's being typed into the board or the book, kept across a re-render. */
+function keepSpiritTyping() {
+  const el = document.activeElement;
+  const typing = el instanceof HTMLInputElement && el.closest(".spirit form") ? { form: el.closest("form")!.className, value: el.value } : null;
+  return () => {
+    const fold = $("build-info").querySelector<HTMLDetailsElement>(".spirit-fold");
+    fold?.addEventListener("toggle", () => (spiritOpen = fold.open));
+    if (!typing) return;
+    const box = $("build-info").querySelector<HTMLInputElement>(`form.${typing.form} input`);
+    if (!box) return;
+    box.value = typing.value;
+    box.focus();
+  };
+}
+
+const spiritProblem = (root: HTMLElement, text: string) => {
+  const p = root.querySelector(".spirit-problem");
+  if (p) p.textContent = text;
+};
+
+function wireSpirit(f: Filing) {
+  const root = $("build-info");
+  const s = spirit?.filing === f.id ? spirit : null;
+  root.querySelector(".spirit-sign")?.addEventListener("click", async () => {
+    const problem = await flipSign(f.id, !f.open_sign);
+    if (problem) return spiritProblem(root, problem);
+    f.open_sign = !f.open_sign;
+    renderBuildInfo();
+  });
+  root.querySelector<HTMLFormElement>(".spirit-pin")?.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const box = (e.currentTarget as HTMLFormElement).querySelector("input")!;
+    const got = await pinNotice(f.id, box.value.trim());
+    if (typeof got === "string") return spiritProblem(root, got);
+    box.value = "";
+    if (s && !s.notices.some((n) => n.id === got.id)) s.notices.push(got);
+    renderBuildInfo();
+  });
+  for (const b of root.querySelectorAll<HTMLButtonElement>("[data-unpin]")) {
+    b.addEventListener("click", async () => {
+      const id = Number(b.dataset.unpin);
+      if (!(await unpinNotice(id))) return spiritProblem(root, "It won't come down. Try again in a moment.");
+      if (s) s.notices = s.notices.filter((n) => n.id !== id);
+      renderBuildInfo();
+    });
+  }
+  root.querySelector<HTMLFormElement>(".spirit-sign-book")?.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const box = (e.currentTarget as HTMLFormElement).querySelector("input")!;
+    const got = await signBook(f.id, box.value.trim());
+    if (typeof got === "string") return spiritProblem(root, got);
+    box.value = "";
+    if (s && !s.visits.some((v) => v.id === got.id)) s.visits.unshift(got);
+    renderBuildInfo();
+  });
+  root.querySelector(".spirit-put-back")?.addEventListener("click", async () => {
+    const n = await summonReader();
+    spiritProblem(root, n === null ? "Gary couldn't be reached." : n ? "Gary's on his way to have another look." : "Gary's only just been. Give him a minute.");
+  });
+  root.querySelector(".spirit-change-use")?.addEventListener("click", async () => {
+    const got = await fileChangeOfUse(f.id, f.drift ?? "");
+    if (typeof got === "string") return spiritProblem(root, got);
+    setVariation(got);
+    spiritProblem(root, "Filed. Gary will rule on the change of use.");
+  });
+  wireAsk(root, f);
+}
+
+/** Ask Gary for a boarded-up plot, from up close or from its card. */
+function wireAsk(root: HTMLElement, f: Filing) {
+  root.querySelector(".spirit-ask")?.addEventListener("click", async () => {
+    const until = await askForPlot(f.plot);
+    if (!until) return spiritProblem(root, "Gary can't give notice on this one.");
+    f.quit_by = until;
+    renderAll();
+  });
+}
+
+/** Lines on the board and in the book as they're written, and as Gary reads them. */
+function spiritChannel(ch: RealtimeChannel) {
+  for (const table of ["notices", "visits"] as const) {
+    ch.on("postgres_changes", { event: "*", schema: "the_commons", table }, async ({ eventType, new: row, old }) => {
+      if (!spirit) return;
+      const list = (table === "notices" ? spirit.notices : spirit.visits) as (Notice | Visit)[];
+      if (eventType === "DELETE") {
+        const id = (old as { id: number }).id;
+        if (table === "notices") spirit.notices = spirit.notices.filter((n) => n.id !== id);
+        else spirit.visits = spirit.visits.filter((v) => v.id !== id);
+      } else {
+        const r = row as Notice | Visit;
+        if (r.filing !== spirit.filing) return;
+        const at = list.findIndex((x) => x.id === r.id);
+        if (at >= 0) list[at] = r;
+        else if (table === "notices") spirit.notices.push(r as Notice);
+        else spirit.visits.unshift(r as Visit);
+        if ("visitor" in r) handles = await handlesFor([r.visitor]);
+      }
+      if (focus) renderBuildInfo();
+    });
+  }
 }
 
 // --- canvas and views --------------------------------------------------------
@@ -786,6 +1002,7 @@ function resize() {
   ctx.imageSmoothingEnabled = false;
   mapView = fitMap();
   fitFocus();
+  fitRoom();
 }
 
 function toArt(e: MouseEvent, v: View) {
@@ -826,7 +1043,7 @@ function drawZoom(now: number) {
     ox: Math.round(from.x + (to.x - from.x) * k - s * left),
     oy: Math.round(from.y + (to.y - from.y) * k - s * top),
   });
-  draw(ctx, { held: heldPlots(), built, me, hover: null, selected: null, walkers: [...walkers.values()], look: lookOf, letters: [], t: Date.now(), recent: recent() });
+  draw(ctx, { held: heldPlots(), built, me, hover: null, selected: null, walkers: [...walkers.values()], look: lookOf, letters: [], t: Date.now(), recent: recent(), tags: tagsOf, pound: pounded });
   const fade = Math.max(0, (u - 0.65) / 0.35);
   if (fade > 0) {
     ctx.globalAlpha = fade;
@@ -878,13 +1095,16 @@ function brushAt(bx: number, by: number): Cells {
 function focusScene(f: Filing): FocusScene {
   const mine = f.filer === me && !zoom;
   const ps = built.get(f.id) ?? [];
-  const scene: FocusScene = { plot: plotOf(f), filing: f, built: ps, mine: f.filer === me, ghost: null, brush: null, hover: null };
+  const scene: FocusScene = { plot: plotOf(f), filing: f, built: ps, mine: f.filer === me, ghost: null, brush: null, hover: null, tags: tagsOf.get(f.id) };
+  shellScene(scene);
   if (!mine || !pointer) return scene;
   const [kind, arg] = tool.split(":");
   if (drag) {
     const moved = { ...drag.p, x: drag.x, y: drag.y };
     scene.built = ps.map((p) => (p.id === moved.id ? moved : p));
     scene.hover = { p: moved, colour: "#fff8e0" };
+  } else if (kind === "reclaim") {
+    scene.ghost = handGhost(f, pointer);
   } else if (kind === "prop" || kind === "item") {
     const prop = sized(kind === "item" ? drawnAs(tool.slice(5)) : arg, size);
     scene.ghost = { id: 0, filing: f.id, prop, ...propAt(prop, pointer.x, pointer.y) };
@@ -939,11 +1159,11 @@ function takeDown(b: { x: number; y: number }) {
 /** The next size up that fits where it stands, round to the plain one again. */
 async function regrow(b: { x: number; y: number }) {
   if (!focus) return;
-  const plot = plotOf(focus);
+  const plot = plotOf(focus), shell = focus.shell;
   const p = placementAt(built.get(focus.id) ?? [], b.x, b.y);
   if (!p) return;
   const from = p.size ?? 1;
-  const to = SCALES.find((k) => k > from && canPlace(plot, look({ ...p, size: k }), p.x, p.y)) ?? 1;
+  const to = SCALES.find((k) => k > from && canPlace(plot, look({ ...p, size: k }), p.x, p.y, shell)) ?? 1;
   if (to === from) return problem("There isn't room for it any bigger.");
   problem("");
   setPlacement({ ...p, size: to });
@@ -958,7 +1178,7 @@ async function placeAt(prop: string, b: { x: number; y: number }, label?: string
   const f = focus!;
   const shape = sized(label ? drawnAs(label) : prop, size);
   const at = propAt(shape, b.x, b.y);
-  if (!canPlace(plotOf(f), shape, at.x, at.y)) return problem("It has to stand on the plot, and not on what's already there.");
+  if (!canPlace(plotOf(f), shape, at.x, at.y, f.shell)) return problem("It has to stand on the plot, and not on what's already there.");
   const result = await place(f.id, at.x, at.y, prop, size, label);
   if (typeof result === "string") return problem(result);
   problem("");
@@ -985,9 +1205,10 @@ function paintTo(to: Cells) {
 }
 
 canvas.addEventListener("pointerdown", (e) => {
+  if (indoors !== null || knock(e)) return;
   if (!focus || zoom || !mineInFocus()) return;
   const [kind] = tool.split(":");
-  placing = e.button === 0 && (kind === "prop" || kind === "item");
+  placing = e.button === 0 && (kind === "prop" || kind === "item" || kind === "reclaim");
   const b = toBuild(e);
   if (!b) return void (placing = false);
   pointer = b;
@@ -995,6 +1216,7 @@ canvas.addEventListener("pointerdown", (e) => {
   if (kind === "resize") return void regrow(b);
   if (e.button !== 0) return;
   canvas.setPointerCapture(e.pointerId);
+  if (kind === "shell" || kind === "window") return shellDown(b);
   if (kind === "ground") {
     const before = focus.ground ?? empty(plotOf(focus));
     const at = brushAt(b.x, b.y);
@@ -1007,6 +1229,7 @@ canvas.addEventListener("pointerdown", (e) => {
 });
 
 canvas.addEventListener("pointermove", (e) => {
+  if (indoors !== null) return;
   if (!focus && panning) {
     const dx = (e.clientX - panning.x) * dpr, dy = (e.clientY - panning.y) * dpr;
     if (!panning.moved && Math.hypot(dx, dy) > 8 * dpr) {
@@ -1031,6 +1254,7 @@ canvas.addEventListener("pointermove", (e) => {
   }
   pointer = b;
   if (stroke) paintTo(brushAt(b.x, b.y));
+  if (shellDrag) shellMove(b);
   if (drag) {
     const { w, h } = propSize(look(drag.p));
     Object.assign(drag, propAt(look(drag.p), b.x - drag.dx + w / 2, b.y - drag.dy + h / 2));
@@ -1038,13 +1262,15 @@ canvas.addEventListener("pointermove", (e) => {
 });
 
 canvas.addEventListener("pointerup", async (e) => {
+  if (indoors !== null) return;
+  if (shellDrag) return shellUp();
   if (placing) {
     placing = false;
     const at = pointer;
     if (e.pointerType !== "mouse") pointer = null;
     if (!at || !focus) return;
     const [kind, arg] = tool.split(":");
-    return void (kind === "item" ? placeAt("item", at, tool.slice(5)) : placeAt(arg, at));
+    return void (kind === "item" ? placeAt("item", at, tool.slice(5)) : kind === "reclaim" ? putBack(at) : placeAt(arg, at));
   }
   if (stroke && focus) {
     const { before } = stroke;
@@ -1062,7 +1288,7 @@ canvas.addEventListener("pointerup", async (e) => {
     const { p, x, y } = drag;
     drag = null;
     if (p.x === x && p.y === y) return;
-    if (focus && !canPlace(plotOf(focus), look(p), x, y)) return problem("It has to stand on the plot, and not on what's already there.");
+    if (focus && !canPlace(plotOf(focus), look(p), x, y, focus.shell)) return problem("It has to stand on the plot, and not on what's already there.");
     setPlacement({ ...p, x, y });
     const err = await move(p.id, x, y);
     if (err) {
@@ -1091,6 +1317,7 @@ window.addEventListener("keydown", (e) => {
     reading = null;
     renderBoard();
   } else if (!board.hidden) closeBoard();
+  else if (indoors !== null) leaveRoom();
   else if (focus) leaveFocus();
   else closeCard();
 });
@@ -1129,6 +1356,7 @@ function enterableAt(e: MouseEvent) {
 // by hand, since phones don't send dblclick once the canvas takes its own touches.
 let lastClick: { t: number; x: number; y: number } | null = null;
 canvas.addEventListener("click", (e) => {
+  if (indoors !== null) return;
   const touch = (e as PointerEvent).pointerType !== "mouse";
   const last = lastClick;
   lastClick = { t: e.timeStamp, x: e.clientX, y: e.clientY };
@@ -1146,6 +1374,7 @@ canvas.addEventListener("click", (e) => {
 
 // Scroll or pinch: in over a plot goes inside, out comes back to the commons.
 canvas.addEventListener("wheel", (e) => {
+  if (indoors !== null) return void roomWheel(e);
   // Pinches arrive as ctrl-wheel; keep the browser from zooming the page.
   if (e.ctrlKey || focus) e.preventDefault();
   if (zoom || Math.abs(e.deltaY) < 4) return;
@@ -1159,6 +1388,400 @@ canvas.addEventListener("wheel", (e) => {
   closeCard();
   enterFocus(f);
 }, { passive: false });
+
+// --- inside: through a shell's door into its room (src/interior.ts) ----------
+
+let indoors: number | null = null; // the filing whose room we're in; focus stays on its plot
+const insides = new Map<number, Placement[]>(); // filing -> what's inside and in things
+let roomView: View = { s: 1, ox: 0, oy: 0 };
+let roomTool = "move"; // a fitting to lay out, or "move" / "remove"
+let roomPointer: { x: number; y: number } | null = null; // art px of the room
+let roomDrag: { p: Placement; x: number; y: number; slot: { holder: Placement; slot: number } | null } | null = null;
+
+const indoorFiling = () => (indoors === null ? null : (filings.get(indoors) ?? null));
+const mineIndoors = () => indoorFiling()?.filer === me && !zoom;
+/** Small things go in slots; a thing with slots of its own never does. */
+const slotted = (prop: string) => !!fitting(prop)?.small && !fitting(prop)?.slots;
+
+function regroupInside(filing: number) {
+  insides.set(filing, [...placements.values()].filter((p) => p.filing === filing && (p.room === "in" || !!p.parent) && p.room !== "store" && !p.impounded_at));
+  if (filing === indoors) renderRoomInfo();
+}
+
+/** The "Go inside" button up close, for anyone, when there's a shell to go into. */
+function doorway() {
+  $("go-in").hidden = !focus?.shell;
+}
+$("go-in").addEventListener("click", () => focus && goInside(focus));
+
+/** A press on the shell's door up close goes in. */
+function knock(e: PointerEvent): boolean {
+  const f = focus;
+  if (!f?.shell || zoom || e.button !== 0) return false;
+  const b = toBuild(e);
+  if (!b) return false;
+  const d = doorOutside(f.shell);
+  const cx = Math.floor(b.x / ZOOM), cy = Math.floor(b.y / ZOOM);
+  if (cx < d.x || cy < d.y || cx >= d.x + d.w || cy >= d.y + d.h) return false;
+  e.stopImmediatePropagation(); // the room's own handler would take this press as a click inside
+  goInside(f);
+  return true;
+}
+
+function goInside(f: Filing) {
+  if (!f.shell || zoom) return;
+  indoors = f.id;
+  roomPointer = null;
+  roomDrag = null;
+  stroke = null;
+  drag = null;
+  placing = false;
+  $("build").hidden = true;
+  $("room").hidden = false;
+  $("room-problem").textContent = "";
+  renderRoomInfo();
+  renderRoomTools();
+}
+
+function leaveRoom() {
+  if (indoors === null) return;
+  indoors = null;
+  roomDrag = null;
+  $("room").hidden = true;
+  $("build").hidden = !focus;
+  renderBuildInfo();
+}
+
+$("room-leave").addEventListener("click", leaveRoom);
+
+function roomWheel(e: WheelEvent) {
+  e.preventDefault();
+  if (!zoom && e.deltaY > 4) leaveRoom();
+}
+
+function renderRoomInfo() {
+  const f = indoorFiling();
+  if (!f) return;
+  const n = (insides.get(f.id) ?? []).length;
+  const name = f.shell?.sign && f.shell.sign_ok ? f.shell.sign : f.intent;
+  $("room-info").innerHTML = `<h2>${esc(name)}</h2>
+    <p>${f.filer === me ? "Yours, inside." : `${esc(who(f.filer))}'s place. You're visiting.`}</p>
+    <p class="meta">${n ? `${n} thing${n === 1 ? "" : "s"} inside.` : "Nothing inside yet."} The door's the way out.</p>`;
+  fitRoom();
+}
+
+const ROOM_HINTS: Record<string, string> = {
+  move: "Drag things about. Drop a small thing on a rack, shelf or table to put it there.",
+  remove: `${touch ? "Tap" : "Click"} something to take it down.`,
+  wall: "Click the back wall to hang it.",
+  floor: "Click the floor to set it down.",
+  small: "Click a free slot on a rack, shelf or table, or the floor.",
+};
+
+function renderRoomTools() {
+  const mine = mineIndoors();
+  $("room-tools").hidden = !mine;
+  if (mine) {
+    const button = (t: string, title: string, inner: string) => `<button data-tool="${t}" title="${esc(title)}">${inner}</button>`;
+    $("room-palette").innerHTML = button("move", "move things", "move") + button("remove", "take down", "take down")
+      + fittingKeys().map((k) => {
+        const c = spriteOf({ prop: k, x: 0, parent: null });
+        return button(k, fitting(k)!.name, `<img src="${icon(`fitting:${k}`, () => c)}" width="${Math.min(c.width * 2, 40)}" alt="${esc(fitting(k)!.name)}">`);
+      }).join("");
+    for (const b of $("room-palette").querySelectorAll<HTMLButtonElement>("[data-tool]")) {
+      b.classList.toggle("on", b.dataset.tool === roomTool);
+      b.addEventListener("click", () => {
+        roomTool = b.dataset.tool!;
+        renderRoomTools();
+      });
+    }
+    const f = fitting(roomTool);
+    $("room-hint").textContent = ROOM_HINTS[!f ? roomTool : slotted(roomTool) ? "small" : f.on];
+  }
+  fitRoom();
+}
+
+/** The room as big as whole pixels allow, clear of the papers. */
+function fitRoom() {
+  const f = indoorFiling();
+  if (!f?.shell) return;
+  const art = roomArt(roomSize(f.shell));
+  const tools = $("room-tools"), info = $("room-info");
+  const below = !tools.hidden ? (tools.offsetHeight + 16) * dpr : 0;
+  const above = canvas.height > canvas.width ? (info.offsetTop + info.offsetHeight + 8) * dpr : 0;
+  roomView = fit(art.w, art.h, below, above);
+}
+
+/** What's in the room, with whatever's being placed or dragged shown where it would go. */
+function roomScene(f: Filing, ghosts = true): RoomScene {
+  const all = insides.get(f.id) ?? [];
+  const things = all.filter((p) => p.room === "in" && !p.parent);
+  const ids = new Set(things.map((p) => p.id));
+  const held = all.filter((p) => p.parent && ids.has(p.parent));
+  const scene: RoomScene = { shell: f.shell!, things, held, ghost: null, hover: null, door: false };
+  const at = roomPointer;
+  if (!at) return scene;
+  scene.door = onDoor(f.shell!, at.x, at.y);
+  if (!ghosts || !mineIndoors() || scene.door) return scene;
+  if (roomDrag) {
+    const d = roomDrag;
+    scene.things = things.filter((p) => p.id !== d.p.id);
+    scene.held = held.filter((p) => p.id !== d.p.id);
+    scene.ghost = d.slot ? { ...d.p, parent: d.slot.holder.id, x: d.slot.slot, y: 0 } : { ...d.p, parent: null, x: d.x, y: d.y };
+  } else if (fitting(roomTool)) {
+    const slot = slotted(roomTool) ? slotAt(scene, at.x, at.y) : null;
+    const spot = !slot && spotFor(roomSize(f.shell!), roomTool, at.x, at.y);
+    const ghost = { id: 0, filing: f.id, prop: roomTool, room: "in" as const };
+    if (slot) scene.ghost = { ...ghost, x: slot.slot, y: 0, parent: slot.holder.id };
+    else if (spot) scene.ghost = { ...ghost, ...spot, parent: null };
+  } else {
+    const p = thingAt(scene, at.x, at.y);
+    if (p) scene.hover = { p, colour: roomTool === "remove" ? "#e05c48" : "#fff8e0" };
+  }
+  return scene;
+}
+
+function drawInside(now: number) {
+  const f = indoorFiling();
+  if (!f?.shell) return leaveRoom();
+  fill(SURROUND);
+  viewport(roomView);
+  const scene = roomScene(f);
+  drawRoom(ctx, scene, now);
+  canvas.style.cursor = scene.door ? "pointer"
+    : !mineIndoors() || !roomPointer ? ""
+    : roomTool === "move" ? (roomDrag ? "grabbing" : scene.hover ? "grab" : "")
+    : roomTool === "remove" ? (scene.hover ? "pointer" : "") : "crosshair";
+}
+
+function roomProblem(text: string) {
+  $("room-problem").textContent = text;
+}
+
+async function layOut(f: Filing, prop: string, at: { x: number; y: number }) {
+  const scene = roomScene(f, false);
+  const slot = slotted(prop) ? slotAt(scene, at.x, at.y) : null;
+  const spot = slot ? null : spotFor(roomSize(f.shell!), prop, at.x, at.y);
+  if (!slot && !spot) return roomProblem("It won't go there.");
+  const result = slot ? await placeInside(f.id, slot.slot, 0, prop, slot.holder) : await placeInside(f.id, spot!.x, spot!.y, prop, null);
+  if (typeof result === "string") return roomProblem(result);
+  roomProblem("");
+  addPlacement(result);
+}
+
+/** Take a thing down, and whatever it held with it (the database cascades the same). */
+function takeOut(p: Placement) {
+  const gone = [p, ...(insides.get(p.filing) ?? []).filter((c) => c.parent === p.id)];
+  for (const g of gone) removePlacement(g.id);
+  unplace(p.id).then((ok) => ok || gone.forEach(addPlacement));
+}
+
+canvas.addEventListener("pointerdown", (e) => {
+  const f = indoorFiling();
+  if (!f?.shell || zoom) return;
+  const at = toArt(e, roomView);
+  roomPointer = at;
+  if (e.button === 0 && onDoor(f.shell, at.x, at.y)) return leaveRoom();
+  if (!mineIndoors()) return;
+  const p = thingAt(roomScene(f, false), at.x, at.y);
+  if (e.button === 2 || roomTool === "remove") return void (p && takeOut(p));
+  if (e.button !== 0) return;
+  if (roomTool === "move") {
+    if (!p) return;
+    roomDrag = { p, x: p.x, y: p.y, slot: null };
+    canvas.setPointerCapture(e.pointerId);
+  } else if (fitting(roomTool)) void layOut(f, roomTool, at);
+});
+
+canvas.addEventListener("pointermove", (e) => {
+  const f = indoorFiling();
+  if (!f?.shell) return;
+  const at = (roomPointer = toArt(e, roomView));
+  const d = roomDrag;
+  if (!d) return;
+  const scene = roomScene(f, false);
+  scene.held = scene.held.filter((p) => p.id !== d.p.id);
+  d.slot = slotted(d.p.prop) ? slotAt(scene, at.x, at.y) : null;
+  const spot = !d.slot && spotFor(roomSize(f.shell), d.p.prop, at.x, at.y);
+  if (spot) Object.assign(d, spot);
+});
+
+canvas.addEventListener("pointerup", async () => {
+  const d = roomDrag;
+  if (indoors === null || !d) return;
+  roomDrag = null;
+  const to = d.slot ? { x: d.slot.slot, y: 0, parent: d.slot.holder.id } : { x: d.x, y: d.y, parent: null };
+  if (to.x === d.p.x && to.y === d.p.y && to.parent === (d.p.parent ?? null)) return;
+  setPlacement({ ...d.p, ...to });
+  const err = await moveInside(d.p.id, to.x, to.y, to.parent);
+  if (err) {
+    setPlacement(d.p);
+    roomProblem(err);
+  } else roomProblem("");
+});
+
+canvas.addEventListener("pointerleave", () => {
+  if (!roomDrag) roomPointer = null;
+});
+// --- up close: the shell (slice A) --------------------------------------------
+// The holder's building or pen: drag its footprint out (or drag it to move it),
+// put windows in the front wall, turn the door, choose material and paint, and
+// hang a sign for Gary to read. Drawn by src/shell.ts; saved by saveShell.
+
+let shellDrag: { from: { x: number; y: number }; move: { dx: number; dy: number } | null; draft: Shell | null; problem: string | null } | null = null;
+let shellPick = { material: "", paint: DEFAULT_PAINT }; // what the next one goes up in
+const shellSaving = new Map<number, Shell | null>(); // our save in flight, over any echo of an older one
+
+const shellKindHere = (f: Filing) => shellKind(f.schedule);
+
+/** The material a shell goes up in: Gary's, else what's been chosen, else timber. */
+function shellMaterial(f: Filing, kind: ShellKind): string {
+  const fixed = scheduledMaterial(f.schedule, kind);
+  if (fixed) return fixed;
+  for (const m of [shellPick.material, f.shell?.material]) if (m && MATERIALS[m]?.kinds.includes(kind)) return m;
+  return DEFAULT_MATERIAL;
+}
+
+/** The Building group of the toolbar, or nothing where the schedule has no shell. */
+function shellGroupHtml(f: Filing, group: (name: string, inner: string) => string, button: (t: Tool, title: string, inner: string) => string): string {
+  const kind = shellKindHere(f);
+  if (!kind) return "";
+  const building = kind === "building";
+  const fixed = scheduledMaterial(f.schedule, kind);
+  const paint = f.shell?.paint ?? shellPick.paint;
+  return group("Building",
+    button("shell", building ? "drag out where it stands; drag it to move it" : "drag out the pen; drag it to move it", building ? "build" : "pen")
+    + (building ? button("window", "put a window in the front wall, or take one out", "windows") + `<button data-shell="door" title="turn the door to the next side">door</button>` : "")
+    + `<button data-shell="down" title="take it down">take down</button>`
+    + (fixed ? "" : materialsFor(kind).map((m) =>
+      `<button data-material="${m}" title="${MATERIALS[m].name}"><img src="${materialSwatch(m, paint).toDataURL()}" width="24" alt="${MATERIALS[m].name}"></button>`).join(""))
+    + (building || MATERIALS[shellMaterial(f, kind)].fence === "picket"
+      ? Object.entries(PAINTS).map(([k, p]) => `<button data-paint="${k}" title="${p.name}"><span style="display:inline-block;width:18px;height:18px;border:2px solid #402e3a;background:${p.ramp[2]}"></span></button>`).join("")
+      : "")
+    + `<form class="sign-in write-in"><input maxlength="24" placeholder="what the sign says" aria-label="the sign" value="${esc(f.shell?.sign ?? "")}"><button>Hang</button></form>`
+    + `<span class="meta sign-status"></span>`);
+}
+
+function bindShellGroup(f: Filing) {
+  const pal = $("palette");
+  for (const b of pal.querySelectorAll<HTMLButtonElement>("[data-material]")) b.addEventListener("click", () => restyle({ material: b.dataset.material! }));
+  for (const b of pal.querySelectorAll<HTMLButtonElement>("[data-paint]")) b.addEventListener("click", () => restyle({ paint: b.dataset.paint! }));
+  pal.querySelector<HTMLButtonElement>('[data-shell="door"]')?.addEventListener("click", () => {
+    const s = focus?.shell;
+    if (!s) return problem("Put the building up first.");
+    const door = (["s", "e", "n", "w"] as const)[(["s", "e", "n", "w"].indexOf(s.door) + 1) % 4];
+    void putShell({ ...s, door, windows: defaultWindows(s, door) });
+  });
+  pal.querySelector<HTMLButtonElement>('[data-shell="down"]')?.addEventListener("click", () => {
+    if (!focus?.shell) return;
+    if (confirm(kindOf(focus.shell) === "building" ? "Take the building down? What's inside stays on your plot's books." : "Take the pen down?")) void putShell(null);
+  });
+  const sign = pal.querySelector<HTMLFormElement>(".sign-in");
+  sign?.addEventListener("submit", (e) => {
+    e.preventDefault();
+    const s = focus?.shell;
+    if (!s) return problem("Put it up first, then hang the sign.");
+    const text = sign.querySelector("input")!.value.trim() || null;
+    if (text !== s.sign) void putShell({ ...s, sign: text, sign_ok: null });
+  });
+  void f;
+}
+
+/** Material and paint: for the next one, and for the one that's up. */
+function restyle(change: { material?: string; paint?: string }) {
+  shellPick = { ...shellPick, ...change };
+  const s = focus?.shell;
+  if (s) void putShell({ ...s, ...change });
+  else renderBuildInfo();
+}
+
+/** The toolbar's Building group, as things stand. */
+function renderShellTools(f: Filing) {
+  const pal = $("palette");
+  const s = f.shell;
+  const material = shellKindHere(f) ? shellMaterial(f, s ? kindOf(s) : shellKindHere(f)!) : "";
+  const paint = s?.paint ?? shellPick.paint;
+  for (const b of pal.querySelectorAll<HTMLButtonElement>("[data-material]")) b.classList.toggle("on", b.dataset.material === material);
+  for (const b of pal.querySelectorAll<HTMLButtonElement>("[data-paint]")) b.classList.toggle("on", b.dataset.paint === paint);
+  const status = pal.querySelector(".sign-status");
+  if (status) status.textContent = !s?.sign ? "" : s.sign_ok === null ? "Gary is reading the sign." : s.sign_ok ? "" : "Gary has declined the sign. It hangs blank.";
+}
+
+/** Save the shell, showing it at once and putting it back if the database says no. */
+async function putShell(next: Shell | null) {
+  const f = focus;
+  if (!f) return;
+  const before = f.shell;
+  f.shell = next;
+  shellSaving.set(f.id, next);
+  problem("");
+  renderBuildInfo();
+  const err = await saveShell(f.id, next);
+  shellSaving.delete(f.id);
+  if (err) {
+    f.shell = before;
+    problem(err);
+    renderBuildInfo();
+  }
+}
+
+/** The footprint between two cells, or the shell moved by the drag. */
+function shellDraft(f: Filing, at: { x: number; y: number }): Shell | null {
+  const kind = shellKindHere(f);
+  if (!kind || !shellDrag) return null;
+  const plot = plotOf(f);
+  const cx = Math.floor(at.x / ZOOM), cy = Math.floor(at.y / ZOOM);
+  const prev = f.shell;
+  if (shellDrag.move && prev) {
+    const x = clamp(cx - shellDrag.move.dx, 0, plot.w - prev.w), y = clamp(cy - shellDrag.move.dy, 0, plot.h - prev.h);
+    return raise(plot, kindOf(prev), { x, y, w: prev.w, h: prev.h }, prev, prev.material, prev.paint);
+  }
+  const { x: fx, y: fy } = shellDrag.from;
+  const r = { x: Math.min(fx, cx), y: Math.min(fy, cy), w: Math.abs(cx - fx) + 1, h: Math.abs(cy - fy) + 1 };
+  return raise(plot, kind, r, prev, shellMaterial(f, kind), prev?.paint ?? shellPick.paint);
+}
+
+/** The close-up's view of a shell being dragged out or moved. */
+function shellScene(scene: FocusScene) {
+  if (!shellDrag?.draft) return;
+  scene.shell = { shell: shellDrag.draft, ok: !shellDrag.problem };
+}
+
+/** Pointer down with the shell tools: start a footprint or a move, or put in a window. */
+function shellDown(b: { x: number; y: number }) {
+  const f = focus!;
+  if (tool === "window") {
+    const s = f.shell;
+    const at = s && frontWallAt(s, b.x, b.y);
+    if (!s || at === null) return problem("Click the front wall where you'd like a window.");
+    const has = s.windows.some((w) => w.side === "s" && w.at === at);
+    if (!has && !windowFits(s, "s", at)) return problem("There isn't room for a window there.");
+    return void putShell({ ...s, windows: has ? s.windows.filter((w) => !(w.side === "s" && w.at === at)) : [...s.windows, { side: "s", at }] });
+  }
+  const cx = Math.floor(b.x / ZOOM), cy = Math.floor(b.y / ZOOM);
+  const s = f.shell;
+  shellDrag = { from: { x: cx, y: cy }, move: s && onShell(s, b.x, b.y) ? { dx: cx - s.x, dy: cy - s.y } : null, draft: null, problem: null };
+  shellMove(b);
+}
+
+function shellMove(b: { x: number; y: number }) {
+  const f = focus;
+  if (!f || !shellDrag) return;
+  const draft = shellDraft(f, b);
+  shellDrag.draft = draft;
+  const others = (built.get(f.id) ?? []);
+  shellDrag.problem = draft && footprintProblem(plotOf(f), kindOf(draft), draft, others);
+}
+
+function shellUp() {
+  const drag = shellDrag;
+  shellDrag = null;
+  if (!drag?.draft || !focus) return;
+  if (drag.problem) return problem(drag.problem);
+  const s = drag.draft, was = focus.shell;
+  if (was && s.x === was.x && s.y === was.y && s.w === was.w && s.h === was.h) return;
+  void putShell(s);
+}
 
 // --- the map ---------------------------------------------------------------
 
@@ -1199,8 +1822,8 @@ function speak(line?: string) {
 
 /** Double-clicked, Gary comes round your outstanding conditions now. */
 async function summon() {
-  const n = await summonGary();
-  speak(n === null ? "Not now. The kettle." : n ? "Right. I'll come round now." : "Nothing outstanding that I haven't already seen.");
+  const [n, r] = await Promise.all([summonGary(), summonRounds()]);
+  speak(n === null && r === null ? "Not now. The kettle." : n || r ? "Right. I'll come round now." : "Nothing outstanding that I haven't already seen.");
 }
 
 // Hold the notice board for three seconds and the back office opens (src/backoffice.ts).
@@ -1231,6 +1854,7 @@ canvas.addEventListener("click", (e) => {
   heading = null;
   const p = toArt(e, mapView);
   if (onGary(p)) return speak();
+  if (onHut(p)) return goTo(LANDMARKS.office.at.x, LANDMARKS.office.at.y, openPound);
   if (onBoard(p)) {
     closeCard();
     return goTo(LANDMARKS.board.at.x, LANDMARKS.board.at.y, openBoard);
@@ -1245,6 +1869,174 @@ canvas.addEventListener("click", (e) => {
   release();
   walkAlong(p.x, p.y);
 });
+
+// --- the letter: Gary's questions, red tags, the pound (src/letter.ts) --------
+
+const tags = new Map<number, Tag>();
+let tagsOf = new Map<number, Tag[]>(); // filing -> its tags, for the map and up close; replaced on change
+// Questions Gary asked while we were about (Realtime brought them, so we're present):
+// he's at the gate, rather than leaving a questionnaire on the door.
+const askedHere = new Set<number>();
+const answering = new Map<number, string>(); // answers half typed, kept across re-renders
+let typingTag: number | null = null; // and which one has the cursor
+let pounded = 0; // things in the pound, anyone's: the crates by the hut
+HINTS.reclaim = `${touch ? "Touch, slide and let go" : "Click"} to put it back where you like.`;
+
+function setTag(t: Tag) {
+  tags.set(t.id, t);
+  tagsOf = new Map();
+  for (const x of tags.values()) tagsOf.set(x.filing, [...(tagsOf.get(x.filing) ?? []), x]);
+}
+
+async function loadLetter() {
+  try {
+    for (const t of await loadTags()) setTag(t);
+    renderAll();
+  } catch {
+    // No tags table yet (or a blip): the commons works without the letter.
+  }
+}
+
+/** A tag as the database now has it. A new question on our plot means Gary's at the gate now. */
+function tagArrived(t: Tag, fresh: boolean) {
+  const was = tags.get(t.id);
+  setTag(t);
+  const f = filings.get(t.filing);
+  if (f?.filer !== me) return renderAll();
+  if (fresh && isWaiting(t)) {
+    askedHere.add(t.id);
+    if (!focus) {
+      speak(t.question);
+      openCard(f.plot);
+    }
+  } else if (was?.status === "asked" && t.status !== "asked" && t.reply && !focus) speak(t.reply);
+  renderAll();
+}
+
+/** The letter on a plot's paper: questions, red tags, certificates. */
+const letterFor = (f: Filing) => letterHtml(tagsOf.get(f.id) ?? [], { mine: f.filer === me, here: askedHere });
+
+/** Wire up the letter's forms and buttons in a paper just rendered. */
+function wireLetter(paper: HTMLElement) {
+  for (const box of paper.querySelectorAll<HTMLElement>("[data-tag]")) {
+    const t = tags.get(Number(box.dataset.tag));
+    if (!t) continue;
+    const form = box.querySelector<HTMLFormElement>("form.answer");
+    if (form) {
+      const text = form.querySelector("textarea")!;
+      text.value = answering.get(t.id) ?? "";
+      if (typingTag === t.id) text.focus();
+      text.addEventListener("input", () => answering.set(t.id, text.value));
+      text.addEventListener("focus", () => void (typingTag = t.id));
+      // Re-rendering takes the box away from under the cursor; only a real blur lets go.
+      text.addEventListener("blur", () => void (text.isConnected && typingTag === t.id && (typingTag = null)));
+      text.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
+          e.preventDefault();
+          form.requestSubmit();
+        }
+      });
+      form.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const button = form.querySelector("button")!;
+        button.disabled = true;
+        const problem = await answerTag(t.id, text.value.trim());
+        button.disabled = false;
+        if (problem) return void (form.querySelector(".problem")!.textContent = problem);
+        answering.delete(t.id);
+        setTag({ ...t, answer: text.value.trim(), answered_at: new Date().toISOString() });
+        renderAll();
+      });
+    }
+    box.querySelector(".take-down")?.addEventListener("click", () => {
+      const p = t.placement !== null ? placements.get(t.placement) : null;
+      if (!p) return;
+      removePlacement(p.id);
+      unplace(p.id).then((ok) => ok || setPlacement(p));
+    });
+    box.querySelector(".file-for")?.addEventListener("click", async () => {
+      const got = await fileRetrospective(t);
+      if (typeof got === "string") return void (box.querySelector(".problem")!.textContent = got);
+      setVariation(got);
+      renderAll();
+    });
+  }
+}
+
+// The pound, behind Gary's hut: your impounded things, and getting them back.
+const pound = Object.assign(document.createElement("div"), { id: "pound", className: "paper", hidden: true });
+$("field").append(pound);
+
+const onHut = (p: { x: number; y: number }) => {
+  const o = LANDMARKS.office;
+  return p.x >= o.x - 1 && p.x < o.x + o.w + 12 && p.y >= o.y - 10 && p.y < o.y + o.h;
+};
+
+function openPound() {
+  closeCard();
+  pound.hidden = false;
+  renderPound();
+}
+
+function renderPound() {
+  if (pound.hidden) return;
+  const mine = [...placements.values()].filter((p) => p.impounded_at && filings.get(p.filing)?.filer === me && !p.parent);
+  pound.innerHTML = poundHtml(mine.map((p) => ({
+    id: p.id, name: thingName(p.prop, p.label), plot: labelOf(filings.get(p.filing)!.plot),
+    icon: icon(`pound:${look(p)}`, () => propCanvas(look(p))), since: p.impounded_at!,
+  })));
+  pound.querySelector(".close")!.addEventListener("click", () => void (pound.hidden = true));
+  for (const li of pound.querySelectorAll<HTMLElement>("[data-placement]")) {
+    li.querySelector(".reclaim")!.addEventListener("click", () => void getBack(Number(li.dataset.placement)));
+  }
+}
+
+/** Back where it was if that's free; otherwise to its plot, in hand, to put down somewhere. */
+async function getBack(id: number) {
+  const p = placements.get(id);
+  if (!p) return;
+  const ok = await reclaim(id);
+  if (typeof ok === "string") return void (pound.querySelector(".problem")!.textContent = ok);
+  if (ok) {
+    setPlacement({ ...p, impounded_at: null });
+    pound.hidden = true;
+    speak(`There's your ${thingName(p.prop, p.label)}. It's back where it was.`);
+    return;
+  }
+  pound.hidden = true;
+  tool = `reclaim:${id}`;
+  enterFocus(filings.get(p.filing)!);
+  problem("Something's standing where it was. Put it down somewhere else.");
+}
+
+/** The thing in hand from the pound, if that's the tool and we're on its plot. */
+function inHand() {
+  const p = tool.startsWith("reclaim:") ? placements.get(Number(tool.slice(8))) : null;
+  return p && p.impounded_at && focus?.id === p.filing ? p : null;
+}
+
+window.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") pound.hidden = true;
+});
+
+function handGhost(f: Filing, at: { x: number; y: number }): Placement | null {
+  const p = inHand();
+  return p ? { ...p, id: 0, filing: f.id, prop: look(p), size: 1, label: null, ...propAt(look(p), at.x, at.y) } : null;
+}
+
+async function putBack(at: { x: number; y: number }) {
+  const p = inHand();
+  if (!p || !focus) return;
+  const spot = propAt(look(p), at.x, at.y);
+  if (!canPlace(plotOf(focus), look(p), spot.x, spot.y)) return problem("It has to stand on the plot, and not on what's already there.");
+  const ok = await reclaim(p.id, spot.x, spot.y);
+  if (ok !== true) return problem(typeof ok === "string" ? ok : "Something is already standing exactly there.");
+  problem("");
+  land(p.id);
+  setPlacement({ ...p, ...spot, impounded_at: null });
+  tool = "move";
+  renderBuildInfo();
+}
 
 // --- the field channel: avatars (broadcast), who's here (presence), filings --
 
@@ -1356,6 +2148,8 @@ function frame(now: number) {
   last = now;
   if (zoom) {
     drawZoom(now);
+  } else if (indoors !== null) {
+    drawInside(now);
   } else if (focus) {
     fill(SURROUND);
     viewport(focusView);
@@ -1367,7 +2161,7 @@ function frame(now: number) {
     follow();
     viewport(mapView);
     const t = Date.now();
-    draw(ctx, { held: heldPlots(), built, me, hover, selected, walkers: [...walkers.values()], look: lookOf, letters, t, recent: recent() });
+    draw(ctx, { held: heldPlots(), built, me, hover, selected, walkers: [...walkers.values()], look: lookOf, letters, t, recent: recent(), tags: tagsOf, pound: pounded });
     post(now);
     placeCard();
     overlays(now, t);
@@ -1409,12 +2203,16 @@ async function arrive(f: Filing) {
 
 function upsert(f: Filing) {
   if (painted.has(f.id)) f.ground = painted.get(f.id)!;
+  if (shellSaving.has(f.id)) f.shell = shellSaving.get(f.id)!;
   filings.set(f.id, f);
   if (focus?.id === f.id) focus = f;
 }
 
 function regroup(filing: number) {
-  built.set(filing, [...placements.values()].filter((p) => p.filing === filing));
+  // On the plot: outdoors, not held in anything, not impounded (at the hut). Storage and inside are elsewhere.
+  built.set(filing, [...placements.values()].filter((p) => p.filing === filing && (p.room ?? "out") === "out" && !p.parent && !p.impounded_at));
+  pounded = [...placements.values()].filter((p) => p.impounded_at && !p.parent).length;
+  regroupInside(filing);
 }
 
 function addPlacement(p: Placement) {
@@ -1450,6 +2248,8 @@ async function start() {
   for (const a of appealed) setAppeal(a);
   for (const p of placed) placements.set(p.id, p);
   for (const id of new Set(placed.map((p) => p.filing))) regroup(id);
+  for (const v of await loadVariations().catch(() => [])) setVariation(v);
+  void loadLetter();
   handles = await handlesFor([me, ...[...filings.values()].map((f) => f.filer)]);
 
   const spawn = { x: LANDMARKS.spawn.x + Math.round((Math.random() - 0.5) * 6), y: LANDMARKS.spawn.y };
@@ -1496,6 +2296,11 @@ async function start() {
       setAppeal(a);
       renderAll();
     })
+    .on("postgres_changes", { event: "*", schema: "the_commons", table: "variations" }, ({ new: row }) => {
+      if (!row || !("id" in row)) return;
+      setVariation(row as Variation);
+      renderAll();
+    })
     .on("postgres_changes", { event: "*", schema: "the_commons", table: "placements" }, ({ eventType, new: row, old }) => {
       // Deletes carry only the id.
       if (eventType === "DELETE") removePlacement((old as { id: number }).id);
@@ -1507,6 +2312,10 @@ async function start() {
       }
       renderAll();
     });
+  channel.on("postgres_changes", { event: "*", schema: "the_commons", table: "tags" }, ({ eventType, new: row }) => {
+    if (row && "id" in row) tagArrived(row as Tag, eventType === "INSERT");
+  });
+  spiritChannel(channel);
   channel.subscribe((status) => {
     if (status === "SUBSCRIBED") channel.track(spawn);
   });

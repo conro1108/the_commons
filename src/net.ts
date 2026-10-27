@@ -1,7 +1,8 @@
 import { createClient, isAuthRetryableFetchError, type PostgrestError } from "@supabase/supabase-js";
 import type { PropDef } from "./content/canon/props.ts";
 import { parseAvatar, type Avatar } from "./avatar.ts";
-import type { Schedule, Shell, Where } from "./schedule.ts";
+import type { Room, Schedule, Shell, Where } from "./schedule.ts";
+import { TAG_COLUMNS, type Tag } from "./letter.ts";
 
 export const supabase = createClient(
   import.meta.env.VITE_SUPABASE_URL,
@@ -57,6 +58,13 @@ export interface Filing {
   ground: string | null;
   schedule: Schedule | null; // Gary's, once granted; null for filings from before schedules
   shell: Shell | null; // the holder's building, once put up
+  // The spirit's columns (see the spirit, at the end): optional so made-up filings needn't give them.
+  open_sign?: boolean;
+  boarded_at?: string | null;
+  quit_by?: string | null; // someone's asked for it while boarded: reopen by then or it's freed
+  reading?: string | null; // Gary's latest reading of the use
+  read_at?: string | null;
+  drift?: string | null; // what he found it's become instead, while it has
 }
 
 /** Statuses that hold a plot; denied, refused and lost give it back. */
@@ -220,7 +228,7 @@ export interface Placement {
   label?: string | null; // a written-in item's name
   label_ok?: boolean | null; // Gary's read of it: null while he hasn't
   sprite?: PropDef | null; // and his drawing of it, once he's done one
-  room?: Where; // outdoors on the plot, or inside the shell
+  room?: Room; // outdoors on the plot, inside the shell, or in storage (put away on a change of use)
   parent?: number | null; // held in or on another placement; x is the slot
   impounded_at?: string | null; // in the pound at Gary's hut
 }
@@ -265,4 +273,173 @@ export async function move(id: number, x: number, y: number, size?: number): Pro
 export async function paint(filing: number, ground: string): Promise<string | null> {
   const { error } = await supabase.from("filings").update({ ground }).eq("id", filing);
   return error && said(error);
+}
+
+// --- variations and the pieces Gary drew (slice C) ------------------------------
+
+/** Going back to Gary about a permit: an addition, or a change of use (see db/tables.sql). */
+export interface Variation {
+  id: number;
+  filing: number;
+  kind: "addition" | "use";
+  what: string;
+  room: Where | null;
+  retrospective: boolean;
+  status: "pending" | "granted" | "committee" | "denied" | "refused";
+  scale: "small" | "material" | null;
+  condition: string | null;
+  reply: string | null;
+  minutes: Filing["minutes"];
+  filed_at: string;
+  heard_at: string | null;
+}
+
+const VARIATION_COLUMNS = "id, filing, kind, what, room, retrospective, status, scale, condition, reply, minutes, filed_at, heard_at";
+
+export async function loadVariations(): Promise<Variation[]> {
+  const { data, error } = await supabase.from("variations").select(VARIATION_COLUMNS).order("id");
+  if (error) throw error;
+  return data;
+}
+
+async function vary(row: { filing: number; kind: Variation["kind"]; what: string; room?: Where | null; tag?: number }): Promise<Variation | string> {
+  const { data, error } = await supabase.from("variations").insert(row).select(VARIATION_COLUMNS).single();
+  if (!error) return data;
+  if (error.code === "23514") return "A variation must be between 3 and 80 characters.";
+  if (error.code === "23505" || error.code === "42501") return "Gary's already got one about this permit in front of him.";
+  return said(error);
+}
+
+/** File for something new on one's permit ("a vending machine"); room: where it'd go, or null for Gary's call. */
+export const fileVariation = (filing: number, what: string, room: Where | null = null) => vary({ filing, kind: "addition", what, room });
+
+/** File for a change of use: the shell stays, the schedule is rewritten. Slice E's drift notice points here. */
+export const fileChangeOfUse = (filing: number, use: string) => vary({ filing, kind: "use", what: use });
+
+/** Gary's drawings of scheduled things nothing in the library was close to, by name (norm() in src/schedule.ts). */
+export async function loadPieces(names: string[]): Promise<Map<string, PropDef>> {
+  const out = new Map<string, PropDef>();
+  if (!names.length) return out;
+  const { data } = await supabase.from("pieces").select("name, sprite").in("name", names);
+  for (const p of data ?? []) if (p.sprite) out.set(p.name, p.sprite);
+  return out;
+}
+
+// --- the letter: Gary's questions, red tags, the pound (src/letter.ts) ---------
+
+export async function loadTags(): Promise<Tag[]> {
+  const { data, error } = await supabase.from("tags").select(TAG_COLUMNS).order("id").limit(2000);
+  if (error) throw error;
+  return data;
+}
+
+/** Answer Gary's question about something on your plot. Once; he rules on it straight away. */
+export async function answerTag(id: number, answer: string): Promise<string | null> {
+  const { data, error } = await supabase.from("tags").update({ answer }).eq("id", id).is("answer", null).select("id");
+  if (error) return error.code === "23514" ? "An answer must be between 1 and 200 characters." : said(error);
+  return data.length ? null : "Gary has already had an answer to that one.";
+}
+
+/** Get something back from the pound: where it was, or at x, y. False if that spot's taken. */
+export async function reclaim(id: number, x?: number, y?: number): Promise<boolean | string> {
+  const { data, error } = await supabase.rpc("reclaim", { p_id: id, p_x: x ?? null, p_y: y ?? null });
+  return error ? said(error) : data;
+}
+
+/** Double-click Gary: he comes round your plots with the schedule. How many he's gone to. */
+export async function summonRounds(): Promise<number | null> {
+  const { data, error } = await supabase.rpc("summon_rounds");
+  return error ? null : data;
+}
+
+/**
+ * File for a red-tagged thing: retrospective permission. A variation carrying
+ * the tag; the database marks it retrospective and the tag 'filed' (see
+ * "retrospective permission" in db/logic.sql).
+ */
+export const fileRetrospective = (t: Tag) =>
+  vary({ filing: t.filing, kind: "addition", what: t.what.length < 3 ? `a ${t.what}` : t.what.slice(0, 80), tag: t.id });
+
+// --- the spirit: the open sign, the what's-on board, the visitors' book -------
+
+/** A notice on the what's-on board by a place's door. ok: Gary's read of it, null while he hasn't. */
+export interface Notice { id: number; filing: number; line: string; posted_at: string; ok: boolean | null }
+/** A line in a place's visitors' book; one a visitor a day. */
+export interface Visit { id: number; filing: number; visitor: string; line: string; day: string; at: string; ok: boolean | null }
+
+/** The board and the last month of the book for one place. Unread lines come back only to whoever wrote them. */
+export async function loadSpirit(filing: number): Promise<{ notices: Notice[]; visits: Visit[] }> {
+  const [n, v] = await Promise.all([
+    supabase.from("notices").select("id, filing, line, posted_at, ok").eq("filing", filing).order("posted_at"),
+    supabase.from("visits").select("id, filing, visitor, line, day, at, ok").eq("filing", filing).order("at", { ascending: false }).limit(30),
+  ]);
+  return { notices: n.data ?? [], visits: v.data ?? [] };
+}
+
+export async function flipSign(filing: number, open: boolean): Promise<string | null> {
+  const { error } = await supabase.from("filings").update({ open_sign: open }).eq("id", filing);
+  return error && said(error);
+}
+
+export async function pinNotice(filing: number, line: string): Promise<Notice | string> {
+  const { data, error } = await supabase.from("notices").insert({ filing, line }).select("id, filing, line, posted_at, ok").single();
+  if (!error) return data;
+  if (error.code === "23514") return "A notice is a line: between 3 and 80 characters.";
+  if (error.code === "42501") return "The board's full. Take one down first.";
+  return said(error);
+}
+
+export async function unpinNotice(id: number): Promise<boolean> {
+  const { error } = await supabase.from("notices").delete().eq("id", id);
+  return !error;
+}
+
+export async function signBook(filing: number, line: string): Promise<Visit | string> {
+  const { data, error } = await supabase.from("visits").insert({ filing, line }).select("id, filing, visitor, line, day, at, ok").single();
+  if (!error) return data;
+  if (error.code === "23505") return "You've signed it today already.";
+  if (error.code === "23514") return "A line in the book: between 3 and 140 characters.";
+  if (error.code === "42501") return "The book's not open to you here.";
+  return said(error);
+}
+
+/** Ask Gary to come and read the place again (after putting it back). How many he's gone to, or null. */
+export async function summonReader(): Promise<number | null> {
+  const { data, error } = await supabase.rpc("summon_reader");
+  return error ? null : data;
+}
+
+/** Ask for a boarded-up plot: its holder gets a week's notice. When it runs out, or null if it can't be asked for. */
+export async function askForPlot(plot: number): Promise<string | null> {
+  const { data, error } = await supabase.rpc("ask_for_plot", { p_plot: plot });
+  return error ? null : data;
+}
+
+// --- inside and in things (slice B) ------------------------------------------
+
+/** Put a thing inside the shell's room at (x, y), or in a holder's slot (x is the slot), in the holder's room. */
+export async function placeInside(filing: number, x: number, y: number, prop: string, holder: Placement | null): Promise<Placement | string> {
+  const row = { filing, x, y: holder ? 0 : y, prop, size: 1, room: holder?.room ?? "in", parent: holder?.id ?? null };
+  const { data, error } = await supabase.from("placements").insert(row).select(COLUMNS).single();
+  if (!error) return data;
+  if (error.code === "23505") return holder ? "That slot's taken." : "Something is already standing exactly there.";
+  return said(error);
+}
+
+/** Move a thing about inside: to (x, y) on its own, or into a holder's slot x. */
+export async function moveInside(id: number, x: number, y: number, parent: number | null): Promise<string | null> {
+  const { error } = await supabase.from("placements").update({ x, y, parent }).eq("id", id);
+  if (!error) return null;
+  if (error.code === "23505") return "Something is already there.";
+  return said(error);
+}
+
+// --- the shell (slice A) -------------------------------------------------------
+
+/** Put up, change or take down the holder's building or pen. The database keeps Gary's read of the sign as his. */
+export async function saveShell(filing: number, shell: Shell | null): Promise<string | null> {
+  const { error } = await supabase.from("filings").update({ shell }).eq("id", filing);
+  if (!error) return null;
+  if (error.code === "23514") return error.message; // the database says what was wrong with it
+  return said(error);
 }

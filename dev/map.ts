@@ -1,9 +1,10 @@
 // The real map with made-up residents: every plot state, walkers, letters.
-// ?scale=4, ?hour=20, ?hover=7, ?t=ms to pin the clock. No network.
+// ?scale=4, ?hour=20, ?hover=7, ?t=ms to pin the clock, ?letter=1 for red tags and the pound. No network.
 
 import { draw, type Scene } from "../src/render.ts";
 import { MAP_H, MAP_W, PLOTS, route, LANDMARKS } from "../src/world/index.ts";
 import type { Filing, Placement } from "../src/net.ts";
+import { fakeTag } from "./letter.ts";
 
 const q = new URLSearchParams(location.search);
 const S = +(q.get("scale") ?? 4);
@@ -43,6 +44,11 @@ const scene: Scene = {
   held, built, me, hover: q.get("hover") ? +q.get("hover")! : null, selected: q.get("selected") ? +q.get("selected")! : null,
   walkers, look: (id) => (id === me ? { meadow: "dog" } : { meadow: "blob" }), letters: [], t, recent: [12, 3],
 };
+// ?letter=1: red tags on the second thing of every built plot, and three things in the pound by the hut.
+if (q.get("letter")) {
+  scene.tags = new Map([...built].map(([filing, ps]) => [filing, ps.slice(1, 2).map((p) => fakeTag(p.id, filing, "tagged"))]));
+  scene.pound = 3;
+}
 const frame = () => {
   ctx.setTransform(S, 0, 0, S, 0, 0);
   draw(ctx, { ...scene, t: q.get("t") ? t : Date.now() });

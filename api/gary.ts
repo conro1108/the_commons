@@ -7,7 +7,9 @@
 // nightly for each referral, which five members debate (see sit()), and { committee_appeal: id } for each
 // appeal that's come up to them (sitAppeal()), and { audit: id } on his
 // daily round of plots built on since he last came (send_auditor(), audit()), and { appeal: id } when a
-// denied filer writes back to make their case (hear()). A decision model rules from enums; the scribe only
+// denied filer writes back to make their case (hear()), and { variation: id } / { committee_variation: id } when a holder
+// goes back to him about their permit (see "variations and changes of use"), and { letter: id } / { tag: id } for his
+// rounds against the schedule and the answers to them (see "the letter"). A decision model rules from enums; the scribe only
 // writes the prose, and the decision model checks it before it goes out. The write is conditional on the filing still being
 // pending, so a retried request never overwrites a stored ruling.
 
@@ -16,6 +18,9 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { experimental_decide as decide, generateText, type Experimental_DecisionQuestion, type Experimental_DecisionState } from "ai";
 import world from "../src/world/plots.json" with { type: "json" };
 import type { PlotDef, Region, Side, World } from "../src/world/types.ts";
+// The first runtime imports from src/ (pure, DOM-free): see "the schedule" below.
+import { LIBRARY, MATERIALS, closest } from "../src/library.ts";
+import { changeUse, isFitting, norm, scheduled, vary, type Addition, type Fate, type Fitting, type Schedule, type Where, useOf } from "../src/schedule.ts";
 
 const JUDGE = "typesafe-ai/jev";
 const SCRIBE = "anthropic/claude-haiku-5.5";
@@ -657,6 +662,7 @@ async function convene(db: Db, id: number): Promise<Response> {
     })
     .eq("id", id)
     .eq("status", "committee");
+  if (verdict.status === "approved" || verdict.status === "conditional") await scheduleFor(db, id);
   return Response.json(verdict);
 }
 
@@ -759,6 +765,7 @@ async function hearAppeal(db: Db, id: number): Promise<Response> {
     p_claimed: "Sorry, someone else claimed the plot while I was reading your appeal.", p_minutes: null,
   });
   if (error) throw error;
+  if (data) await scheduleFor(db, f.id);
   return Response.json({ allowed: data });
 }
 
@@ -793,6 +800,7 @@ async function sitAppeal(db: Db, id: number): Promise<Response> {
     p_claimed: "The plot was claimed by another filing before the committee could sit. It can only apologise.", p_minutes: minutes,
   });
   if (error) throw error;
+  if (data) await scheduleFor(db, f.id);
   return Response.json({ allowed: data });
 }
 
@@ -935,7 +943,7 @@ export type Db = SupabaseClient<any, any, any>;
 export async function survey(db: Db, f: { id: number; plot: number; ground: string | null }): Promise<Evidence> {
   const plot = plotOf(f.plot);
   const { w: W, h: H } = plot;
-  const { data: placed } = await db.from("placements").select("prop, size, x, y, label, label_ok, sprite").eq("filing", f.id).order("id");
+  const { data: placed } = await db.from("placements").select("prop, size, x, y, label, label_ok, sprite").eq("filing", f.id).eq("room", "out").is("parent", null).is("impounded_at", null).order("id");
   // Each thing by the cells it covers, not just its anchor, so "beside" can be judged.
   const boxes = [
     ...plot.features.map((x) => ({ name: `${x.kind.replace("_", " ")} (already there)`, x0: x.x, y0: x.y, x1: x.x + x.w - 1, y1: x.y + x.h - 1 })),
@@ -987,12 +995,29 @@ async function readLabel(db: Db, id: number): Promise<Response> {
   await db.from("placements").update({ label_ok: ok, label_check: answers }).eq("id", id).is("label_ok", null);
   if (!ok) return Response.json({ ok });
 
-  // Then he draws it, once per name: anything already drawn under it is reused.
+  // Then he draws it, once per name: anything already drawn under it (or drawn for a schedule, in pieces) is reused.
   const { data: seen } = await db
     .from("placements").select("sprite").ilike("label", p.label.trim().replace(/[\\%_]/g, "\\$&")).not("sprite", "is", null).limit(1).maybeSingle();
-  const { sprite, drafts } = seen ? { sprite: seen.sprite as Sprite, drafts: null } : await draw(p.label.trim());
+  const { data: piece } = seen ? { data: null } : await db.from("pieces").select("sprite").eq("name", norm(p.label)).not("sprite", "is", null).maybeSingle();
+  const got = seen ?? piece;
+  const { sprite, drafts } = got ? { sprite: got.sprite as Sprite, drafts: null } : await draw(p.label.trim());
   await db.from("placements").update({ sprite, sprite_drafts: drafts }).eq("id", id).is("sprite", null);
   return Response.json({ ok, drawn: !!sprite });
+}
+
+// --- the shell's sign (slice A) --------------------------------------------------
+
+/** Read the sign over a building's door before it shows to anyone else. Same test as a label; stored only if it's still the sign he read. */
+async function readSign(db: Db, id: number): Promise<Response> {
+  const { data: f } = await db.from("filings").select("shell").eq("id", id).maybeSingle();
+  const sign: string | undefined = f?.shell?.sign;
+  if (!sign || f?.shell.sign_ok != null) return Response.json({ skipped: true });
+  const { answers } = await ask("sign", { sign }, {
+    unacceptable: { type: "boolean", instructions: UNFIT("sign over the door of a building on a shared common") },
+  });
+  const ok = answers.unacceptable.probability <= 0.5;
+  const { data: kept } = await db.rpc("sign_read", { p_id: id, p_sign: sign, p_ok: ok });
+  return Response.json({ ok, kept });
 }
 
 interface Sprite {
@@ -1112,6 +1137,763 @@ export async function precedentFor(db: Db, id: number, plot: PlotDef) {
     .map((r) => ({ id: r.id, intent: r.intent, status: r.status, ground: `on ${regionOf(plotOf(r.plot)).name}` }));
 }
 
+// --- the schedule (slice C) ----------------------------------------------------
+
+// When Gary grants a filing he writes its schedule (src/schedule.ts): the shell,
+// a starting kit of fittings outside and in, and the use. Jev picks the shell and
+// which library piece each fitting is (src/library.ts, the one seam onto the
+// library); the scribe names the fittings; Jev checks them; code applies. A
+// fitting nothing in the library is close to is keyed "item" and drawn once into
+// the pieces table by name, so anyone scheduled for the same thing, or writing in
+// an item by that name, gets the same drawing. Every path that grants calls
+// scheduleFor(). Variations and changes of use are below.
+
+const SHELLS = {
+  building: "A building, with walls, a roof and a door: anything you'd go inside (a studio, a shop, a hut, a reading room).",
+  enclosure: "An enclosure open to the sky: a pen, a run, a walled or fenced garden, a yard.",
+  none: "No structure at all: things standing out on the plot (a bench, a flower bed, a pond, a sundial).",
+} as const;
+type ShellKind = keyof typeof SHELLS;
+
+const SCHEDULER = `${GARY}
+
+You've granted a filing, and now you write its schedule: the starting kit the permit lets them build with. The shell is decided ("shell"). Output only JSON, no markdown, no commentary:
+{"shell": "...", "fittings": [{"name": "...", "where": "in" | "out"}]}
+"shell": the shell as it reads on a schedule, in a few words: "a hall, timber, one room", "a pen, wire mesh", "a hut, stone". If shell.kind is "none", write "none".
+"fittings": three to six things that make it this place and not another. A starting kit, not everything it could ever have. Each "name" a plain noun phrase of at most 24 characters ("mats", "a rack of practice swords", "a shoe rack"), no brands, and no sign (every building has one).
+"where": "in" for inside the building, "out" for on the plot outside. With no building, everything is "out". A building's kit is mostly inside, with one or two things outside.
+"library" lists ordinary pieces already drawn: use their names where they suit, but name what the place actually needs.
+Never anything crude, nothing the filing doesn't plausibly need, nothing against the bylaws or the condition.
+
+Example, "a karate studio", a building, timber:
+{"shell": "a hall, timber, one room", "fittings": [{"name": "mats", "where": "in"}, {"name": "a rack of practice swords", "where": "in"}, {"name": "a board of belts", "where": "in"}, {"name": "a punching bag", "where": "in"}, {"name": "a shoe rack", "where": "out"}]}`;
+
+/** The library pieces that can go there, as criteria for Jev, and "none" for one he'd have to draw. */
+const piecesFor = (where: Where): Record<string, string> => ({
+  ...Object.fromEntries(LIBRARY.filter((p) => p.where === where || p.where === "either").map((p) => [p.key, p.name])),
+  none: "Nothing listed is close to it: it would have to be drawn specially.",
+});
+
+/** A fitting's library key: the piece its name plainly is, else Jev's pick, else "item" for one to draw. */
+function keyOf(name: string, where: Where, picked: string | undefined): string {
+  const near = closest(name);
+  if (near && (near.where === where || near.where === "either")) return near.key;
+  return !picked || picked === "none" ? "item" : picked;
+}
+
+const shellWords = (kind: ShellKind, material: string | null) =>
+  kind === "none" ? "none" : `${kind === "building" ? "a building" : "an enclosure"}, ${(MATERIALS[material ?? ""] ?? "timber").replace(/ \(.*\)$/, "")}${kind === "building" ? ", one room" : ""}`;
+
+/** A written schedule, parsed; problems if it won't do. Code checks it; the model only writes. */
+export function scheduleProblems(raw: string, kind: ShellKind): { shell?: string; fittings?: { name: string; where: Where }[]; problems: string[] } {
+  let j: { shell?: unknown; fittings?: unknown };
+  try {
+    j = JSON.parse(raw.replace(/^```(json)?|```$/gm, "").trim());
+  } catch {
+    return { problems: ["it wasn't valid JSON"] };
+  }
+  if (typeof j?.shell !== "string" || !Array.isArray(j.fittings)) return { problems: ['it wasn\'t {"shell": string, "fittings": [...]}'] };
+  const fittings = (j.fittings as { name?: unknown; where?: unknown }[])
+    .filter((f): f is { name: string; where: Where } => typeof f?.name === "string" && (f.where === "in" || f.where === "out"))
+    .map((f) => ({ name: f.name.trim().replace(/\s+/g, " "), where: kind === "building" ? f.where : ("out" as Where) }));
+  const problems: string[] = [];
+  if (fittings.length < 3 || fittings.length > 6) problems.push(`it had ${fittings.length} usable fittings; three to six`);
+  const bad = fittings.filter((f) => f.name.length < 2 || f.name.length > 24);
+  if (bad.length) problems.push(`names must be 2 to 24 characters: ${bad.map((f) => f.name).join(", ")}`);
+  if (problemsWith([j.shell, ...fittings.map((f) => f.name)].join(" "), {}).length) problems.push("it contained a link or handle");
+  return { shell: j.shell.trim().slice(0, 80), fittings, problems };
+}
+
+/** Gary writes a granted filing's schedule. keep: a shell already standing, which a change of use keeps. Exported for the back office. */
+export async function writeSchedule(filing: { id: number; intent: string; condition?: string | null }, plot: PlotDef, keep?: Schedule["shell"]) {
+  const at = new Date().toISOString();
+  const site = siteOf(plot);
+  const { answers: shape } = await ask("schedule, shell", { filing: pad(filing.id), intent: filing.intent, plot: site }, {
+    shell: { type: "choice", instructions: "What does this filing need to be built as?", criteria: SHELLS as Record<ShellKind, string> },
+    material: { type: "choice", instructions: "If it had a building or an enclosure, which material would suit it, and this plot's ground and weather?", criteria: MATERIALS },
+    chief: { type: "choice", instructions: "Which one of these is most essential to it?", criteria: Object.fromEntries(LIBRARY.map((p) => [p.key, p.name])) },
+  });
+  const kind: ShellKind = keep?.kind ?? (shape.shell.choice as ShellKind);
+  const material = keep ? keep.material : kind === "none" ? null : shape.material.choice;
+  const input = {
+    filing: pad(filing.id), intent: filing.intent, condition: filing.condition ?? null, plot: site.particulars,
+    shell: { kind, material: material && (MATERIALS[material]?.replace(/ \(.*\)$/, "") ?? material), ...(keep && { already_standing: keep.words }) },
+    library: LIBRARY.map((p) => p.name),
+  };
+  const drafts: { text: string; checks: Record<string, number | string>; problems: string[] }[] = [];
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const last = drafts.at(-1);
+    const { text } = await write(`schedule, draft ${attempt + 1}`, {
+      reasoning: LIGHT_THINKING,
+      system: SCHEDULER,
+      prompt: last ? { ...input, rejected: last.text, rejected_because: last.problems } : input,
+      maxOutputTokens: 4000, // reasoning counts against it
+    });
+    const parsed = scheduleProblems(text, kind);
+    if (parsed.problems.length) {
+      drafts.push({ text, checks: {}, problems: parsed.problems });
+      continue;
+    }
+    const fs = parsed.fittings!;
+    const { answers } = (await ask(`schedule, check ${attempt + 1}`, { intent: filing.intent, shell: input.shell, shell_words: parsed.shell, fittings: fs.map((f) => f.name) }, {
+      ...Object.fromEntries(fs.flatMap((f, i) => [
+        [`odd${i}`, { type: "boolean" as const, instructions: `Is "${f.name}" crude or unkind, or plainly out of place in ${filing.intent}?` }],
+        [`key${i}`, { type: "choice" as const, instructions: `Which of these is "${f.name}", or would do as it? Pick "none" unless one really would.`, criteria: piecesFor(f.where) }],
+      ])),
+      shell_wrong: { type: "boolean" as const, instructions: "Does shell_words describe something other than the shell given (its kind and material), or anything crude?" },
+    })) as unknown as { answers: Record<string, { probability: number; choice: string }> };
+    const checks = Object.fromEntries(Object.entries(answers).map(([k, a]) => [k, a.choice ?? a.probability]));
+    const kept = fs.map((f, i) => ({ f, i })).filter(({ i }) => answers[`odd${i}`].probability <= 0.5);
+    if (kept.length < 2) {
+      drafts.push({ text, checks, problems: ["most of the fittings didn't belong"] });
+      continue;
+    }
+    drafts.push({ text, checks, problems: [] });
+    const fittings: Fitting[] = kept.map(({ f, i }) => ({ name: f.name, key: keyOf(f.name, f.where, answers[`key${i}`].choice), where: f.where, how: "granted", at }));
+    const words = kind === "none" ? "none" : answers.shell_wrong.probability > 0.5 ? shellWords(kind, material) : parsed.shell!;
+    const schedule: Schedule = { shell: keep ?? { kind, words, material }, fittings, use: filing.intent };
+    return { schedule, record: { shape, drafts } };
+  }
+  // Twice no good: the one piece he'd least do without.
+  const chief = LIBRARY.find((p) => p.key === shape.chief.choice) ?? LIBRARY[0];
+  const where: Where = kind === "building" && chief.where !== "out" ? "in" : "out";
+  const schedule: Schedule = {
+    shell: keep ?? { kind, words: shellWords(kind, material), material },
+    fittings: [{ name: chief.name, key: chief.key, where, how: "granted", at }],
+    use: filing.intent,
+  };
+  return { schedule, record: { shape, drafts } };
+}
+
+/** Draw what the library hasn't got, once per name; anything drawn before, as a piece or a written-in item, is reused. */
+async function drawPieces(db: Db, names: string[]) {
+  await Promise.all([...new Set(names.map(norm))].map(async (name) => {
+    const { data: have } = await db.from("pieces").select("name").eq("name", name).maybeSingle();
+    if (have) return;
+    const { data: seen } = await db
+      .from("placements").select("sprite").ilike("label", name.replace(/[\\%_]/g, "\\$&")).not("sprite", "is", null).limit(1).maybeSingle();
+    const { sprite, drafts } = seen ? { sprite: seen.sprite as Sprite, drafts: null } : await draw(name);
+    // Nothing usable: no row, so the next to need it tries again.
+    if (sprite) await db.from("pieces").upsert({ name, sprite, drafts }, { onConflict: "name", ignoreDuplicates: true });
+  }));
+}
+
+/** Write the schedule onto a filing just granted, if it hasn't one, then draw what the library hasn't got. Every grant calls this;
+ *  a failure leaves the filing unscheduled, held to nothing like those from before schedules. */
+export async function scheduleFor(db: Db, id: number): Promise<Schedule | null> {
+  try {
+    const { data: f } = await db.from("filings").select("*").eq("id", id).single();
+    if (!f || (f.status !== "approved" && f.status !== "conditional") || f.schedule) return null;
+    const { schedule, record } = await writeSchedule(f, plotOf(f.plot));
+    const { data: wrote } = await db
+      .from("filings").update({ schedule, verdict: { ...f.verdict, schedule: record } }).eq("id", id).is("schedule", null).select("id");
+    if (wrote?.length) await drawPieces(db, schedule.fittings.filter((x) => x.key === "item").map((x) => x.name));
+    return schedule;
+  } catch (e) {
+    console.error("schedule", id, e);
+    return null;
+  }
+}
+
+// --- variations and changes of use (slice C) -------------------------------------
+
+// The holder goes back to Gary (the variations table, its own in-tray: drain_variations()).
+// An addition that belongs and is small is stamped the same day and joins the
+// schedule as how='variation'; a material one (a room, an extension, an interior
+// larger than the exterior) goes to the committee's nightly sitting. One filed
+// after a red tag (variations.retrospective, slice D's) is dearer: usually a
+// condition. A change of use is a fresh ruling on the same plot: the shell stays,
+// the schedule's rewritten, and old fittings stay on, stay as historic, or go
+// into storage (placements.room 'store').
+//
+// Entry points: slice D files retrospective permission with fileVariation(db,
+// {..., retrospective: true}) and adds ancillary or lawful things with
+// addToSchedule(); slice E files a change of use with fileVariation(db, {kind:
+// "use", ...}) or the holder does from the card (fileChangeOfUse in src/net.ts).
+
+const NATURE = {
+  fitting: "A thing to put on the plot or inside: furniture, equipment, an animal, a plant, a small structure.",
+  room: "A room or an extension added to the building itself, or a new building.",
+  larger: "Making the inside of the building larger than its outside.",
+} as const;
+
+const variationRulings = (use: string): Record<string, string> => ({
+  belongs: `Belongs in ${use}: part of one, or a reasonable extra (a kettle in a dojo, a vending machine in a studio), and modest.`,
+  material: `Could belong in ${use}, but it's a material change: a second room, an extension, a sauna, an interior larger than the exterior, or anything big enough to change what the place is like.`,
+  foreign: `Doesn't belong in ${use}: it has nothing to do with one, or would turn the place into something else.`,
+  ...Object.fromEntries(BYLAWS.map((text, i) => [`b${i + 1}`, `Breaches Bylaw ${i + 1}, "${text}"`])),
+});
+
+export interface VariationRuling {
+  status: "granted" | "committee" | "denied" | "refused";
+  scale: "small" | "material" | null;
+  bylaw: number | null;
+  conditioned: boolean; // a condition comes with it
+}
+
+/** Turn Jev's answers on a variation into what's done. Code applies; the model only picks. Retrospective: a condition unless it plainly belongs. */
+export function variationOf(a: { unacceptable: number; ruling: string; nature: string; belongs?: number }, retrospective: boolean): VariationRuling {
+  if (a.unacceptable > 0.5) return { status: "refused", scale: null, bylaw: null, conditioned: false };
+  if (/^b\d$/.test(a.ruling)) return { status: "denied", scale: null, bylaw: Number(a.ruling.slice(1)), conditioned: false };
+  if (a.ruling === "foreign") return { status: "denied", scale: null, bylaw: null, conditioned: false };
+  if (a.ruling === "material" || a.nature !== "fitting") return { status: "committee", scale: "material", bylaw: null, conditioned: false };
+  return { status: "granted", scale: "small", bylaw: null, conditioned: retrospective && (a.belongs ?? 0) < 0.9 };
+}
+
+/** An item's name as it'll be written in: at most 24 characters (placements.label), cut at a word. */
+const itemName = (what: string) => {
+  const w = what.trim().replace(/\s+/g, " ");
+  return w.length <= 24 ? w : w.slice(0, 25).replace(/\s+\S*$/, "") || w.slice(0, 24);
+};
+
+/** What Gary has on the schedule, as he'd read it out. */
+const scheduleText = (s: Schedule) => ({
+  shell: s.shell.words,
+  inside: s.fittings.filter((f) => f.where === "in").map((f) => f.name),
+  outside: s.fittings.filter((f) => f.where === "out").map((f) => f.name),
+});
+
+const VARIER = `${GARY}
+
+The holder of a permit ("use") has filed a variation to add something ("asked"), and you've ruled ("ruling"). Write back: one or two sentences, at most 45 words, plain text, no greeting, no sign-off, no markdown.
+Make the outcome clear. Granted: it's on their schedule now; if a condition is given, quote it. Gone to committee: it's a bigger change than you'll stamp yourself, and the committee sits tonight. Denied as not belonging: say plainly it isn't part of the use, and that if that's what the place is turning into, it wants a change of use. Denied under a bylaw: cite it by its number and say what it forbids.
+If "retrospective" is true, they'd built it already and you'd tagged it. You're putting it on paper now; if there's a condition, that's the price. Don't lecture.
+Never invent bylaws, numbers, filings or procedures that are not in the input.
+
+Example, "a vending machine" for "a karate studio", granted:
+Granted. I suppose people get thirsty after all that kicking. It's on your schedule.`;
+
+const { ignores: _ignores, ...VARIATION_CHECKS } = REPLY_CHECKS;
+
+/** The plain reply, for when the scribe can't be trusted with this one. */
+function formVariation(r: VariationRuling, what: string, use: string, condition: string | null, p: PlotDef) {
+  if (r.status === "refused") return `Denied. ${REFUSED}`;
+  if (r.status === "committee") return `That's a material change, so it goes to the committee, which sits overnight.`;
+  if (r.status === "denied") return r.bylaw ? `Denied under ${bylawText(r.bylaw, p)}` : `Denied: that isn't part of ${use}. If that's what the place is becoming, file a change of use.`;
+  return `Granted: ${what} is on your schedule.${condition ? ` On condition: ${condition}` : ""}`;
+}
+
+/** Gary rules on an addition to a permit. Exported for the back office and slice D. */
+export async function ruleVariation(
+  f: { id: number; intent: string; schedule: Schedule | null },
+  v: { what: string; room: Where | null; retrospective: boolean },
+  plot: PlotDef,
+) {
+  const use = f.schedule?.use ?? f.intent;
+  const building = f.schedule ? f.schedule.shell.kind === "building" : true;
+  const { answers } = await ask("variation", {
+    filing: pad(f.id), use, schedule: f.schedule && scheduleText(f.schedule), plot: siteOf(plot),
+    bylaws: BYLAWS.map((text, i) => `${i + 1}. ${text}`), asked: v.what, ...(v.room && { where: v.room }), retrospective: v.retrospective,
+  }, {
+    unacceptable: { type: "boolean", instructions: UNFIT("variation") },
+    ruling: { type: "choice", instructions: `Rule on adding "asked" to ${use}, strictly according to the bylaws. Be reasonable: places have ordinary extras.`, criteria: variationRulings(use) },
+    nature: { type: "choice", instructions: "What kind of addition is it?", criteria: NATURE as Record<keyof typeof NATURE, string> },
+    where: { type: "choice", instructions: "Where would it go?", criteria: { in: "Inside the building.", out: "Outside, on the plot." } },
+    key_in: { type: "choice", instructions: `Which of these is "${v.what}", or would do as it? Pick "none" unless one really would.`, criteria: piecesFor("in") },
+    key_out: { type: "choice", instructions: `Which of these is "${v.what}", or would do as it? Pick "none" unless one really would.`, criteria: piecesFor("out") },
+    condition: { type: "choice", instructions: "If a condition were attached to letting this stand, which would suit it best?", criteria: conditionsFor(plot) },
+  });
+  const ruled = variationOf({
+    unacceptable: answers.unacceptable.probability,
+    ruling: answers.ruling.probabilities ? (Object.entries(answers.ruling.probabilities).sort((a, b) => b[1] - a[1])[0][0]) : answers.ruling.choice,
+    nature: answers.nature.choice,
+    belongs: answers.ruling.probabilities?.belongs,
+  }, v.retrospective);
+  const where: Where = !building ? "out" : (v.room ?? (answers.where.choice as Where));
+  const key = keyOf(v.what, where, answers[where === "in" ? "key_in" : "key_out"].choice);
+  const addition: Addition = answers.nature.choice === "room" ? { kind: "room", name: v.what.trim() }
+    : answers.nature.choice === "larger" ? { kind: "larger", name: v.what.trim() }
+    : { kind: "fitting", name: key === "item" ? itemName(v.what) : v.what.trim(), key, where };
+  const written = ruled.conditioned
+    ? await writeCondition({ id: f.id, intent: `${use}, with ${v.what} let stand after the fact` }, answers.condition.choice as Condition, { plot, writeIn: false })
+    : null;
+  const input = {
+    use, asked: v.what, retrospective: v.retrospective,
+    ruling: { granted: "granted: added to the schedule", committee: "a material change: referred to the committee, which sits overnight", denied: ruled.bylaw ? "denied" : `denied: not part of ${use}`, refused: "denied" }[ruled.status],
+    condition: written?.condition ?? null,
+    bylaw: ruled.bylaw !== null ? bylawText(ruled.bylaw, plot) : null,
+  };
+  const refused = ruled.status === "refused";
+  const { text, drafts } = refused ? { text: null, drafts: [] } : await note("variation reply", VARIER, input, askable(VARIATION_CHECKS, input) as Record<string, string>);
+  const reply = text ?? formVariation(ruled, v.what, use, input.condition, plot);
+  return { ...ruled, addition, condition: written?.condition ?? null, wants: written?.wants ?? null, reply, record: { answers, drafts, conditions: written?.tries, addition } };
+}
+
+/** File a variation from the server (bypassing RLS): slice D's retrospective permission, slice E's change of use after a drift
+ *  notice. It goes in the same in-tray as the holder's own. Null if one's already before Gary or the committee. */
+export async function fileVariation(db: Db, v: { filing: number; what: string; kind?: "addition" | "use"; room?: Where | null; retrospective?: boolean }) {
+  const { data: f } = await db.from("filings").select("filer").eq("id", v.filing).single();
+  if (!f) return null;
+  const { data, error } = await db.from("variations")
+    .insert({ filing: v.filing, filer: f.filer, what: v.what, kind: v.kind ?? "addition", room: v.room ?? null, retrospective: v.retrospective ?? false })
+    .select("id").single();
+  return error ? null : (data.id as number);
+}
+
+/** Add something to a filing's schedule: a granted variation, or slice D's ancillary and lawful things (how). A condition that
+ *  comes with it goes on the permit if it has none outstanding. Filings from before schedules stay held to nothing. */
+export async function addToSchedule(db: Db, filing: number, addition: Addition, how: Fitting["how"] = "variation", condition?: { condition: string; wants: string | null }) {
+  const { data: f } = await db.from("filings").select("id, status, schedule, condition, met_at").eq("id", filing).single();
+  if (!f) return;
+  if (f.schedule) await db.from("filings").update({ schedule: vary(f.schedule, addition, new Date().toISOString(), how) }).eq("id", filing);
+  if (condition && (f.status === "approved" || (f.status === "conditional" && f.met_at))) {
+    await db.from("filings").update({ status: "conditional", condition: condition.condition, wants: condition.wants, met_at: null, remark: null })
+      .eq("id", filing).in("status", ["approved", "conditional"]);
+  }
+  if (addition.kind === "fitting" && addition.key === "item") await drawPieces(db, [addition.name]);
+}
+
+const FATES: Record<Fate, string> = {
+  keep: "Still part of the new use.",
+  historic: "Doesn't belong to the new use, but can stay on harmlessly as a reminder of what the place was (the punching bag in the corner of the tea room).",
+  store: "Doesn't belong to the new use and would be in the way: it goes into storage.",
+};
+
+/** Put a filing's things that are these fittings into storage (room 'store', one slot each), with whatever they hold. */
+async function store(db: Db, filing: number, fittings: Fitting[]) {
+  const { data } = await db.from("placements").select("id, prop, label, room, parent, x, y").eq("filing", filing).is("impounded_at", null);
+  const all = (data ?? []) as { id: number; prop: string; label: string | null; room: string; parent: number | null; x: number; y: number }[];
+  let slot = Math.max(-1, ...all.filter((p) => p.room === "store" && !p.parent).map((p) => p.y * 44 + p.x)) + 1;
+  for (const p of all.filter((p) => p.room !== "store" && fittings.some((f) => f.where === p.room && isFitting(f, p)))) {
+    if (slot >= 44 * 32) break;
+    await db.from("placements").update({ room: "store", parent: null, x: slot % 44, y: Math.floor(slot / 44) }).eq("id", p.id);
+    await db.from("placements").update({ room: "store" }).eq("parent", p.id);
+    slot++;
+  }
+}
+
+/** A change of use granted: the filing's intent and permit are the new use's, the shell stays, the schedule is rewritten, and
+ *  each old fitting stays on, stays as historic, or goes into storage with its things. */
+async function applyChangeOfUse(db: Db, id: number, use: string, granted: { status: "approved" | "conditional"; condition: string | null; wants: string | null; permit: string }) {
+  const { data: f } = await db.from("filings").select("*").eq("id", id).single();
+  if (!f || (f.status !== "approved" && f.status !== "conditional")) return;
+  const old = f.schedule as Schedule | null;
+  const { schedule: fresh, record } = await writeSchedule({ id, intent: use, condition: granted.condition }, plotOf(f.plot), old?.shell);
+  let fates: Fate[] = [];
+  let fateAnswers: unknown = null;
+  if (old?.fittings.length) {
+    const { answers } = (await ask("change of use, fittings", { was: old.use, now: use, fittings: old.fittings.map((x) => x.name) },
+      Object.fromEntries(old.fittings.map((x, i) => [`f${i}`, {
+        type: "choice" as const, instructions: `The place is changing from ${old.use} to ${use}. What should become of "${x.name}"?`, criteria: FATES,
+      }])))) as unknown as { answers: Record<string, { choice: string }> };
+    fates = old.fittings.map((_, i) => answers[`f${i}`].choice as Fate);
+    fateAnswers = answers;
+  }
+  const schedule = old ? changeUse(old, fresh, fates) : fresh;
+  const at = new Date().toISOString();
+  await db.from("filings").update({
+    intent: use, permit: granted.permit, status: granted.status, condition: granted.condition, wants: granted.wants, met_at: null, remark: null, drift: null,
+    schedule, verdict: { ...f.verdict, uses: [...(f.verdict?.uses ?? []), { was: f.intent, permit: f.permit, at, schedule: record, fates: fateAnswers }] },
+  }).eq("id", id).in("status", ["approved", "conditional"]);
+  const stored = (schedule.stored ?? []).slice(old?.stored?.length ?? 0);
+  if (stored.length) await store(db, id, stored);
+  await drawPieces(db, fresh.fittings.filter((x) => x.key === "item").map((x) => x.name));
+}
+
+const heardNow = () => new Date().toISOString();
+
+/** A variation from its in-tray: an addition, or a change of use. */
+async function hearVariation(db: Db, id: number): Promise<Response> {
+  const { data: v } = await db.from("variations").select("*").eq("id", id).maybeSingle();
+  if (!v || v.status !== "pending") return Response.json({ skipped: true });
+  const { data: f } = await db.from("filings").select("*").eq("id", v.filing).single();
+  if (!f || (f.status !== "approved" && f.status !== "conditional")) {
+    await db.from("variations").update({ status: "denied", ok: true, heard_at: heardNow(), reply: "That permit isn't in force any more, so there's nothing to vary." })
+      .eq("id", id).eq("status", "pending");
+    return Response.json({ skipped: true });
+  }
+  const plot = plotOf(f.plot);
+
+  if (v.kind === "use") {
+    const r = await rule({ id: f.id, intent: v.what }, plot, await precedentFor(db, f.id, plot));
+    const granted = r.verdict.status === "approved" || r.verdict.status === "conditional";
+    const status = granted ? "granted" : r.verdict.status === "committee" ? "committee" : r.verdict.status;
+    const { data: heard } = await db.from("variations").update({
+      status, scale: "material", ok: status !== "refused", condition: r.written?.condition ?? null, reply: r.permit,
+      record: { answers: r.answers, drafts: r.drafts, conditions: r.written?.tries }, heard_at: status === "committee" ? null : heardNow(),
+    }).eq("id", id).eq("status", "pending").select("id");
+    if (heard?.length && granted) {
+      await applyChangeOfUse(db, f.id, v.what, { status: r.verdict.status as "approved" | "conditional", condition: r.written?.condition ?? null, wants: r.written?.wants ?? null, permit: r.permit });
+    }
+    return Response.json({ status });
+  }
+
+  const r = await ruleVariation(f, v, plot);
+  const { data: heard } = await db.from("variations").update({
+    status: r.status, scale: r.scale, ok: r.status !== "refused", condition: r.condition, reply: r.reply, record: r.record,
+    heard_at: r.status === "committee" ? null : heardNow(),
+  }).eq("id", id).eq("status", "pending").select("id");
+  if (heard?.length && r.status === "granted") await addToSchedule(db, f.id, r.addition, "variation", r.condition ? { condition: r.condition, wants: r.wants } : undefined);
+  return Response.json({ status: r.status });
+}
+
+/** A material variation, or a change of use Gary referred, at the committee's nightly sitting. Null quorum: it waits a night. */
+async function sitVariation(db: Db, id: number): Promise<Response> {
+  const { data: v } = await db.from("variations").select("*").eq("id", id).maybeSingle();
+  if (!v || v.status !== "committee") return Response.json({ skipped: true });
+  const { data: f } = await db.from("filings").select("*").eq("id", v.filing).single();
+  if (!f || (f.status !== "approved" && f.status !== "conditional")) {
+    await db.from("variations").update({ status: "denied", heard_at: heardNow(), reply: "That permit isn't in force any more, so there's nothing to vary." })
+      .eq("id", id).eq("status", "committee");
+    return Response.json({ skipped: true });
+  }
+  const plot = plotOf(f.plot);
+  const use = (f.schedule as Schedule | null)?.use ?? f.intent;
+  const intent = v.kind === "use" ? `${v.what} (a change of use, from ${use})` : `${v.what}, added to ${use} (a variation to its permit)`;
+  const sat = await sit({ id: f.id, intent }, plot);
+  if (!sat) return Response.json({ quorum: false });
+  const { verdict, written, minutes, record } = sat;
+  const allowed = verdict.status === "approved" || verdict.status === "conditional";
+  const { data: heard } = await db.from("variations").update({
+    status: allowed ? "granted" : "denied", ok: verdict.status !== "refused", condition: written?.condition ?? null,
+    reply: minutes.finding ?? minutes.outcome, minutes, record: { ...v.record, committee: record }, heard_at: heardNow(),
+  }).eq("id", id).eq("status", "committee").select("id");
+  if (!heard?.length || !allowed) return Response.json({ allowed: false });
+  if (v.kind === "use") {
+    await applyChangeOfUse(db, f.id, v.what, { status: verdict.status as "approved" | "conditional", condition: written?.condition ?? null, wants: written?.wants ?? null, permit: minutes.outcome });
+  } else if (v.record?.addition) {
+    await addToSchedule(db, f.id, v.record.addition as Addition, "variation", written ? { condition: written.condition, wants: written.wants } : undefined);
+  }
+  return Response.json({ allowed: true });
+}
+
+// --- the letter ----------------------------------------------------------------
+
+// Gary's rounds against the schedule (plans/building-and-enforcement.md, "The
+// letter"). send_rounds() sends { letter: filing } for a plot with something
+// built that isn't on its schedule, and he asks about each kind of thing (a
+// tag). The holder's answer comes as { tag: id }: the decision model weighs
+// whether it's explained (ancillary, onto the schedule) or not (a red tag with
+// a date), and the scribe writes what he says back. Everything after that (the
+// pound, lawful by time) is keep_tags() in db/logic.sql, which needs no model.
+// It runs alongside the audit rather than replacing it: the audit reads the
+// plot whole against its intent and condition, and is all there is for filings
+// granted before schedules; the letter goes thing by thing.
+
+const DAY_MS = 864e5;
+const TAG_DAYS = 3; // a red tag's date, from when it's hung
+const PER_VISIT = 4; // questions in one visit; the rest keep for the next
+
+const ASK_OUT = [
+  (w: string) => `What's the ${w} for?`,
+  (w: string) => `And the ${w}? What's that for?`,
+  (w: string) => `I haven't got a ${w} on the schedule. What's it for?`,
+];
+const ASK_IN = [
+  (w: string) => `What's the ${w} doing in here?`,
+  (w: string) => `There's a ${w} in here that isn't on the schedule. What's it for?`,
+];
+/** His question about one thing: a form of words, the same for the same thing. */
+export const questionFor = (id: number, what: string, where: Where) =>
+  (where === "in" ? ASK_IN : ASK_OUT)[id % (where === "in" ? ASK_IN : ASK_OUT).length](what);
+
+/** What Gary calls a thing, bare. Mirrors thingName() in src/letter.ts. */
+const thingName = (prop: string, label?: string | null) =>
+  prop === "item" ? (label ?? "parcel").trim().replace(/^(a|an|the|some)\s+/i, "") : prop.replace(/_/g, " ");
+
+/** One visit: a question for each kind of thing off the schedule he hasn't already asked about. */
+async function round(db: Db, id: number): Promise<Response> {
+  const { data: f } = await db.from("filings").select("id, status, schedule").eq("id", id).single();
+  if (!f || !BUILT_STATUSES.includes(f.status) || !f.schedule) return Response.json({ skipped: true });
+  const { data: placed } = await db.from("placements").select("id, prop, label, label_ok, room").eq("filing", id).is("impounded_at", null).order("id");
+  const { data: open } = await db.from("tags").select("placement, what").eq("filing", id).in("status", ["asked", "tagged", "filed"]);
+  const asked = new Set((open ?? []).map((t) => t.placement as number));
+  const askedOf = new Set((open ?? []).map((t) => (t.what as string).toLowerCase()));
+  // Three geese are one question: the first of each, and the answer covers the rest (the schedule goes by kind).
+  const kinds = new Map<string, { id: number; what: string; where: Where }>();
+  for (const p of (placed ?? []) as { id: number; prop: string; label: string | null; label_ok: boolean | null; room: Where }[]) {
+    if ((p.prop === "item" && !p.label_ok) || asked.has(p.id) || scheduled(f.schedule as Schedule, p)) continue;
+    const what = thingName(p.prop, p.label);
+    if (askedOf.has(what.toLowerCase())) continue;
+    const key = `${p.room}:${what.toLowerCase()}`;
+    if (!kinds.has(key)) kinds.set(key, { id: p.id, what, where: p.room });
+  }
+  const ask = [...kinds.values()].slice(0, PER_VISIT);
+  let n = 0;
+  for (const k of ask) {
+    // One open tag per thing (tags_open): a visit retried alongside asks nothing twice.
+    const { error } = await db.from("tags").insert({ filing: id, placement: k.id, what: k.what, question: questionFor(k.id, k.what, k.where) });
+    if (!error) n++;
+  }
+  return Response.json({ asked: n });
+}
+const BUILT_STATUSES = ["approved", "conditional"];
+
+// How an answer stands against the use. Code decides what explains it, generously; the model only weighs.
+const KINDS = {
+  ancillary: "It serves the permitted use or the people who come for it: something such a place would plausibly have, or that helps it do what it's for (a kettle in a dojo, a coat hook, a bin, a bench for waiting parents, a lamp to read by).",
+  incidental: "It's small, ordinary and harmless, the sort of thing any garden or building might have whatever it's for (a plant pot, a bird box, a hedgehog hotel by the door, a doormat, a gnome), even if it has nothing to do with the use.",
+  separate: "It's a substantial thing with a use of its own that this permit doesn't cover, and would need its own permission (a hot tub at a karate studio, a second shop, a stage, a pony).",
+  unexplained: "The answer doesn't say what it's for: a shrug, a joke, nonsense, or about something else.",
+} as const;
+type Kind = keyof typeof KINDS;
+
+/** Whether an answer explains the thing. Generous: if the model half thinks it belongs, it belongs. An unfit answer explains nothing. */
+export function explainedBy(a: { unfit: number; kind: string; odds?: Record<string, number> }): boolean {
+  if (a.unfit > 0.5) return false;
+  if (!a.odds) return a.kind === "ancillary" || a.kind === "incidental";
+  return (a.odds.ancillary ?? 0) + (a.odds.incidental ?? 0) >= 0.35;
+}
+
+const LETTERER = `${GARY}
+
+You're going round a plot with its schedule: the list of what its permit lets the holder build ("schedule", for a place that is "use"). You found something that isn't on it ("thing"), asked what it was for ("question"), and they answered ("answer"). You've decided ("explained"). Write what you say back to them: one or two sentences, at most 40 words, plain text, no greeting, no markdown.
+If "explained" is true, it's fine: it can stay, and you'll put it on the schedule as part of the place. Say so in your own words, and react to the answer the way a person would.
+If it's false, it isn't part of the place: say so plainly, and that it's tagged, and by "due" they take it down or file for it, or it goes to the pound by your hut. No lecture; you don't mind them having it, it just needs permission.
+If "answer" says it was unfit to repeat, don't repeat or describe it.
+Never invent bylaws, rules, numbers or procedures that aren't in the input.
+
+For the feel (do not copy):
+a karate studio, a hot tub, "after training", not explained:
+That's not part of a karate studio. It's tagged: take it down or file for it by Thursday, or it comes to the pound.
+a karate studio, a kettle, "for the parents waiting", explained:
+Fair enough, they'll want a cup of tea. I'll put it on the schedule.`;
+
+const LETTER_CHECKS = {
+  contradicts: "Does the reply fail to make the decision clear, or say the opposite: that the thing can stay when \"explained\" is false, or that it's tagged or must go when \"explained\" is true?",
+  invents: "Does the reply cite a bylaw, number, fee, date or procedure that is not in the input? Saying it goes on the schedule, or that it's tagged until the date given and then goes to the pound, is in the input.",
+  unfit: REMARK_CHECKS.unfit,
+} as const;
+
+const longDay = (d: Date) => d.toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long", timeZone: "UTC" });
+
+/** Gary hears an answer: the decision model weighs it, code decides, the scribe replies, checked. */
+export async function hearAnswer(t: { what: string; question: string; answer: string }, s: Schedule, intent: string, where: Where, now = new Date()) {
+  const state = {
+    use: s.use || intent,
+    shell: s.shell.words,
+    schedule: s.fittings.map((x) => `${x.name} (${x.where === "in" ? "inside" : "outside"})`),
+    thing: `${t.what}, ${where === "in" ? "inside" : "outside"}`,
+    question: t.question,
+    answer: t.answer,
+  };
+  const { answers } = await ask("letter", state, {
+    unfit: { type: "boolean", instructions: UNFIT("answer") },
+    kind: {
+      type: "choice",
+      instructions: `Going by the answer, and by what "use" is, how does this thing stand? Be generous: most things people put about a place are fine, and an answer that makes any sense of it counts.`,
+      criteria: KINDS as Record<Kind, string>,
+    },
+  });
+  const unfit = answers.unfit.probability;
+  const explained = explainedBy({ unfit, kind: answers.kind.choice, odds: answers.kind.probabilities });
+  const due = explained ? null : new Date(now.getTime() + TAG_DAYS * DAY_MS);
+  const input = {
+    ...state,
+    answer: unfit > 0.5 ? "(an answer unfit to repeat)" : t.answer,
+    explained,
+    ...(due && { due: longDay(due) }),
+  };
+  const { text, drafts } = await note("letter reply", LETTERER, input, LETTER_CHECKS);
+  const reply = text ?? (explained
+    ? `Fine, the ${t.what} can stay. I'll put it on the schedule.`
+    : `The ${t.what} isn't part of ${state.use}. It's tagged: take it down or file for it by ${longDay(due!)}, or it comes to the pound.`);
+  return { explained, unfit: unfit > 0.5, due, reply, record: { answers, drafts, judge: JUDGE, scribe: SCRIBE } };
+}
+
+/** An answer's come in. Written once: the tag only moves on from 'asked'. */
+async function answered(db: Db, id: number): Promise<Response> {
+  const { data: t } = await db.from("tags").select("*").eq("id", id).maybeSingle();
+  if (!t || t.status !== "asked" || !t.answer) return Response.json({ skipped: true });
+  const { data: f } = await db.from("filings").select("id, intent, schedule").eq("id", t.filing).single();
+  const { data: p } = t.placement ? await db.from("placements").select("prop, label, room").eq("id", t.placement).maybeSingle() : { data: null };
+  if (!f?.schedule || !p) return Response.json({ skipped: true }); // taken down meanwhile: keep_tags() closes it
+  const h = await hearAnswer(t, f.schedule as Schedule, f.intent, p.room);
+  const at = new Date().toISOString();
+  const { data: done } = await db
+    .from("tags")
+    .update({
+      status: h.explained ? "ancillary" : "tagged",
+      reply: h.reply,
+      record: h.record,
+      due: h.due?.toISOString() ?? null,
+      closed_at: h.explained ? at : null,
+      ...(h.unfit && { answer: null }), // kept in the record, not on show
+    })
+    .eq("id", id)
+    .eq("status", "asked")
+    .select("id");
+  if (h.explained && done?.length) {
+    const fitting: Fitting = { name: p.prop === "item" ? p.label.trim() : t.what, key: p.prop, where: p.room, how: "ancillary", at };
+    await db.rpc("add_fitting", { p_filing: f.id, p_fitting: fitting });
+  }
+  return Response.json({ explained: h.explained });
+}
+
+
+// --- the spirit ----------------------------------------------------------------
+
+// What a place is used for (plans/building-and-enforcement.md, "The spirit").
+// The database POSTs { notice: id } and { visit: id } for each new line on a
+// what's-on board or in a visitors' book, read for fitness before anyone else
+// sees it (readLine), and { reading: id } when a place has settled after a
+// change, or once a week (send_reader()): Gary reads the board, the book, the
+// sign and the layout against what the permit is for, and asks one question.
+
+export type Finding = "yes" | "mostly" | "drifted";
+
+const FINDINGS = (use: string): Record<Finding, string> => ({
+  yes: `Still plainly ${use}. What's on, what visitors say and how it's laid out fit it, give or take the odd extra (teas on Saturdays at a karate studio is fine).`,
+  mostly: `Mostly still ${use}, but something else is going on there as well, more than the odd extra.`,
+  drifted: `No longer really ${use}: what's on, what visitors say and how it's laid out add up to a different sort of place.`,
+});
+
+/** What Gary looks at to read a place's use. */
+export type Spirit = {
+  use: string; // what the permit is for
+  open: boolean; // the sign on the door
+  board: string[]; // the what's-on board, a notice a line
+  book: string[]; // the visitors' book, latest first, the last month
+  outside: string[]; // what's set out on the plot (survey())
+  beside: string[];
+  inside: string[]; // what's set out in the room, and what's in or on what
+};
+
+const READER = `${GARY}
+
+You've been round to see what a place is actually being used for, and you've made your finding ("finding") against what its permit is for ("use"). Write exactly two lines, plain text, no markdown:
+Line 1: if the finding is "mostly" or "drifted", what else it's being used as, in two to four words starting "a" or "an" ("a tea room"). Otherwise "none".
+Line 2: your reading of the place for its file: at most 12 words, one or two short sentences, the way you'd jot it down. For example "Still a karate studio." / "Mostly a karate studio. Some tea." / "A tea room, really."
+Go by the evidence only: the what's-on board ("board"), the visitors' book ("book"), whether it's open, and what's set out outside and inside. Never invent anything that isn't there, and never give coordinates.`;
+
+const READING_CHECKS = {
+  invents: "Does the reading (or the other use) rest on something that isn't in the evidence: a notice, a visitor's remark, or a thing set out that isn't there?",
+  contradicts: "Does the reading say something different from the finding: still the permitted use when the finding is drifted, or drifted when it is yes?",
+  unfit: REMARK_CHECKS.unfit,
+} as const;
+
+/** The plain reading, for when the scribe can't manage one. */
+export function formReading(finding: Finding, use: string): string {
+  return finding === "yes" ? `Still ${use}.` : finding === "mostly" ? `Mostly ${use}.` : `Not really ${use} any more.`;
+}
+
+/** Gary reads a place's use: the decision model finds, the scribe names what else it is and writes the reading. */
+export async function readUse(spirit: Spirit) {
+  const { answers } = await ask("reading", spirit, {
+    finding: {
+      type: "choice",
+      instructions: `Is this place still ${spirit.use}? Read what's on, what visitors say, whether it's open and how it's laid out, as a whole; don't count things. If there's hardly anything to go on, it's still what it was.`,
+      criteria: FINDINGS(spirit.use),
+    },
+  });
+  const finding = answers.finding.choice as Finding;
+  const input = { ...spirit, finding };
+  const drafts: { text: string; checks: Record<string, number>; problems: string[] }[] = [];
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const last = drafts.at(-1);
+    const { text } = await write(`reading, draft ${attempt + 1}`, {
+      reasoning: LIGHT_THINKING,
+      system: READER,
+      prompt: last ? { ...input, rejected: last.text, rejected_because: last.problems } : input,
+      maxOutputTokens: 3000,
+    });
+    const [first = "", second = ""] = text.trim().split(/\n+/).map((l) => l.trim());
+    const other = finding === "yes" || /^none\.?$/i.test(first) ? null : first.replace(/[.!]+$/, "").slice(0, 40);
+    const line = trim(second, 2, 120);
+    let problems = problemsWith(line, {});
+    if (!problems.length && other && problemsWith(other, {}).length) problems = ["the other use contained a link or handle"];
+    if (!problems.length && finding !== "yes" && !other) problems = ["line 1 must name what else it's being used as"];
+    let checks: Record<string, number> = {};
+    if (!problems.length) {
+      const { answers: a } = await ask(
+        `reading, check ${attempt + 1}`,
+        { ...input, other_use: other, reading: line },
+        Object.fromEntries(Object.entries(READING_CHECKS).map(([k, instructions]) => [k, { type: "boolean" as const, instructions }])),
+      );
+      checks = Object.fromEntries(Object.entries(a).map(([k, v]) => [k, (v as { probability: number }).probability]));
+      problems = Object.entries(checks).filter(([, p]) => p > 0.5).map(([k]) => READING_CHECKS[k as keyof typeof READING_CHECKS]);
+    }
+    drafts.push({ text, checks, problems });
+    if (!problems.length) return { finding, other, line, answers: { ...answers, drafts } };
+  }
+  return { finding, other: null, line: formReading(finding, spirit.use), answers: { ...answers, drafts } };
+}
+
+/** What Gary sees of a place's use, as of now. */
+async function spiritOf(db: Db, f: { id: number; plot: number; ground: string | null; intent: string; schedule: Schedule | null; open_sign?: boolean }): Promise<Spirit> {
+  const month = new Date(Date.now() - 30 * 864e5).toISOString();
+  const [{ data: board }, { data: book }, { data: placed }, out] = await Promise.all([
+    db.from("notices").select("line").eq("filing", f.id).eq("ok", true).order("posted_at"),
+    db.from("visits").select("line").eq("filing", f.id).eq("ok", true).gte("at", month).order("at", { ascending: false }).limit(12),
+    db.from("placements").select("id, prop, label, label_ok, parent").eq("filing", f.id).eq("room", "in").is("impounded_at", null).order("id"),
+    survey(db, f),
+  ]);
+  const things = (placed ?? []) as { id: number; prop: string; label: string | null; label_ok: boolean | null; parent: number | null }[];
+  const name = (p: (typeof things)[number]) => (p.prop !== "item" ? p.prop.replace(/_/g, " ") : p.label_ok ? p.label! : "an unlabelled parcel");
+  const byId = new Map(things.map((p) => [p.id, p]));
+  return {
+    use: useOf(f),
+    open: !!f.open_sign,
+    board: (board ?? []).map((n) => n.line),
+    book: (book ?? []).map((v) => v.line),
+    outside: out.things,
+    beside: out.beside,
+    inside: things.map((p) => (p.parent && byId.has(p.parent) ? `${name(p)}, in or on the ${name(byId.get(p.parent)!)}` : name(p))),
+  };
+}
+
+/** Read a notice or a line in the visitors' book before anyone else sees it. Same test as an item's name. */
+async function readLine(db: Db, table: "notices" | "visits", id: number): Promise<Response> {
+  const { data: r } = await db.from(table).select("line, ok").eq("id", id).maybeSingle();
+  if (!r || r.ok !== null) return Response.json({ skipped: true });
+  const what = table === "notices" ? "notice someone has pinned on the what's-on board by their door" : "line someone has written in a visitors' book";
+  const { answers } = await ask(table === "notices" ? "notice" : "visitors' book", { line: r.line }, {
+    unacceptable: { type: "boolean", instructions: UNFIT(what) },
+  });
+  const ok = answers.unacceptable.probability <= 0.5;
+  await db.from(table).update({ ok, checked: answers }).eq("id", id).is("ok", null);
+  return Response.json({ ok });
+}
+
+/** Read one place's use. The same evidence never gets a second reading, only a fresh date. */
+async function readPlace(db: Db, id: number): Promise<Response> {
+  const { data: f } = await db.from("filings").select("*").eq("id", id).single();
+  if (!f || !["approved", "conditional"].includes(f.status) || f.boarded_at) return Response.json({ skipped: true });
+  const spirit = await spiritOf(db, f);
+  const at = new Date().toISOString();
+  const { data: last } = await db.from("readings").select("evidence").eq("filing", id).order("id", { ascending: false }).limit(1).maybeSingle();
+  if (last && stable(last.evidence) === stable(spirit)) {
+    await db.from("filings").update({ read_at: at }).eq("id", id);
+    return Response.json({ skipped: "unchanged" });
+  }
+  const { finding, other, line, answers } = await readUse(spirit);
+  await db.from("readings").insert({ filing: id, at, use: spirit.use, verdict: finding, other, line, evidence: spirit, answers });
+  await db.from("filings")
+    .update({ reading: line, read_at: at, drift: finding === "drifted" ? (other ?? "something else") : null })
+    .eq("id", id).in("status", ["approved", "conditional"]);
+  return Response.json({ finding, other, line });
+}
+
+/**
+ * For slice C's change of use: what Gary had made of the place as of a moment
+ * (when the change of use was filed; now if not given). Filed before he found
+ * it drifted (drifted false), a mixed use may be granted ("the studio's doing
+ * teas on Saturdays"); after, it's a change of use without permission, dearer.
+ * `to` is what it had drifted to, `mostly` what else was going on.
+ */
+export async function driftOf(db: Db, filing: number, asOf?: string) {
+  const { data } = await db.from("readings").select("at, verdict, other, line")
+    .eq("filing", filing).lte("at", asOf ?? new Date().toISOString()).in("verdict", ["yes", "mostly", "drifted"])
+    .order("id", { ascending: false }).limit(1).maybeSingle();
+  return {
+    drifted: data?.verdict === "drifted",
+    to: data?.verdict === "drifted" ? (data.other as string | null) : null,
+    mostly: data?.verdict === "mostly" ? (data.other as string | null) : null,
+    reading: (data?.line as string | undefined) ?? null,
+    at: (data?.at as string | undefined) ?? null,
+  };
+}
+
+export type SpiritBody = { notice?: number; visit?: number; reading?: number };
+
+/** The spirit's share of the in-tray, or null if it isn't for us. */
+function spiritDesk(db: Db, body: SpiritBody): Promise<Response> | null {
+  if (body.notice) return readLine(db, "notices", body.notice);
+  if (body.visit) return readLine(db, "visits", body.visit);
+  if (body.reading) return readPlace(db, body.reading);
+  return null;
+}
+
 export const deskDb = () =>
   createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SECRET_KEY!, {
     db: { schema: "the_commons" },
@@ -1129,14 +1911,25 @@ export async function POST(req: Request): Promise<Response> {
 /** Whatever's landed in the in-tray. */
 export async function desk(
   db: Db,
-  body: { id?: number; inspect?: number; item?: number; committee?: number; committee_appeal?: number; audit?: number; appeal?: number },
+  body: {
+    id?: number; inspect?: number; item?: number; committee?: number; committee_appeal?: number; audit?: number; appeal?: number;
+    variation?: number; committee_variation?: number; letter?: number; tag?: number;
+    sign?: number;
+  } & SpiritBody,
 ): Promise<Response> {
+  const spirit = spiritDesk(db, body);
+  if (spirit) return spirit;
+  if (body.letter) return round(db, body.letter);
+  if (body.tag) return answered(db, body.tag);
   if (body.inspect) return inspectPlot(db, body.inspect);
   if (body.appeal) return hearAppeal(db, body.appeal);
   if (body.committee_appeal) return sitAppeal(db, body.committee_appeal);
   if (body.audit) return auditPlot(db, body.audit);
   if (body.item) return readLabel(db, body.item);
+  if (body.sign) return readSign(db, body.sign);
   if (body.committee) return convene(db, body.committee);
+  if (body.variation) return hearVariation(db, body.variation);
+  if (body.committee_variation) return sitVariation(db, body.committee_variation);
   const id = body.id!;
 
   const { data: filing } = await db.from("filings").select("*").eq("id", id).single();
@@ -1158,6 +1951,7 @@ export async function desk(
     })
     .eq("id", id)
     .eq("status", "pending");
+  if (verdict.status === "approved" || verdict.status === "conditional") await scheduleFor(db, id);
 
   return Response.json(verdict);
 }

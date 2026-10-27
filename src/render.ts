@@ -1,10 +1,11 @@
 import { K } from "./content/canon/props.ts";
-import { propCanvas } from "./content/props.ts";
+import { look, propCanvas, propSize } from "./content/props.ts";
 import * as C from "./content/palette.ts";
-import { LANDMARKS, MAP_H, MAP_W, PLOTS, REGIONS, inPlot, type PlotDef } from "./world/index.ts";
+import { LANDMARKS, MAP_H, MAP_W, PLOTS, REGIONS, ZOOM, inPlot, type PlotDef } from "./world/index.ts";
 import type { Boundary } from "./world/types.ts";
 import type { Filing, Placement } from "./net.ts";
 import { mini } from "./closeup.ts";
+import { drawBoarded } from "./spirit.ts";
 import { paintGround } from "./map/ground.ts";
 import { bakeScenery, oakCanopy } from "./map/scenery.ts";
 import { drawBoard, drawHut, drawOak } from "./map/landmarks.ts";
@@ -12,6 +13,7 @@ import { hash, keep } from "./map/noise.ts";
 import { critters, drawAir, drawNight, drawUnder } from "./life.ts";
 import { drawAvatar, type Avatar } from "./avatar.ts";
 import { dark, glow, grade, hourNow } from "./light.ts";
+import { drawMapTag, drawPound, isRed, type Tag } from "./letter.ts";
 
 export const INK = K;
 export const FENCE = C.PLANK[1];
@@ -37,6 +39,8 @@ export interface Scene {
   letters: Letter[];
   t: number; // Date.now(), for the commons' own life
   recent: number[]; // newest granted plots, newest first: where Gary goes to look
+  tags?: Map<number, Tag[]>; // filing id -> Gary's tags on it (the letter)
+  pound?: number; // how many things are in the pound at his hut
 }
 
 /**
@@ -237,6 +241,7 @@ function drawPlot(ctx: CanvasRenderingContext2D, p: PlotDef, f: Filing | undefin
     return notice(ctx, p);
   }
   if (BUILT.includes(f.status)) ctx.drawImage(mini(p, f, built), p.x, p.y);
+  if (f.boarded_at) drawBoarded(ctx, p); // the spirit: boarded up for disuse
   boundary(ctx, p, style, mine);
   permit(ctx, p);
   if (mine) pennant(ctx, p, colourOf(f.filer));
@@ -247,6 +252,26 @@ function highlight(ctx: CanvasRenderingContext2D, id: number, colour: string) {
   if (!p) return;
   ctx.fillStyle = colour;
   for (const a of outlineOf(p).around) ctx.fillRect(a.x, a.y, 1, 1);
+}
+
+// --- the letter: red tags on things, the pound by the hut (src/letter.ts) ------
+
+/** Where the pound stands: just east of Gary's hut. */
+const POUND = { x: LANDMARKS.office.x + LANDMARKS.office.w + 2, y: LANDMARKS.office.y + LANDMARKS.office.h - 5 };
+
+/** A red tag at the top corner of each tagged thing, one map pixel a cell. */
+function mapTags(ctx: CanvasRenderingContext2D, scene: Scene) {
+  for (const f of scene.held.values()) {
+    const red = scene.tags!.get(f.id)?.filter(isRed);
+    if (!red?.length) continue;
+    const p = PLOTS.find((q) => q.id === f.plot)!;
+    const ps = scene.built.get(f.id) ?? NONE;
+    for (const t of red) {
+      const thing = ps.find((x) => x.id === t.placement);
+      if (!thing || thing.room === "in" || thing.parent) continue; // inside: shown up close
+      drawMapTag(ctx, p.x + thing.x + Math.ceil(propSize(look(thing)).w / ZOOM) - 1, p.y + thing.y);
+    }
+  }
 }
 
 // --- residents ---------------------------------------------------------------
@@ -277,6 +302,7 @@ export function draw(ctx: CanvasRenderingContext2D, scene: Scene) {
     const f = scene.held.get(p.id);
     drawPlot(ctx, p, f, f ? (scene.built.get(f.id) ?? NONE) : NONE, scene.me);
   }
+  if (scene.tags) mapTags(ctx, scene);
   if (scene.hover !== null && scene.hover !== scene.selected) highlight(ctx, scene.hover, "#ffffff70");
   if (scene.selected !== null) highlight(ctx, scene.selected, "#fff8e0");
 
@@ -285,6 +311,7 @@ export function draw(ctx: CanvasRenderingContext2D, scene: Scene) {
     { y: LANDMARKS.office.y + LANDMARKS.office.h, draw: () => drawHut(ctx, scene.t, lamps) },
     { y: LANDMARKS.board.y + LANDMARKS.board.h, draw: () => drawBoard(ctx) },
     { y: LANDMARKS.oak.y + LANDMARKS.oak.h, draw: () => drawOak(ctx) },
+    ...(scene.pound ? [{ y: POUND.y + 5, draw: () => drawPound(ctx, POUND.x, POUND.y, scene.pound!) }] : []),
     ...critters(ctx, scene.t, scene.recent),
     ...scene.walkers.map((w) => ({ y: w.y, draw: () => drawWalker(ctx, w, scene.look(w.id), w.id === scene.me, scene.t) })),
   ];

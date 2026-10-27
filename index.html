@@ -66,6 +66,17 @@
       .condition { background: #fbf4dc; border: 1px dashed #c9b88f; padding: 4px 8px; margin: 8px 0; }
       .where { margin-top: -4px; font-style: italic; }
 
+      /* The letter (src/letter.ts): Gary's questionnaire, red tags, the pound. */
+      .letter .form-no { margin: 0 0 2px; font-size: 10px; text-transform: uppercase; letter-spacing: .14em; color: #7a6a8a; }
+      .letter .questionnaire.here { border: 2px solid #b07a1e; }
+      .letter .red { border-color: #c8473c; }
+      #pound { top: 50%; left: 50%; width: 300px; transform: translate(-50%, -50%) rotate(.4deg); animation: pop .18s ease-out; }
+      #pound ul { list-style: none; padding: 0; margin: 8px 0; }
+      #pound li { display: flex; align-items: center; gap: 8px; margin: 6px 0; }
+      #pound li img { image-rendering: pixelated; width: 32px; }
+      #pound li > span { flex: 1; }
+      #pound .reclaim { margin: 0; }
+
       /* An unclaimed plot's particulars, as a schedule to a deed. */
       #card:has(.schedule) { width: 330px; }
       .schedule .form-no { display: flex; justify-content: space-between; margin: 0 0 4px; font-size: 10px;
@@ -86,6 +97,13 @@
       .intent { display: block; font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: #7a6a8a; margin-top: 10px; }
       .intent textarea { margin-top: 3px; text-transform: none; letter-spacing: normal; color: #402e3a; font-size: 14px; }
       .condition .stamp { margin: 2px 6px 2px 0; }
+      /* A permit's schedule (src/permit.ts). */
+      .works { border-top: 3px double #402e3a; border-bottom: 1px solid #c9b88f; margin: 8px 0; padding: 6px 0 4px; }
+      .works dl { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; font-size: 12px; }
+      .works dt { color: #7a6a8a; text-transform: uppercase; font-size: 10px; letter-spacing: .08em; line-height: 17px; }
+      .works dd { margin: 0; line-height: 17px; }
+      .works i { color: #7a6a8a; }
+      .vary select { font: inherit; margin-left: 6px; }
 
       #bubble { padding: 6px 10px; max-width: 240px; transform: translate(-50%, -100%); font-size: 13px;
                 border-radius: 2px; pointer-events: none; animation: pop .15s ease-out; }
@@ -140,6 +158,22 @@
       #tabs { display: none; }
       #tool-line { display: flex; gap: 12px; margin: 0 0 6px; font-size: 12px; }
       #tool-line p { margin: 0; }
+
+      /* Inside a place (src/interior.ts). */
+      #go-in { position: absolute; top: 12px; right: 12px; margin: 0; }
+      #room { position: absolute; inset: 0; pointer-events: none; }
+      #room > * { pointer-events: auto; }
+      #room-leave { position: absolute; top: 12px; left: 12px; margin: 0; }
+      #room-info { top: 54px; left: 12px; width: 240px; transform: rotate(-.4deg); }
+      #room-tools { bottom: 12px; left: 50%; transform: translateX(-50%); max-width: calc(100% - 24px); padding: 8px 10px; }
+      #room-tools .line { display: flex; gap: 12px; margin: 0 0 6px; font-size: 12px; }
+      #room-tools .line p { margin: 0; }
+      #room-palette { display: flex; flex-wrap: wrap; gap: 4px; }
+      #room-palette button { margin: 0; min-width: 36px; height: 36px; padding: 2px 4px; background: #fffdf3; box-shadow: none;
+                             display: grid; place-items: center; font-weight: normal; font-size: 12px; }
+      #room-palette button:hover { background: #fff4c9; }
+      #room-palette button.on { background: #ffe9a8; box-shadow: inset 0 0 0 2px #402e3a; }
+      #room-palette img { image-rendering: pixelated; }
 
       /* Phones: papers out of the way of the map, and the toolbar one swipeable row. */
       @media (max-width: 600px), (max-height: 500px) {
@@ -261,10 +295,19 @@
       <section id="build" hidden>
         <div id="labels"></div>
         <button id="leave">← Back to the commons</button>
+        <button id="go-in" hidden>Go inside →</button>
         <div id="build-info" class="paper"></div>
         <div id="tools" class="paper">
           <div id="tool-line"><p id="tool-hint" class="hint"></p><p id="build-problem" class="problem"></p></div>
           <div id="palette"></div>
+        </div>
+      </section>
+      <section id="room" hidden>
+        <button id="room-leave">← Back outside</button>
+        <div id="room-info" class="paper"></div>
+        <div id="room-tools" class="paper" hidden>
+          <div class="line"><p id="room-hint" class="hint"></p><p id="room-problem" class="problem"></p></div>
+          <div id="room-palette"></div>
         </div>
       </section>
       <div id="board" hidden></div>

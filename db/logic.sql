@@ -111,10 +111,40 @@ end $$;
 create trigger filings_ground_built before update of ground on the_commons.filings
   for each row execute function the_commons.ground_built();
 
+-- --- Inside and in things (slice B) ------------------------------------------
+-- A placement is outdoors on the plot (room 'out'), inside the shell's room
+-- (room 'in'), or in or on another thing (parent; x is the slot, y is 0).
+-- The room is sized off the shell as src/interior.ts roomSize() has it: rows
+-- 0-4 are the back wall, the rest the floor. A thing in a thing is in the same
+-- room as its holder, on the same filing, and the holder isn't in anything
+-- itself, nor is anything in a thing that's put in another: nesting stops there.
+create function the_commons.room_size(jsonb) returns int[]
+language sql immutable set search_path = '' as $$
+  select array[least(44, greatest(8, ($1 ->> 'w')::int * 2)), least(32, greatest(6, ($1 ->> 'h')::int * 2) + 5)]
+$$;
+grant execute on function the_commons.room_size(jsonb) to anon, authenticated;
+
+-- Whether a placement (id, filing, room, parent, x, y) may stand where it says.
+-- Positional parameters, so a column ever added can't shadow them.
+create function the_commons.placeable(bigint, bigint, text, bigint, int, int) returns boolean
+language sql stable security definer set search_path = '' as $$
+  select case
+    when $4 is not null then $6 = 0
+      and exists (select 1 from the_commons.placements h
+        where h.id = $4 and h.filing = $2 and h.room = $3 and h.parent is null and h.id <> $1)
+      and not exists (select 1 from the_commons.placements c where c.parent = $1)
+    when $3 = 'in' then exists (select 1 from the_commons.filings f
+      where f.id = $2 and f.shell is not null
+        and $5 < (the_commons.room_size(f.shell))[1] and $6 < (the_commons.room_size(f.shell))[2])
+    else exists (select 1 from the_commons.filings f where f.id = $2 and the_commons.in_plot(f.plot, $5, $6))
+  end
+$$;
+grant execute on function the_commons.placeable(bigint, bigint, text, bigint, int, int) to anon, authenticated;
+
 -- Placements: what's been built. Only on a plot you hold outright (approved or
 -- conditional) — building needs no paperwork, which Gary finds difficult. x/y
 -- are build cells of the plot's box, one per map pixel, and the anchor must be
--- on the plot itself (in_plot). One prop anchored per cell; uncapped otherwise. The prop is
+-- on the plot itself (in_plot), or inside or in things (placeable, above). One prop anchored per cell; uncapped otherwise. The prop is
 -- free text so new art is a client change; RLS can't judge art, only ownership.
 create policy "placements are public"
   on the_commons.placements for select using (true);
@@ -122,19 +152,19 @@ create policy "build on your own granted plot"
   on the_commons.placements for insert to authenticated
   with check (exists (select 1 from the_commons.filings f
     where f.id = filing and f.filer = auth.uid() and f.status in ('approved', 'conditional')
-      and the_commons.in_plot(f.plot, x, y)));
+      and the_commons.placeable(id, filing, room, parent, x, y)));
 create policy "move things about on your plot"
   on the_commons.placements for update to authenticated
   using (exists (select 1 from the_commons.filings f
     where f.id = filing and f.filer = auth.uid()))
   with check (exists (select 1 from the_commons.filings f
-    where f.id = filing and f.filer = auth.uid() and the_commons.in_plot(f.plot, x, y)));
+    where f.id = filing and f.filer = auth.uid() and the_commons.placeable(id, filing, room, parent, x, y)));
 create policy "take down what's on your plot"
   on the_commons.placements for delete to authenticated
   using (exists (select 1 from the_commons.filings f
     where f.id = filing and f.filer = auth.uid()));
 grant select on the_commons.placements to anon, authenticated;
-grant insert (filing, x, y, prop, label, size), update (x, y, size), delete on the_commons.placements to authenticated;
+grant insert (filing, x, y, prop, label, size, room, parent), update (x, y, size, room, parent), delete on the_commons.placements to authenticated;
 grant all on the_commons.placements to service_role;
 
 -- Anything built, moved or taken down marks the plot as changed, for Gary.
@@ -354,6 +384,21 @@ begin
       end if;
       continue;
     end if;
+    -- A shell's sign (slice A): read until it's ruled on, changed or taken down.
+    if m.message ? 'sign' then
+      if m.read_ct > 20 or not exists (select 1 from the_commons.filings
+          where id = (m.message->>'sign')::bigint and shell->>'sign' is not null and shell->>'sign_ok' is null) then
+        perform pgmq.delete('the_commons_gary', m.msg_id);
+      else
+        perform net.http_post(
+          url := 'https://the-commons-eosin.vercel.app/api/gary',
+          body := jsonb_build_object('sign', (m.message->>'sign')::bigint),
+          headers := jsonb_build_object('Content-Type', 'application/json',
+                                        'Authorization', 'Bearer ' || secret),
+          timeout_milliseconds := 30000);
+      end if;
+      continue;
+    end if;
     select * into f from the_commons.filings where id = (m.message->>'id')::bigint;
     if f.id is null or f.status <> 'pending' then
       perform pgmq.delete('the_commons_gary', m.msg_id);
@@ -484,6 +529,691 @@ begin
 end $$;
 revoke execute on function the_commons.convene() from public, anon, authenticated;
 select cron.schedule('the_commons_committee', '0 4 * * *', 'select the_commons.convene()');
+
+-- --- Gary's schedule (slice C): pieces, variations, storage ---------------------
+-- Placed after the cron reset above, so its jobs survive it.
+
+-- A thing's name as compared: norm() in src/schedule.ts.
+create function the_commons.norm(text) returns text
+language sql immutable set search_path = '' as $$
+  select regexp_replace(regexp_replace(lower(btrim($1)), '\s+', ' ', 'g'), '^(a|an|the|some) ', '')
+$$;
+grant execute on function the_commons.norm(text) to anon, authenticated;
+
+-- Pieces Gary has drawn for schedules: anyone's client draws a fitting from them.
+create policy "pieces are public" on the_commons.pieces for select using (true);
+grant select on the_commons.pieces to anon, authenticated;
+grant all on the_commons.pieces to service_role;
+
+-- A written-in item by a name Gary drew for a schedule goes up drawn and read:
+-- he wrote the name himself. Fires after known_item (triggers go by name), and
+-- leaves alone a name he's already read either way.
+create function the_commons.piece_item() returns trigger
+language plpgsql security definer set search_path = '' as $$
+declare s jsonb;
+begin
+  if new.label_ok is not null or new.sprite is not null then return new; end if;
+  select p.sprite into s from the_commons.pieces p where p.name = the_commons.norm(new.label) and p.sprite is not null;
+  if s is not null then
+    new.label_ok := true;
+    new.sprite := s;
+  end if;
+  return new;
+end $$;
+revoke execute on function the_commons.piece_item() from public, anon, authenticated;
+create trigger placements_piece before insert on the_commons.placements
+  for each row when (new.label is not null) execute function the_commons.piece_item();
+
+-- Variations: the holder of a granted plot goes back to Gary, one at a time.
+create function the_commons.can_vary(bigint) returns boolean
+language sql stable security definer set search_path = '' as $$
+  select exists (select 1 from the_commons.filings f where f.id = $1 and f.filer = auth.uid() and f.status in ('approved', 'conditional'))
+    and not exists (select 1 from the_commons.variations v where v.filing = $1 and v.status in ('pending', 'committee'))
+$$;
+grant execute on function the_commons.can_vary(bigint) to authenticated;
+
+create policy "heard variations are public; your own are yours"
+  on the_commons.variations for select
+  using (ok or filer = auth.uid());
+create policy "vary your own permit"
+  on the_commons.variations for insert to authenticated
+  with check (filer = auth.uid() and not coalesce((auth.jwt() ->> 'is_anonymous')::boolean, false)
+    and the_commons.can_vary(filing));
+grant select on the_commons.variations to anon, authenticated;
+grant insert (filing, kind, what, room, tag) on the_commons.variations to authenticated;
+grant all on the_commons.variations to service_role;
+
+-- Their own in-tray, drained like Gary's: until heard, backing off to hourly
+-- after five tries, lost in the post after two days.
+select pgmq.create('the_commons_variations')
+  where not exists (select 1 from pgmq.list_queues() where queue_name = 'the_commons_variations');
+
+create function the_commons.enqueue_variation() returns trigger
+language plpgsql security definer set search_path = '' as $$
+begin
+  perform pgmq.send('the_commons_variations', jsonb_build_object('variation', new.id));
+  return new;
+end $$;
+revoke execute on function the_commons.enqueue_variation() from public, anon, authenticated;
+create trigger variations_enqueue after insert on the_commons.variations
+  for each row execute function the_commons.enqueue_variation();
+
+create function the_commons.drain_variations() returns void
+language plpgsql security definer set search_path = '' as $$
+declare
+  m record;
+  v the_commons.variations;
+  secret text;
+begin
+  select decrypted_secret into secret from vault.decrypted_secrets where name = 'the_commons_gary';
+  if secret is null then return; end if;
+  for m in select * from pgmq.read('the_commons_variations', 120, 10) loop
+    select * into v from the_commons.variations where id = (m.message->>'variation')::bigint;
+    if v.id is null or v.status <> 'pending' then
+      perform pgmq.delete('the_commons_variations', m.msg_id);
+    elsif m.read_ct > 53 then
+      update the_commons.variations
+        set status = 'denied', heard_at = now(), ok = true,
+            reply = 'Your variation appears to have been lost in the post. These things happen.'
+        where id = v.id and status = 'pending';
+      perform pgmq.delete('the_commons_variations', m.msg_id);
+    else
+      if m.read_ct > 5 then perform pgmq.set_vt('the_commons_variations', m.msg_id, 3600); end if;
+      perform net.http_post(
+        url := 'https://the-commons-eosin.vercel.app/api/gary',
+        body := jsonb_build_object('variation', v.id),
+        headers := jsonb_build_object('Content-Type', 'application/json',
+                                      'Authorization', 'Bearer ' || secret),
+        timeout_milliseconds := 30000);
+    end if;
+  end loop;
+end $$;
+revoke execute on function the_commons.drain_variations() from public, anon, authenticated;
+select cron.schedule('the_commons_variations', '5 seconds', 'select the_commons.drain_variations()');
+
+-- Material variations go to the committee's 4am sitting, alongside convene().
+create function the_commons.convene_variations() returns int
+language plpgsql security definer set search_path = '' as $$
+declare
+  secret text;
+  v record;
+  n int := 0;
+begin
+  select decrypted_secret into secret from vault.decrypted_secrets where name = 'the_commons_gary';
+  if secret is null then return 0; end if;
+  for v in select id from the_commons.variations where status = 'committee' loop
+    n := n + 1;
+    perform net.http_post(
+      url := 'https://the-commons-eosin.vercel.app/api/gary',
+      body := jsonb_build_object('committee_variation', v.id),
+      headers := jsonb_build_object('Content-Type', 'application/json',
+                                    'Authorization', 'Bearer ' || secret),
+      timeout_milliseconds := 30000);
+  end loop;
+  return n;
+end $$;
+revoke execute on function the_commons.convene_variations() from public, anon, authenticated;
+select cron.schedule('the_commons_committee_variations', '0 4 * * *', 'select the_commons.convene_variations()');
+
+-- --- the letter (slice D) -----------------------------------------------------
+-- Gary's rounds against the schedule: he asks about anything built that isn't
+-- on it (tags), the holder answers, /api/gary rules (explained: ancillary, on
+-- the schedule; not: a red tag with a date). Past the date it goes to the
+-- pound at his hut, and the holder can get it back (reclaim). A thing nobody's
+-- asked about for a week gets a Certificate of Lawfulness. Separate from the
+-- audit (send_auditor), which still holds plots to their intent and condition,
+-- and is all there is for filings granted before schedules.
+
+-- Whether a thing is on the schedule: src/schedule.ts scheduled(), in SQL. A null schedule holds nothing.
+create function the_commons.on_schedule(s jsonb, p_prop text, p_label text, p_room text) returns boolean
+language sql immutable set search_path = '' as $$
+  select s is null or p_room = 'store' or exists (select 1 from jsonb_array_elements(coalesce(s->'fittings', '[]')) f
+    where f->>'where' = coalesce(p_room, 'out')
+      and case when p_prop = 'item' then f->>'key' = 'item' and the_commons.norm(f->>'name') = the_commons.norm(p_label)
+               else f->>'key' = p_prop end)
+$$;
+
+-- What Gary calls a thing, bare: "hot tub", "lobster". Mirrors thingName() in src/letter.ts.
+create function the_commons.thing_name(p_prop text, p_label text) returns text
+language sql immutable set search_path = '' as $$
+  select case when p_prop = 'item' then regexp_replace(btrim(coalesce(p_label, 'parcel')), '^(a|an|the|some)\s+', '', 'i')
+              else replace(p_prop, '_', ' ') end
+$$;
+
+-- Add a fitting to a filing's schedule in one statement, so two at once don't lose one.
+create function the_commons.add_fitting(p_filing bigint, p_fitting jsonb) returns void
+language sql security definer set search_path = '' as $$
+  update the_commons.filings
+    set schedule = jsonb_set(schedule, '{fittings}', coalesce(schedule->'fittings', '[]') || jsonb_build_array(p_fitting))
+    where id = p_filing and schedule is not null
+$$;
+revoke execute on function the_commons.add_fitting(bigint, jsonb) from public, anon, authenticated;
+grant execute on function the_commons.add_fitting(bigint, jsonb) to service_role;
+
+-- Something for /api/gary, now.
+create function the_commons.letter_post(body jsonb) returns void
+language plpgsql security definer set search_path = '' as $$
+declare secret text;
+begin
+  select decrypted_secret into secret from vault.decrypted_secrets where name = 'the_commons_gary';
+  if secret is null then return; end if;
+  perform net.http_post(
+    url := 'https://the-commons-eosin.vercel.app/api/gary',
+    body := body,
+    headers := jsonb_build_object('Content-Type', 'application/json', 'Authorization', 'Bearer ' || secret),
+    timeout_milliseconds := 30000);
+end $$;
+revoke execute on function the_commons.letter_post(jsonb) from public, anon, authenticated;
+
+-- Tags are public: a red tag is for everyone to see. An answer Gary hasn't
+-- read yet is only its writer's. The holder writes the answer, once.
+create policy "tags are public; an unread answer is yours"
+  on the_commons.tags for select
+  using (status <> 'asked' or answer is null
+    or exists (select 1 from the_commons.filings f where f.id = filing and f.filer = auth.uid()));
+create policy "answer Gary"
+  on the_commons.tags for update to authenticated
+  using (status = 'asked' and answer is null
+    and exists (select 1 from the_commons.filings f where f.id = filing and f.filer = auth.uid()))
+  with check (exists (select 1 from the_commons.filings f where f.id = filing and f.filer = auth.uid()));
+grant select on the_commons.tags to anon, authenticated;
+grant update (answer) on the_commons.tags to authenticated;
+grant all on the_commons.tags to service_role;
+
+-- An answer is stamped, and goes straight to Gary's desk; keep_tags() resends any he didn't get.
+create function the_commons.tag_answered() returns trigger
+language plpgsql security definer set search_path = '' as $$
+begin
+  if tg_when = 'BEFORE' then
+    new.answered_at := now();
+    return new;
+  end if;
+  perform the_commons.letter_post(jsonb_build_object('tag', new.id));
+  return null;
+end $$;
+revoke execute on function the_commons.tag_answered() from public, anon, authenticated;
+create trigger tags_answered before update of answer on the_commons.tags
+  for each row when (old.answer is null and new.answer is not null) execute function the_commons.tag_answered();
+create trigger tags_answered_post after update of answer on the_commons.tags
+  for each row when (old.answer is null and new.answer is not null) execute function the_commons.tag_answered();
+
+-- Gary's round: plots with something unscheduled he hasn't asked about (built
+-- at least ten minutes ago, so it isn't mid-build), the latest built first.
+-- Two each time; he doesn't get round to everyone, which is how things get
+-- to be lawful. Asked by a holder, just theirs. Returns how many he's off to.
+create function the_commons.send_rounds(asked_by uuid) returns int
+language plpgsql security definer set search_path = '' as $$
+declare
+  f record;
+  n int := 0;
+begin
+  for f in
+    select g.id from the_commons.filings g
+    where g.status in ('approved', 'conditional') and g.schedule is not null
+      and (asked_by is null or g.filer = asked_by)
+      and exists (select 1 from the_commons.placements p
+        where p.filing = g.id and p.impounded_at is null and (p.prop <> 'item' or p.label_ok)
+          and (asked_by is not null or p.placed_at < now() - interval '10 minutes')
+          and not the_commons.on_schedule(g.schedule, p.prop, p.label, p.room)
+          -- nothing open on it, or on another of the same kind (three geese are one question)
+          and not exists (select 1 from the_commons.tags t where t.filing = g.id and t.status in ('asked', 'tagged', 'filed')
+            and (t.placement = p.id or lower(t.what) = lower(the_commons.thing_name(p.prop, p.label)))))
+    order by g.built_at desc nulls last
+    limit case when asked_by is null then 2 else 10 end
+  loop
+    n := n + 1;
+    perform the_commons.letter_post(jsonb_build_object('letter', f.id));
+  end loop;
+  return n;
+end $$;
+revoke execute on function the_commons.send_rounds(uuid) from public, anon, authenticated;
+
+-- Double-click Gary and he comes round with the schedule too.
+create function the_commons.summon_rounds() returns int
+language sql security definer set search_path = '' as $$
+  select the_commons.send_rounds(auth.uid())
+$$;
+revoke execute on function the_commons.summon_rounds() from public, anon;
+grant execute on function the_commons.summon_rounds() to authenticated;
+
+-- Get something back from the pound: where it was if that's free (or at x, y
+-- if given), with anything that was in or on it. False if the spot's taken:
+-- the client then has it in hand to put down somewhere else.
+create function the_commons.reclaim(p_id bigint, p_x int default null, p_y int default null) returns boolean
+language plpgsql security definer set search_path = '' as $$
+declare
+  p the_commons.placements;
+  plot smallint;
+begin
+  select pl.* into p from the_commons.placements pl join the_commons.filings f on f.id = pl.filing
+    where pl.id = p_id and pl.impounded_at is not null and f.filer = auth.uid() and f.status in ('approved', 'conditional');
+  if p.id is null then return false; end if;
+  select f.plot into plot from the_commons.filings f where f.id = p.filing;
+  if p_x is not null and p.room = 'out' and p.parent is null and not the_commons.in_plot(plot, p_x, p_y) then return false; end if;
+  begin
+    update the_commons.placements set impounded_at = null, x = coalesce(p_x, x), y = coalesce(p_y, y) where id = p_id;
+  exception when unique_violation then
+    return false;
+  end;
+  update the_commons.placements set impounded_at = null where parent = p_id and impounded_at is not null;
+  update the_commons.tags set status = 'returned' where placement = p_id and status = 'impounded';
+  return true;
+end $$;
+revoke execute on function the_commons.reclaim(bigint, int, int) from public, anon;
+grant execute on function the_commons.reclaim(bigint, int, int) to authenticated;
+
+-- Hourly, no models: close tags on things taken down or permitted since,
+-- tag what nobody answered for three days, send on answers Gary didn't get,
+-- impound what's past its date, and certify what nobody's asked about for a week.
+create function the_commons.keep_tags() returns void
+language plpgsql security definer set search_path = '' as $$
+declare
+  t record;
+begin
+  update the_commons.tags set status = 'removed', closed_at = now()
+    where status in ('asked', 'tagged', 'filed') and placement is null;
+
+  update the_commons.tags g set status = 'permitted', closed_at = now()
+    from the_commons.placements p, the_commons.filings f
+    where g.status in ('asked', 'tagged', 'filed') and p.id = g.placement and f.id = g.filing
+      and f.schedule is not null and the_commons.on_schedule(f.schedule, p.prop, p.label, p.room);
+
+  update the_commons.tags set status = 'tagged', due = now() + interval '3 days',
+      reply = 'Nobody answered the questionnaire, so I''ve had to tag it. Take it down or file for it by the date, or it comes to the pound.'
+    where status = 'asked' and answer is null and asked_at < now() - interval '3 days';
+
+  for t in select id from the_commons.tags where status = 'asked' and answered_at < now() - interval '10 minutes' loop
+    perform the_commons.letter_post(jsonb_build_object('tag', t.id));
+  end loop;
+
+  -- Past the date: to the pound, with anything in or on it. One filed for waits on its filing.
+  with gone as (
+    update the_commons.tags set status = 'impounded', closed_at = now()
+    where status = 'tagged' and due < now()
+    returning placement)
+  update the_commons.placements set impounded_at = now()
+    where impounded_at is null and (id in (select placement from gone) or parent in (select placement from gone));
+
+  for t in
+    select p.id, p.filing, p.prop, p.label, p.room
+    from the_commons.placements p join the_commons.filings f on f.id = p.filing
+    where f.status in ('approved', 'conditional') and f.schedule is not null
+      and p.impounded_at is null and p.placed_at < now() - interval '7 days' and (p.prop <> 'item' or p.label_ok)
+      and not the_commons.on_schedule(f.schedule, p.prop, p.label, p.room)
+      and not exists (select 1 from the_commons.tags g where g.placement = p.id and g.asked_at > now() - interval '7 days')
+      and not exists (select 1 from the_commons.tags g where g.filing = p.filing and g.status in ('asked', 'tagged', 'filed')
+        and (g.placement = p.id or lower(g.what) = lower(the_commons.thing_name(p.prop, p.label))))
+  loop
+    perform the_commons.add_fitting(t.filing, jsonb_build_object(
+      'name', case when t.prop = 'item' then btrim(t.label) else the_commons.thing_name(t.prop, t.label) end,
+      'key', t.prop, 'where', t.room, 'how', 'lawful', 'at', now()));
+    insert into the_commons.tags (filing, placement, what, question, status, closed_at, reply)
+      values (t.filing, t.id, the_commons.thing_name(t.prop, t.label), 'Certificate of Lawfulness', 'lawful', now(),
+        'It''s been up a week and nobody''s said anything, so it''s lawful now. It''s on the schedule.');
+  end loop;
+end $$;
+revoke execute on function the_commons.keep_tags() from public, anon, authenticated;
+
+select cron.schedule('the_commons_rounds', '0 */3 * * *', 'select the_commons.send_rounds(null)');
+select cron.schedule('the_commons_tags', '17 * * * *', 'select the_commons.keep_tags()');
+
+do $$
+begin
+  if not exists (select 1 from pg_publication_tables
+      where pubname = 'supabase_realtime' and schemaname = 'the_commons' and tablename = 'variations') then
+    alter publication supabase_realtime add table the_commons.variations;
+  end if;
+end $$;
+do $$
+begin
+  if not exists (select 1 from pg_publication_tables
+      where pubname = 'supabase_realtime' and schemaname = 'the_commons' and tablename = 'tags') then
+    alter publication supabase_realtime add table the_commons.tags;
+  end if;
+end $$;
+-- --- end of the letter --------------------------------------------------------
+
+-- --- retrospective permission (the letter meets the variations) ---------------
+-- Filing for a red-tagged thing is a variation carrying its tag. It's marked
+-- retrospective (dearer: Gary usually attaches a condition) and the tag waits
+-- as 'filed', which keep_tags() never impounds. Granted, the thing joins the
+-- schedule and keep_tags() closes the tag as permitted; denied or refused, the
+-- tag goes back up with a fresh date.
+create function the_commons.retro_variation() returns trigger
+language plpgsql security definer set search_path = '' as $$
+declare
+  t record;
+begin
+  select tg.status, tg.what, p.room into t
+    from the_commons.tags tg left join the_commons.placements p on p.id = tg.placement
+    where tg.id = new.tag and tg.filing = new.filing;
+  if t is null or t.status not in ('asked', 'tagged') then
+    raise exception 'that tag can''t be filed for' using errcode = '42501';
+  end if;
+  new.kind := 'addition';
+  new.retrospective := true;
+  new.room := coalesce(t.room, new.room);
+  return new;
+end $$;
+revoke execute on function the_commons.retro_variation() from public, anon, authenticated;
+create trigger variations_retro before insert on the_commons.variations
+  for each row when (new.tag is not null) execute function the_commons.retro_variation();
+
+create function the_commons.retro_filed() returns trigger
+language plpgsql security definer set search_path = '' as $$
+begin
+  if tg_op = 'INSERT' then
+    update the_commons.tags set status = 'filed' where id = new.tag and status in ('asked', 'tagged');
+  elsif new.status in ('denied', 'refused') then
+    update the_commons.tags set status = 'tagged', due = now() + interval '3 days' where id = new.tag and status = 'filed';
+  end if;
+  return null;
+end $$;
+revoke execute on function the_commons.retro_filed() from public, anon, authenticated;
+create trigger variations_retro_filed after insert or update of status on the_commons.variations
+  for each row when (new.tag is not null) execute function the_commons.retro_filed();
+
+-- --- the spirit ----------------------------------------------------------------
+-- What a place is used for (plans/building-and-enforcement.md, "The spirit").
+-- The holder flips the open sign and pins notices on the what's-on board;
+-- residents who visit sign the book. Lines are read for fitness by /api/gary
+-- before anyone else sees them. Gary reads the use now and then (send_reader),
+-- and a place with nothing going on for a month is boarded up (board_up).
+
+-- The open sign is the holder's, on the same rows as the ground ("paint your own granted plot").
+grant update (open_sign) on the_commons.filings to authenticated;
+
+-- How many notices are on a board, for the insert policy (which can't count its own table under RLS).
+create function the_commons.notices_on(bigint) returns int
+language sql stable security definer set search_path = '' as $$
+  select count(*)::int from the_commons.notices where filing = $1
+$$;
+grant execute on function the_commons.notices_on(bigint) to authenticated;
+
+-- The what's-on board: the holder's notices, a few at a time. Unread or unfit ones are theirs alone.
+create policy "notices are public once read; your own are yours"
+  on the_commons.notices for select
+  using (ok or exists (select 1 from the_commons.filings f where f.id = filing and f.filer = auth.uid()));
+create policy "pin a notice by your own door"
+  on the_commons.notices for insert to authenticated
+  with check (exists (select 1 from the_commons.filings f
+    where f.id = filing and f.filer = auth.uid() and f.status in ('approved', 'conditional'))
+    and the_commons.notices_on(filing) < 8);
+create policy "take down your own notices"
+  on the_commons.notices for delete to authenticated
+  using (exists (select 1 from the_commons.filings f where f.id = filing and f.filer = auth.uid()));
+grant select on the_commons.notices to anon, authenticated;
+grant insert (filing, line), delete on the_commons.notices to authenticated;
+grant all on the_commons.notices to service_role;
+
+-- The visitors' book: a line a day from any resident (not a guest) who isn't
+-- the holder, at a place that's granted and not boarded up.
+create policy "the book is public once read; your own lines are yours"
+  on the_commons.visits for select
+  using (ok or visitor = auth.uid());
+create policy "sign the book"
+  on the_commons.visits for insert to authenticated
+  with check (visitor = auth.uid() and not coalesce((auth.jwt() ->> 'is_anonymous')::boolean, false)
+    and exists (select 1 from the_commons.filings f
+      where f.id = filing and f.filer <> auth.uid() and f.status in ('approved', 'conditional') and f.boarded_at is null));
+grant select on the_commons.visits to anon, authenticated;
+grant insert (filing, line) on the_commons.visits to authenticated;
+grant all on the_commons.visits to service_role;
+
+-- Gary's readings: written only by /api/gary and board_up(); the latest is copied onto the filing.
+create policy "readings are public"
+  on the_commons.readings for select using (true);
+grant select on the_commons.readings to anon, authenticated;
+grant all on the_commons.readings to service_role;
+
+-- Signs of life. The holder flipping the sign stirs the place; and anything
+-- that stirs it or builds on it takes the boards down, notice and all.
+create function the_commons.spirit_stirred() returns trigger
+language plpgsql set search_path = '' as $$
+begin
+  if new.open_sign is distinct from old.open_sign and auth.uid() = new.filer then new.stirred_at := now(); end if;
+  if old.boarded_at is not null and new.boarded_at is not distinct from old.boarded_at
+      and (new.stirred_at is distinct from old.stirred_at or new.built_at is distinct from old.built_at) then
+    new.boarded_at := null;
+    new.quit_by := null;
+    new.quit_for := null;
+  end if;
+  return new;
+end $$;
+-- Named to fire after filings_ground_built, which sets built_at.
+create trigger filings_stirred before update on the_commons.filings
+  for each row execute function the_commons.spirit_stirred();
+
+create function the_commons.spirit_noted() returns trigger
+language plpgsql security definer set search_path = '' as $$
+begin
+  update the_commons.filings set stirred_at = now() where id = coalesce(new.filing, old.filing);
+  return null;
+end $$;
+revoke execute on function the_commons.spirit_noted() from public, anon, authenticated;
+create trigger notices_noted after insert or delete on the_commons.notices
+  for each row execute function the_commons.spirit_noted();
+create trigger visits_noted after insert on the_commons.visits
+  for each row execute function the_commons.spirit_noted();
+
+-- Gary reads the use of a place once it's settled after a change (ten minutes),
+-- or once a week regardless; five at a time. Asked by the holder ("I've put it
+-- back"), he reads theirs now, at most once a minute. Returns how many.
+create function the_commons.send_reader(asked_by uuid) returns int
+language plpgsql security definer set search_path = '' as $$
+declare
+  f record;
+  secret text;
+  n int := 0;
+begin
+  select decrypted_secret into secret from vault.decrypted_secrets where name = 'the_commons_gary';
+  if secret is null then return 0; end if;
+  for f in
+    update the_commons.filings set read_sent = now()
+    where id in (
+      select id from the_commons.filings
+      where status in ('approved', 'conditional') and boarded_at is null
+        and (filer = asked_by and coalesce(read_sent, '-infinity') < now() - interval '1 minute'
+          or asked_by is null and coalesce(read_sent, '-infinity') < now() - interval '10 minutes'
+            and (greatest(built_at, stirred_at) > coalesce(read_at, '-infinity')
+                 and greatest(built_at, stirred_at) < now() - interval '10 minutes'
+              or coalesce(read_at, stamped_at) < now() - interval '7 days'))
+      order by greatest(built_at, stirred_at) desc nulls last limit 5)
+    returning id
+  loop
+    n := n + 1;
+    perform net.http_post(
+      url := 'https://the-commons-eosin.vercel.app/api/gary',
+      body := jsonb_build_object('reading', f.id),
+      headers := jsonb_build_object('Content-Type', 'application/json',
+                                    'Authorization', 'Bearer ' || secret),
+      timeout_milliseconds := 30000);
+  end loop;
+  return n;
+end $$;
+revoke execute on function the_commons.send_reader(uuid) from public, anon, authenticated;
+
+create function the_commons.summon_reader() returns int
+language sql security definer set search_path = '' as $$
+  select the_commons.send_reader(auth.uid())
+$$;
+revoke execute on function the_commons.summon_reader() from public, anon;
+grant execute on function the_commons.summon_reader() to authenticated;
+
+-- Every fifteen seconds: unread notices and book lines to /api/gary (retried
+-- every two minutes, given up after twenty, staying unread and so unseen), then
+-- whatever wants reading.
+create function the_commons.send_spirit() returns void
+language plpgsql security definer set search_path = '' as $$
+declare
+  m record;
+  secret text;
+begin
+  select decrypted_secret into secret from vault.decrypted_secrets where name = 'the_commons_gary';
+  if secret is null then return; end if;
+  for m in
+    with n as (
+      update the_commons.notices set sent_at = now(), tries = tries + 1
+      where id in (select id from the_commons.notices where ok is null and tries < 20
+        and coalesce(sent_at, '-infinity') < now() - interval '2 minutes' order by id limit 10)
+      returning jsonb_build_object('notice', id) as body),
+    v as (
+      update the_commons.visits set sent_at = now(), tries = tries + 1
+      where id in (select id from the_commons.visits where ok is null and tries < 20
+        and coalesce(sent_at, '-infinity') < now() - interval '2 minutes' order by id limit 10)
+      returning jsonb_build_object('visit', id) as body)
+    select body from n union all select body from v
+  loop
+    perform net.http_post(
+      url := 'https://the-commons-eosin.vercel.app/api/gary',
+      body := m.body,
+      headers := jsonb_build_object('Content-Type', 'application/json',
+                                    'Authorization', 'Bearer ' || secret),
+      timeout_milliseconds := 30000);
+  end loop;
+  perform the_commons.send_reader(null);
+end $$;
+revoke execute on function the_commons.send_spirit() from public, anon, authenticated;
+
+-- Disuse, hourly. A granted place with nothing on, nobody in and nothing changed
+-- for thirty days is boarded up, intact. One boarded up whose week's notice has
+-- run out (ask_for_plot) is freed: its filing lost, its plot open to file for,
+-- what was built left on the lost filing. Returns how many of each.
+create function the_commons.board_up() returns jsonb
+language plpgsql security definer set search_path = '' as $$
+declare
+  f record;
+  boarded int := 0;
+  freed int := 0;
+  line text;
+begin
+  line := 'Boarded up. Nothing on, nobody in, and nothing changed in a month. It''s all still there.';
+  for f in
+    update the_commons.filings set boarded_at = now(), open_sign = false, reading = line, read_at = now()
+    where status in ('approved', 'conditional') and boarded_at is null
+      and greatest(stamped_at, built_at, stirred_at) < now() - interval '30 days'
+    returning id, intent, schedule
+  loop
+    boarded := boarded + 1;
+    insert into the_commons.readings (filing, use, verdict, line) values (f.id, coalesce(f.schedule ->> 'use', f.intent), 'boarded', line);
+  end loop;
+  line := 'Freed. Someone asked for the plot, and nobody reopened it in the week''s notice.';
+  for f in
+    update the_commons.filings set status = 'lost', reading = line, read_at = now()
+    where status in ('approved', 'conditional') and boarded_at is not null and quit_by < now()
+    returning id, intent, schedule
+  loop
+    freed := freed + 1;
+    insert into the_commons.readings (filing, use, verdict, line) values (f.id, coalesce(f.schedule ->> 'use', f.intent), 'freed', line);
+  end loop;
+  return jsonb_build_object('boarded', boarded, 'freed', freed);
+end $$;
+revoke execute on function the_commons.board_up() from public, anon, authenticated;
+
+-- A resident asks for a boarded-up plot: its holder gets a week's notice to
+-- reopen it. The plot stays held (filings_plot_held) until board_up() frees it.
+-- Returns when the notice runs out, or null if this plot can't be asked for.
+create function the_commons.ask_for_plot(p_plot smallint) returns timestamptz
+language plpgsql security definer set search_path = '' as $$
+declare
+  due timestamptz;
+begin
+  if auth.uid() is null or coalesce((auth.jwt() ->> 'is_anonymous')::boolean, false) then return null; end if;
+  update the_commons.filings set quit_by = now() + interval '7 days', quit_for = auth.uid()
+    where plot = p_plot and status in ('approved', 'conditional') and boarded_at is not null
+      and quit_by is null and filer <> auth.uid()
+    returning quit_by into due;
+  if due is null then
+    select quit_by into due from the_commons.filings
+      where plot = p_plot and status in ('approved', 'conditional') and boarded_at is not null and filer <> auth.uid();
+  end if;
+  return due;
+end $$;
+revoke execute on function the_commons.ask_for_plot(smallint) from public, anon;
+grant execute on function the_commons.ask_for_plot(smallint) to authenticated;
+
+select cron.schedule('the_commons_spirit', '15 seconds', 'select the_commons.send_spirit()');
+select cron.schedule('the_commons_disuse', '17 * * * *', 'select the_commons.board_up()');
+
+do $$
+declare t text;
+begin
+  foreach t in array array['notices', 'visits'] loop
+    if not exists (select 1 from pg_publication_tables
+        where pubname = 'supabase_realtime' and schemaname = 'the_commons' and tablename = t) then
+      execute format('alter publication supabase_realtime add table the_commons.%I', t);
+    end if;
+  end loop;
+end $$;
+-- --- end of the spirit ---------------------------------------------------------
+-- --- The shell (slice A) -----------------------------------------------------
+-- The holder's building or pen (filings.shell, Shell in src/schedule.ts), put up
+-- under the same policy as painting the ground. Its shape is checked here; the
+-- sign over its door is read by Gary like a written-in label, and his read of it
+-- (sign_ok) is his: a holder's write keeps it while the sign stands, clears it
+-- when the words change, and takes a ruling he's already made on the same words.
+grant update (shell) on the_commons.filings to authenticated;
+
+create function the_commons.shell_built() returns trigger
+language plpgsql security definer set search_path = '' as $$
+declare
+  s jsonb := new.shell;
+  x int; y int; w int; h int;
+  big boolean;
+  known jsonb;
+begin
+  if new.shell is not distinct from old.shell then return new; end if;
+  if (new.shell - 'sign_ok') is distinct from (old.shell - 'sign_ok') then new.built_at := now(); end if;
+  if s is null or coalesce(auth.jwt() ->> 'role', '') = 'service_role' then return new; end if;
+  if jsonb_typeof(s) <> 'object' or jsonb_typeof(s->'x') <> 'number' or jsonb_typeof(s->'y') <> 'number'
+      or jsonb_typeof(s->'w') <> 'number' or jsonb_typeof(s->'h') <> 'number' then
+    raise exception 'That building has no footprint.' using errcode = '23514';
+  end if;
+  x := (s->>'x')::int; y := (s->>'y')::int; w := (s->>'w')::int; h := (s->>'h')::int;
+  big := coalesce(s->>'kind', 'building') = 'enclosure';
+  if coalesce(s->>'kind', 'building') not in ('building', 'enclosure')
+      or w < 3 or h < 3 or w > case when big then 32 else 20 end or h > case when big then 26 else 14 end then
+    raise exception 'That footprint is the wrong size.' using errcode = '23514';
+  end if;
+  if exists (select 1 from generate_series(x, x + w - 1) cx, generate_series(y, y + h - 1) cy
+      where not the_commons.in_plot(new.plot, cx, cy)) then
+    raise exception 'It has to stand on the plot.' using errcode = '23514';
+  end if;
+  if s ? 'sign' and jsonb_typeof(s->'sign') <> 'null'
+      and (jsonb_typeof(s->'sign') <> 'string' or length(btrim(s->>'sign')) not between 1 and 24) then
+    raise exception 'A sign is between 1 and 24 characters.' using errcode = '23514';
+  end if;
+  if nullif(btrim(s->>'sign'), '') is null then
+    s := jsonb_set(s, '{sign}', 'null') || '{"sign_ok": null}';
+  elsif old.shell is not null and old.shell->>'sign' = s->>'sign' then
+    s := s || jsonb_build_object('sign_ok', old.shell->'sign_ok');
+  else
+    select f.shell->'sign_ok' into known from the_commons.filings f
+      where f.id <> new.id and lower(btrim(f.shell->>'sign')) = lower(btrim(s->>'sign'))
+        and jsonb_typeof(f.shell->'sign_ok') = 'boolean'
+      order by (f.shell->>'sign_ok')::boolean desc, f.id
+      limit 1;
+    s := s || jsonb_build_object('sign_ok', coalesce(known, 'null'));
+    if known is null then perform pgmq.send('the_commons_gary', jsonb_build_object('sign', new.id)); end if;
+  end if;
+  new.shell := s;
+  return new;
+end $$;
+revoke execute on function the_commons.shell_built() from public, anon, authenticated;
+create trigger filings_shell_built before update of shell on the_commons.filings
+  for each row execute function the_commons.shell_built();
+
+-- Gary's read of a sign, written only if it's still the sign he read. /api/gary's alone.
+create function the_commons.sign_read(p_id bigint, p_sign text, p_ok boolean) returns boolean
+language sql security definer set search_path = '' as $$
+  with done as (
+    update the_commons.filings set shell = shell || jsonb_build_object('sign_ok', p_ok)
+      where id = p_id and shell->>'sign' = p_sign and shell->>'sign_ok' is null
+      returning 1)
+  select exists (select 1 from done)
+$$;
+revoke execute on function the_commons.sign_read(bigint, text, boolean) from public, anon, authenticated;
+grant execute on function the_commons.sign_read(bigint, text, boolean) to service_role;
 
 -- Realtime, for the tables the map watches.
 do $$
