@@ -15,12 +15,12 @@ its progress file, carry on from the first unticked step.
 | Slice | Branch | Status |
 |---|---|---|
 | foundation | main @ 5368586 | done, pushed, alter applied |
-| A. Outside | `worktree-agent-a7b5ff9fc6bf3cff7` | finished (494c29e), awaiting merge |
+| A. Outside | `worktree-agent-a7b5ff9fc6bf3cff7` | merged into integrate |
 | B. Inside | `worktree-agent-abdb5b75c87a75ea4` | merged into integrate |
 | C. Gary's schedule | `worktree-agent-abdf4488549af27a7` | merged into integrate |
 | D. The letter | `worktree-agent-a2e4e1a742c385faa` | merged into integrate |
 | E. The spirit | `worktree-agent-a723058c2a972b2bb` | merged into integrate |
-| F. The library | `worktree-agent-acc722659ac2419b9` | stopped mid-work (usage limit), was polishing; resume from plans/progress/F-library.md on its branch |
+| F. The library | `worktree-agent-acc722659ac2419b9` | merged into integrate |
 
 ## Integration
 
@@ -33,8 +33,8 @@ seams are wired. Merged so far (tick as done):
 - [x] E: spliced E's whole sections into gary/logic/net; drift notice -> C's fileChangeOfUse, C's change of use clears drift
 - [x] B (e184a33): plot/room/survey each filter to their own placements
 - [x] wire seams C↔D (retrospective via variations.tag + triggers, db/alters/6-retrospective.sql), C↔E (done in E merge); on_schedule() uses norm()
-- [ ] F, then point B/C library seams at it
-- [ ] A, then point B door/finishes, C materials, D questionnaire at it
+- [x] F merged clean; [ ] point B (interior-fittings stand-in) and C (library.ts stand-in, closest()) at FITTINGS/bestFitting
+- [x] A merged (7bb699b); B door -> doorAt, C materials mirror A's keys; D questionnaire still by the gatepost (left as is)
 - [ ] apply alters 3,4,5,6 (A has none) live, push to main, CI reruns logic.sql
 - [ ] verify Vercel bundles api/ runtime imports from src/ (preview or prod)
 
@@ -59,3 +59,4 @@ logic.sql), tick it below.
 - Usage limit hit: A and F stopped mid-work (their worktrees are kept). Next: resume A and F from their progress files, then continue the Integration checklist from E.
 - Resumed A and F. E merged into integrate.
 - A finished (no alters file; logic.sql section 'The shell (slice A)' + a branch in drain_gary for signs, expect conflict). Merge notes: B use doorCell()/doorAt()/shell.windows from src/shell.ts instead of its doorOutside() guess; B filter clicks to outdoor placements up close; D anchor tags with shellBox(); C's schedule material must use A's MATERIALS keys (timber, brick, stone, render, tin, glass, picket, wattle, hedge) — replace src/library.ts stand-in materials; B's finishOf() keys likewise.
+- F finished; A and F merged. Remaining: library seams, apply alters, push, Vercel check.
