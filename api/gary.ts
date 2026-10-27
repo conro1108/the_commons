@@ -1182,7 +1182,7 @@ function keyOf(name: string, where: Where, picked: string | undefined): string {
 }
 
 const shellWords = (kind: ShellKind, material: string | null) =>
-  kind === "none" ? "none" : `${kind === "building" ? "a building" : "an enclosure"}, ${MATERIALS[material ?? ""] ?? "timber"}${kind === "building" ? ", one room" : ""}`;
+  kind === "none" ? "none" : `${kind === "building" ? "a building" : "an enclosure"}, ${(MATERIALS[material ?? ""] ?? "timber").replace(/ \(.*\)$/, "")}${kind === "building" ? ", one room" : ""}`;
 
 /** A written schedule, parsed; problems if it won't do. Code checks it; the model only writes. */
 export function scheduleProblems(raw: string, kind: ShellKind): { shell?: string; fittings?: { name: string; where: Where }[]; problems: string[] } {
@@ -1217,7 +1217,7 @@ export async function writeSchedule(filing: { id: number; intent: string; condit
   const material = keep ? keep.material : kind === "none" ? null : shape.material.choice;
   const input = {
     filing: pad(filing.id), intent: filing.intent, condition: filing.condition ?? null, plot: site.particulars,
-    shell: { kind, material: material && (MATERIALS[material] ?? material), ...(keep && { already_standing: keep.words }) },
+    shell: { kind, material: material && (MATERIALS[material]?.replace(/ \(.*\)$/, "") ?? material), ...(keep && { already_standing: keep.words }) },
     library: LIBRARY.map((p) => p.name),
   };
   const drafts: { text: string; checks: Record<string, number | string>; problems: string[] }[] = [];

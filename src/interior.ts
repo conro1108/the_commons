@@ -8,6 +8,7 @@
 // Room cells are build cells (ZOOM art px). Rows 0..WALL-1 are the back wall,
 // the rest the floor. db/logic.sql's room_size() mirrors roomSize().
 
+import { doorAt } from "./shell.ts";
 import type { Shell } from "./schedule.ts";
 import type { Placement } from "./net.ts";
 import { ZOOM } from "./world/index.ts";
@@ -47,17 +48,14 @@ export type Room = ReturnType<typeof roomSize>;
 /** The room's whole drawing, wall tops and all, in art px. */
 export const roomArt = (r: Room) => ({ w: r.w * ZOOM + PAD * 2, h: r.h * ZOOM + PAD * 2 });
 
-/**
- * SEAM (slice A): the door's cells on the plot, to click from up close. The
- * middle of its side, two cells across; A's shell.ts may put it elsewhere.
- */
+/** The door's cell on the plot, to click from up close: on the wall, where src/shell.ts draws it. */
 export function doorOutside(s: Shell): Cells {
-  const midX = s.x + Math.floor((s.w - 2) / 2), midY = s.y + Math.floor((s.h - 2) / 2);
+  const d = doorAt(s); // where src/shell.ts draws it
   return {
-    n: { x: midX, y: s.y, w: 2, h: 1 },
-    s: { x: midX, y: s.y + s.h - 1, w: 2, h: 1 },
-    e: { x: s.x + s.w - 1, y: midY, w: 1, h: 2 },
-    w: { x: s.x, y: midY, w: 1, h: 2 },
+    n: { x: s.x + d, y: s.y, w: 1, h: 1 },
+    s: { x: s.x + d, y: s.y + s.h - 1, w: 1, h: 1 },
+    e: { x: s.x + s.w - 1, y: s.y + d, w: 1, h: 1 },
+    w: { x: s.x, y: s.y + d, w: 1, h: 1 },
   }[s.door];
 }
 

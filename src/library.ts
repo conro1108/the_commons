@@ -40,9 +40,11 @@ export const LIBRARY: Piece[] = [...PROPS, ...FITTINGS];
 export const pieceOf = (key: string) => LIBRARY.find((p) => p.key === key);
 
 // STAND-IN for A's shell materials.
+// Mirrors MATERIALS in src/shell.ts (which draws them, and so can't be imported by api/): keep the keys in step.
 export const MATERIALS: Record<string, string> = {
-  timber: "timber", brick: "brick", stone: "stone", wattle: "wattle and daub", tin: "corrugated tin", canvas: "canvas",
-  hedge: "living hedge (an enclosure)", paling: "wooden paling (an enclosure)", wire: "wire mesh (an enclosure)",
+  timber: "timber (a building or a rail fence)", brick: "brick (a building or a wall)", stone: "stone (a building or a dry wall)",
+  render: "whitewash and thatch (a building)", tin: "corrugated tin (a building)", glass: "glass (a building: a greenhouse, a conservatory)",
+  picket: "picket fence (an enclosure)", wattle: "wattle hurdles (an enclosure)", hedge: "hedge (an enclosure)",
 };
 
 /** The piece a name plainly is, if any: the same name, or the piece's whole name as its last words ("a rack" for "a weapons rack").
