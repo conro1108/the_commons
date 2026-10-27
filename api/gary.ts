@@ -25,8 +25,8 @@ import { changeUse, isFitting, norm, scheduled, vary, type Addition, type Fate, 
 const JUDGE = "typesafe-ai/jev";
 const SCRIBE = "anthropic/claude-haiku-5.5";
 const CAREFUL = "anthropic/claude-sonnet-5.5"; // the clerk's second go, once Haiku's first has been sent back
+const DRAWER_MODEL = "anthropic/claude-sonnet-5.5"; // no reasoning, but the silhouette planned first: picked by eye over Haiku thinking, and a fifth of the time
 const LIGHT_THINKING = "medium"; // short prose, but some thought keeps it on the facts
-const THINKING = "medium"; // drawing is spatial; worth the wait
 
 // Run inside transcript.run() (the back office does), every model call is
 // written down as it's made: who it went to, what was sent, what came back.
@@ -58,7 +58,7 @@ function ask<const Q extends Record<string, Experimental_DecisionQuestion>>(step
 }
 
 /** A model writes prose from an input: the scribe, unless another's named. */
-function write(step: string, o: { model?: string; reasoning: "low" | "medium" | "high"; system: string; prompt: object; maxOutputTokens: number }) {
+function write(step: string, o: { model?: string; reasoning: "none" | "low" | "medium" | "high"; system: string; prompt: object; maxOutputTokens: number }) {
   const model = o.model ?? SCRIBE;
   return minuted(
     step, model, { system: o.system, prompt: o.prompt },
@@ -1095,7 +1095,8 @@ interface Sprite {
 
 const INK = "#402e3a";
 const DRAWER = `You draw tiny pixel-art sprites for a cosy top-down garden game, seen from slightly above and in front, like a storybook.
-Output only JSON: {"rows": [...], "palette": {...}}. No markdown, no commentary.
+Output only JSON: {"plan": "...", "rows": [...], "palette": {...}}. No markdown, no commentary.
+"plan" comes first: one line describing the silhouette you're about to draw (its overall shape and proportions, the two or three parts that make it recognisable, where they sit). Then draw to that plan.
 "rows" is a character grid, one string per row, top to bottom. "." is transparent. Every other character must be a key in "palette".
 "palette" maps single characters to hex colours "#rrggbb". Use "k" for the outline, always "${INK}", and outline the whole silhouette with it.
 At most 16 wide and 16 tall; small things smaller (a cat is about 8x7, a bench 16x9, a goose 10x12). Rows may be shorter than the widest; they are padded on the right.
@@ -1103,7 +1104,7 @@ At most 6 colours besides the outline. Soft, warm, slightly muted colours. Simpl
 Draw exactly the thing named, alone, with no ground, shadow, text or background.
 
 Example, "duck":
-{"rows":["..kk.....",".kggk....","ookgk....","..kwkkkk.",".kbbbbbbk","..kkkkkk."],"palette":{"k":"${INK}","o":"#f59a3e","g":"#3e8a5a","w":"#f7ecd8","b":"#a97048"}}`;
+{"plan":"a duck in profile facing left: round body low and wide, head up on the left with an orange bill, a pale wing on the back","rows":["..kk.....",".kggk....","ookgk....","..kwkkkk.",".kbbbbbbk","..kkkkkk."],"palette":{"k":"${INK}","o":"#f59a3e","g":"#3e8a5a","w":"#f7ecd8","b":"#a97048"}}`;
 
 /** What's wrong with a drawn sprite, if anything. Code checks it; the model only draws. */
 function spriteProblems(raw: string): { sprite?: Sprite; problems: string[] } {
@@ -1137,10 +1138,11 @@ export async function draw(label: string): Promise<{ sprite: Sprite | null; draf
   for (let i = 0; i < 3; i++) {
     const last = drafts.at(-1);
     const { text } = await write(`sprite, draft ${i + 1}`, {
-      reasoning: THINKING,
+      model: DRAWER_MODEL,
+      reasoning: "none",
       system: DRAWER,
       prompt: last ? { draw: label, rejected: last.text, rejected_because: last.problems } : { draw: label },
-      maxOutputTokens: 16000, // reasoning counts against it; at 8000 it sometimes thought itself out of an answer
+      maxOutputTokens: 2000,
     });
     const { sprite, problems } = spriteProblems(text);
     drafts.push({ text, problems });
