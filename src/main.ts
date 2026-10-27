@@ -180,7 +180,7 @@ const appealableOn = (plot: number) =>
 
 const VOTED = (v: string | null, f: Filing) =>
   !v ? "remarks struck from the record" : v === "approved" ? "in favour" : v === "conditional" ? "in favour, on a condition"
-  : v === "refused" ? "against, as still unfit"
+  : v === "refused" ? "against, as still unfit" : v === "against" ? "against, citing no bylaw" : v === "abstain" ? "abstaining"
   : v === "covenant" ? `against, under the covenant of ${REGIONS[plotOf(f).region].name}` : `against, under Bylaw ${v.slice(1)}`;
 
 /** A referral's night in committee: the clerk's finding, then each member in turn. */

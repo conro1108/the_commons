@@ -25,7 +25,7 @@ const esc = (s: unknown) => String(s).replace(/[&<>"]/g, (c) => `&${{ "&": "amp"
 const pre = (v: unknown) => `<pre>${esc(typeof v === "string" ? v : JSON.stringify(v, null, 2))}</pre>`;
 const pct = (p: number) => `${Math.round(p * 100)}%`;
 const secs = (ms?: number) => (ms === undefined ? "" : `${(ms / 1000).toFixed(1)}s`);
-const bylawName = (n: number | null) => (n === 0 ? "the covenant" : `Bylaw ${n}`);
+const bylawName = (n: number | null) => (n === null ? "no bylaw" : n === 0 ? "the covenant" : `Bylaw ${n}`);
 
 // --- what came of it ----------------------------------------------------------
 
@@ -38,7 +38,7 @@ const conditionOf = (w: { condition: string; wants: string | null } | null) =>
   w ? `<p><span class="k">Condition</span> ${esc(w.condition)}${w.wants ? ` <span class="dim">(met with: ${esc(w.wants)})</span>` : ""}</p>` : "";
 
 const VOTE = (v: string | null) =>
-  v === null ? "struck" : v === "approved" ? "in favour" : v === "conditional" ? "in favour, on condition" : v === "refused" ? "against, as unfit" : `against, under ${v === "covenant" ? "the covenant" : `Bylaw ${v.slice(1)}`}`;
+  v === null ? "struck" : v === "approved" ? "in favour" : v === "conditional" ? "in favour, on condition" : v === "refused" ? "against, as unfit" : v === "against" ? "against, no bylaw" : v === "abstain" ? "abstains" : `against, under ${v === "covenant" ? "the covenant" : `Bylaw ${v.slice(1)}`}`;
 
 const ruled = (r: any) => `${stamp(r.verdict)}${said(r.permit)}${conditionOf(r.written)}`;
 const sat = (r: any) => !r ? `<p>No quorum: fewer than three speeches stood. It sits again tomorrow night.</p>`
