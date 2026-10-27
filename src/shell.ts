@@ -69,6 +69,14 @@ const sideLength = (r: Rect, side: Side) => (side === "n" || side === "s" ? r.w 
 /** Which cell along its side the door is in: the middle. Slice B comes in here. */
 export const doorAt = (s: Rect & { door: Side }) => Math.floor(sideLength(s, s.door) / 2);
 
+/** The plot cell just outside the door, where you stand to go in. */
+export function doorCell(s: Rect & { door: Side }): { x: number; y: number } {
+  const d = doorAt(s);
+  if (s.door === "s") return { x: s.x + d, y: s.y + s.h };
+  if (s.door === "n") return { x: s.x + d, y: s.y - 1 };
+  return { x: s.door === "e" ? s.x + s.w : s.x - 1, y: s.y + d };
+}
+
 /** Windows every three cells along each side, clear of the corners and the door. */
 export function defaultWindows(r: Rect, door: Side): Shell["windows"] {
   const out: Shell["windows"] = [];
