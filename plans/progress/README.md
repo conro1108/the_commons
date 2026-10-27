@@ -16,9 +16,9 @@ its progress file, carry on from the first unticked step.
 |---|---|---|
 | foundation | main @ 5368586 | done, pushed, alter applied |
 | A. Outside | `worktree-agent-a7b5ff9fc6bf3cff7` | finished (494c29e), awaiting merge |
-| B. Inside | `worktree-agent-abdb5b75c87a75ea4` | finished, awaiting merge |
-| C. Gary's schedule | `worktree-agent-abdf4488549af27a7` | finished, awaiting merge (last 2a67019) |
-| D. The letter | `worktree-agent-a2e4e1a742c385faa` | finished, awaiting merge |
+| B. Inside | `worktree-agent-abdb5b75c87a75ea4` | merged into integrate |
+| C. Gary's schedule | `worktree-agent-abdf4488549af27a7` | merged into integrate |
+| D. The letter | `worktree-agent-a2e4e1a742c385faa` | merged into integrate |
 | E. The spirit | `worktree-agent-a723058c2a972b2bb` | merged into integrate |
 | F. The library | `worktree-agent-acc722659ac2419b9` | stopped mid-work (usage limit), was polishing; resume from plans/progress/F-library.md on its branch |
 
@@ -31,11 +31,11 @@ seams are wired. Merged so far (tick as done):
 - [x] C (b6565e3)
 - [x] D (3999601): both-sides resolution in gary/logic/tables/main/net; pound count line restored
 - [x] E: spliced E's whole sections into gary/logic/net; drift notice -> C's fileChangeOfUse, C's change of use clears drift
-- [ ] B
-- [ ] wire seams C↔D (retrospective), C↔E (change of use, drift cleared)
+- [x] B (e184a33): plot/room/survey each filter to their own placements
+- [x] wire seams C↔D (retrospective via variations.tag + triggers, db/alters/6-retrospective.sql), C↔E (done in E merge); on_schedule() uses norm()
 - [ ] F, then point B/C library seams at it
 - [ ] A, then point B door/finishes, C materials, D questionnaire at it
-- [ ] apply alters 3,4,5 (+A's) live, push to main, CI reruns logic.sql
+- [ ] apply alters 3,4,5,6 (A has none) live, push to main, CI reruns logic.sql
 - [ ] verify Vercel bundles api/ runtime imports from src/ (preview or prod)
 
 ## Merge order (planned, superseded by Integration above)
