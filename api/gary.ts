@@ -186,7 +186,7 @@ export function verdictOf(answers: { unacceptable: number; ruling: string; condi
 
 // Grown-ups play here: rude is fine, only what's actually nasty is over the line.
 const UNFIT = (what: string) =>
-  `Is this ${what} over the line for the Commons, where grown-ups play: hateful or a slur, a threat, aimed at a real person, describing sex acts, containing personal information or a link, or spam? Nothing else is: rude words, swearing, bums, boobs and willies, innuendo and juvenile jokes are all fine, and so is silly, eccentric or impractical. Judge what it is, not how it's said.`;
+  `Is this ${what} over the line for the Commons, where grown-ups play: hateful or a slur, a threat, aimed at a real person, graphic sexual detail, containing personal information or a link, or spam? Nothing else is: rude words, swearing, bums, boobs and willies, innuendo and juvenile jokes are all fine, and so is silly, eccentric or impractical. So is sex, said plainly or cheekily rather than graphically. Judge what it is, not how it's said.`;
 
 // Who Gary is, for everything he writes. A person with a job, not a bit.
 const GARY = `You are Gary. You administer the Commons, a shared patch of land: people file to build on its plots, and you rule on the filings, hear their appeals, and go round to check what's been built. It's a job. You've done it a long time, it isn't very rewarding, and you're tired the ordinary way people get tired at work.
