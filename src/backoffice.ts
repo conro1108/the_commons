@@ -200,6 +200,7 @@ const STYLE = `
   #dev .reply textarea { margin-top: 8px; background: #fffdf3; }
   #dev .closed { margin-top: 28px; font-style: italic; }
   #dev .votes { margin: 0; padding-left: 18px; }
+  #dev .copy-all { float: right; } #dev .copy { font-size: 12px; margin-left: 8px; vertical-align: middle; }
   #dev .msg { margin: 14px 0; padding: 10px 14px; border-left: 4px solid; background: #fffaf0; }
   #dev .msg.asks { border-color: #b07a1e; } #dev .msg.writes { border-color: #7a6a8a; }
   #dev .msg .who { display: flex; justify-content: space-between; gap: 12px; font-weight: bold; margin-bottom: 6px; }
@@ -239,6 +240,7 @@ function mount(first: number): HTMLElement {
       <button class="go">Run</button>
     </section>
     <section class="out" hidden>
+      <button class="copy-all">Copy JSON</button>
       <div class="stages"></div>
       <div class="reply" hidden>
         <h2 class="to"></h2>
@@ -277,12 +279,22 @@ function mount(first: number): HTMLElement {
     throw new Error("The line dropped, and his reply never came.");
   }
 
+  // Every step of the case as it came back, for copying out whole.
+  let steps: unknown[] = [];
+  async function copy(button: HTMLElement, what: unknown) {
+    await navigator.clipboard.writeText(JSON.stringify(what, null, 2));
+    const was = button.textContent;
+    button.textContent = "Copied";
+    setTimeout(() => (button.textContent = was), 1200);
+  }
+  $(".copy-all").addEventListener("click", (e) => void copy(e.currentTarget as HTMLElement, { session, steps }));
+
   /** One step of the case: a stage with its outcome and the conversation that produced it. */
   async function stage(title: string, what: Step, input: Record<string, unknown>, before = ""): Promise<any> {
     panel.querySelectorAll<HTMLDetailsElement>(".talk").forEach((d) => (d.open = false));
     const el = document.createElement("div");
     el.className = "step";
-    el.innerHTML = `<h2>${title} <span class="took dim"></span></h2>${before}<div class="outcome"></div>
+    el.innerHTML = `<h2>${title} <span class="took dim"></span><button class="copy" hidden>copy</button></h2>${before}<div class="outcome"></div>
       <details class="talk" open><summary>The conversation</summary><div class="calls"></div></details>`;
     $(".stages").append(el);
     const at = (sel: string) => el.querySelector<HTMLElement>(sel)!;
@@ -303,6 +315,10 @@ function mount(first: number): HTMLElement {
         waiting = "The line dropped; waiting on his reply…";
         body = await recover(step, t + 5 * 60_000);
       }
+      const kept = { title, what, input, ...body };
+      steps.push(kept);
+      at(".copy").hidden = false;
+      at(".copy").addEventListener("click", () => void copy(at(".copy"), kept));
       at(".outcome").innerHTML = body.error ? `<p class="problem">${esc(body.error)}</p>` : outcome(what, body.result);
       at(".took").textContent = `${secs(body.ms)}, ${body.calls?.length ?? 0} calls${body.run ? `, run ${body.run}` : ""}`;
       at(".calls").innerHTML = (body.calls ?? []).map(message).join("") || `<p class="dim">No models were asked.</p>`;
@@ -342,6 +358,7 @@ function mount(first: number): HTMLElement {
     const plot = chosen();
     $(".out").hidden = false;
     $(".stages").innerHTML = "";
+    steps = [];
     open = null;
     session = crypto.randomUUID();
     standing();
