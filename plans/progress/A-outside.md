@@ -11,6 +11,6 @@ Resume from the first unticked step. Notes say what was decided and touched.
 - [x] 7. `src/net.ts`: saveShell section (own `// ---` at the end).
 - [x] 8. `db/logic.sql`: own section: grant update (shell), trigger (holder can't set sign_ok; sign change resets it, reuses a known ruling, enqueues; shell counts as building); drain_gary hook for 'sign'. Done: section "The shell (slice A)" before Realtime; trigger enqueues itself (no after trigger); sign_read() for Gary. No new columns, so no db/alters file. SQL not run anywhere (no local postgres).
 - [x] 9. `api/gary.ts`: readSign section + one-line desk hook; writes via `the_commons.sign_read` rpc (service role only) so it never clobbers a newer shell.
-- [ ] 10. `src/main.ts`: own section: shell tool (drag footprint, material/paint, sign, windows, take down), sign label overlay.
+- [x] 10. `src/main.ts`: section "up close: the shell (slice A)" plus small hooks (imports, HINTS, renderTools, renderPalette adds a Building group last, focusScene, pointer down/move/up, canPlace gets the shell, upsert keeps an in-flight save over echoes, leaveFocus). Tools: build/pen (drag out; drag the shell to move it), windows (click the front wall), door (turns it), take down, material (unless the schedule fixes one), paint, sign form with a status line. No floating DOM label: the sign is lettered in pixels. `materialSwatch` added to shell.ts. Not exercised against the live db.
 - [ ] 11. Look at it (dev page screenshots), tune the art.
 - [ ] 12. `npm run build`, `npm test`, final note.

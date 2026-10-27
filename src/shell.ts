@@ -785,3 +785,25 @@ export function shellMini(ctx: CanvasRenderingContext2D, s: Shell) {
   if (s.door === "s") { const d = s.x + doorAt(s); put(d, s.y + s.h - 2, INK); put(d, s.y + s.h - 1, m.painted ? p[0] : p[1]); }
   if (m.chimney && shape !== "ns") put(s.x + Math.round(s.w * 0.72), top, INK);
 }
+
+/** A square of a material, painted, for the toolbar. */
+export function materialSwatch(material: string, paint: string): HTMLCanvasElement {
+  const c = document.createElement("canvas");
+  c.width = c.height = 12;
+  const ctx = c.getContext("2d")!;
+  const m = MATERIALS[material] ?? MATERIALS[DEFAULT_MATERIAL];
+  const p = (PAINTS[paint] ?? PAINTS[DEFAULT_PAINT]).ramp;
+  for (let y = 0; y < 12; y++)
+    for (let x = 0; x < 12; x++) {
+      ctx.fillStyle = m.kinds.includes("building") ? m.wall(x, y + 1, p) : fenceSwatch(m.fence, x, y);
+      ctx.fillRect(x, y, 1, 1);
+    }
+  return c;
+}
+
+function fenceSwatch(f: Fence, x: number, y: number): string {
+  if (f === "hedge") return C.FOLIAGE[hash(x, y, 3) > 0.6 ? 4 : hash(x, y, 4) > 0.3 ? 3 : 2];
+  if (f === "hurdle") return mod(x + (y >> 1), 2) ? C.PLANK[3] : C.PLANK[1];
+  if (f === "picket") return x % 3 === 2 ? "#9cc070" : y === 3 || y === 8 ? "#d8cfba" : TRIM;
+  return C.PLANK[2];
+}

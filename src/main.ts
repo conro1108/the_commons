@@ -15,6 +15,12 @@ import { VOID, colourOf, draw, letterPhase, type Letter, type Walker } from "./r
 import {
   FOCUS_PAD, SURROUND, canPaint, canPlace, drawFocus, focusSize, land, placementAt, type Cells, type FocusScene,
 } from "./closeup.ts";
+import {
+  DEFAULT_MATERIAL, DEFAULT_PAINT, MATERIALS, PAINTS, defaultWindows, footprintProblem, frontWallAt, kindOf, materialSwatch, materialsFor,
+  onShell, raise, scheduledMaterial, shellKind, windowFits, type Kind as ShellKind,
+} from "./shell.ts";
+import { saveShell } from "./net.ts";
+import type { Shell } from "./schedule.ts";
 import { BOARD_BOX } from "./map/landmarks.ts";
 import { GARY_LINES, garyAt } from "./life.ts";
 import { looksLike } from "./avatar.ts";
@@ -519,6 +525,8 @@ const HINTS: Record<string, string> = {
   move: "Drag things about.",
   remove: `${touch ? "Tap" : "Click"} something to take it down.`,
   item: `${touch ? "Touch, slide and let go" : "Click"} to set it down. Gary reads the label before anyone else does.`,
+  shell: "Drag out where it stands. Drag it to move it. The door faces your gate; Gary reads the sign first.",
+  window: `${touch ? "Tap" : "Click"} the front wall to put a window in, or take one out.`,
 };
 
 function renderBuildInfo() {
@@ -567,6 +575,7 @@ function renderTools(f: Filing) {
     $("tabs").querySelector(`[data-tab="${g.dataset.group}"]`)?.classList.toggle("wanted", !!g.querySelector(".wanted"));
   }
   for (const b of $("tabs").querySelectorAll<HTMLButtonElement>("[data-tab]")) b.classList.toggle("on", b.dataset.tab === openGroup);
+  renderShellTools(f);
 }
 
 const icons = new Map<string, string>();
@@ -624,9 +633,10 @@ function renderPalette() {
     // Anything not in the palette, by name: it goes down as a labelled parcel. What Gary has drawn here, again in a tap.
     group("Write in", drawnHere(focus!).map((d) => button(`item:${esc(d.label)}`, esc(d.label), `<img src="${propCanvas(d.look).toDataURL()}" width="${Math.min(propSize(d.look).w * 2, 40)}" alt="${esc(d.label)}">`)).join("")
       + `<form class="write-in"><input maxlength="24" placeholder="a lobster" aria-label="something of your own" required><button>Use</button></form>`),
+    shellGroupHtml(focus!, group, button),
   ].join("");
   // On a phone the groups are tabs, one open at a time; Tools stays out.
-  const names = ["Ground", ...PALETTE.map((g) => g.group), "Write in"];
+  const names = ["Ground", ...PALETTE.map((g) => g.group), "Write in", ...(shellKindHere(focus!) ? ["Building"] : [])];
   $("tabs").innerHTML = names.map((n) => `<button data-tab="${n}">${n}</button>`).join("");
   for (const b of $("tabs").querySelectorAll<HTMLButtonElement>("[data-tab]")) {
     b.addEventListener("click", () => {
@@ -652,6 +662,7 @@ function renderPalette() {
       renderBuildInfo();
     });
   }
+  bindShellGroup(focus!);
 }
 
 function showPanels() {
@@ -684,6 +695,7 @@ function leaveFocus() {
   focus = null;
   stroke = null;
   drag = null;
+  shellDrag = null;
   selected = null;
   showPanels();
   renderAll();
@@ -879,6 +891,7 @@ function focusScene(f: Filing): FocusScene {
   const mine = f.filer === me && !zoom;
   const ps = built.get(f.id) ?? [];
   const scene: FocusScene = { plot: plotOf(f), filing: f, built: ps, mine: f.filer === me, ghost: null, brush: null, hover: null };
+  shellScene(scene);
   if (!mine || !pointer) return scene;
   const [kind, arg] = tool.split(":");
   if (drag) {
@@ -939,11 +952,11 @@ function takeDown(b: { x: number; y: number }) {
 /** The next size up that fits where it stands, round to the plain one again. */
 async function regrow(b: { x: number; y: number }) {
   if (!focus) return;
-  const plot = plotOf(focus);
+  const plot = plotOf(focus), shell = focus.shell;
   const p = placementAt(built.get(focus.id) ?? [], b.x, b.y);
   if (!p) return;
   const from = p.size ?? 1;
-  const to = SCALES.find((k) => k > from && canPlace(plot, look({ ...p, size: k }), p.x, p.y)) ?? 1;
+  const to = SCALES.find((k) => k > from && canPlace(plot, look({ ...p, size: k }), p.x, p.y, shell)) ?? 1;
   if (to === from) return problem("There isn't room for it any bigger.");
   problem("");
   setPlacement({ ...p, size: to });
@@ -958,7 +971,7 @@ async function placeAt(prop: string, b: { x: number; y: number }, label?: string
   const f = focus!;
   const shape = sized(label ? drawnAs(label) : prop, size);
   const at = propAt(shape, b.x, b.y);
-  if (!canPlace(plotOf(f), shape, at.x, at.y)) return problem("It has to stand on the plot, and not on what's already there.");
+  if (!canPlace(plotOf(f), shape, at.x, at.y, f.shell)) return problem("It has to stand on the plot, and not on what's already there.");
   const result = await place(f.id, at.x, at.y, prop, size, label);
   if (typeof result === "string") return problem(result);
   problem("");
@@ -995,6 +1008,7 @@ canvas.addEventListener("pointerdown", (e) => {
   if (kind === "resize") return void regrow(b);
   if (e.button !== 0) return;
   canvas.setPointerCapture(e.pointerId);
+  if (kind === "shell" || kind === "window") return shellDown(b);
   if (kind === "ground") {
     const before = focus.ground ?? empty(plotOf(focus));
     const at = brushAt(b.x, b.y);
@@ -1031,6 +1045,7 @@ canvas.addEventListener("pointermove", (e) => {
   }
   pointer = b;
   if (stroke) paintTo(brushAt(b.x, b.y));
+  if (shellDrag) shellMove(b);
   if (drag) {
     const { w, h } = propSize(look(drag.p));
     Object.assign(drag, propAt(look(drag.p), b.x - drag.dx + w / 2, b.y - drag.dy + h / 2));
@@ -1038,6 +1053,7 @@ canvas.addEventListener("pointermove", (e) => {
 });
 
 canvas.addEventListener("pointerup", async (e) => {
+  if (shellDrag) return shellUp();
   if (placing) {
     placing = false;
     const at = pointer;
@@ -1062,7 +1078,7 @@ canvas.addEventListener("pointerup", async (e) => {
     const { p, x, y } = drag;
     drag = null;
     if (p.x === x && p.y === y) return;
-    if (focus && !canPlace(plotOf(focus), look(p), x, y)) return problem("It has to stand on the plot, and not on what's already there.");
+    if (focus && !canPlace(plotOf(focus), look(p), x, y, focus.shell)) return problem("It has to stand on the plot, and not on what's already there.");
     setPlacement({ ...p, x, y });
     const err = await move(p.id, x, y);
     if (err) {
@@ -1159,6 +1175,166 @@ canvas.addEventListener("wheel", (e) => {
   closeCard();
   enterFocus(f);
 }, { passive: false });
+
+// --- up close: the shell (slice A) --------------------------------------------
+// The holder's building or pen: drag its footprint out (or drag it to move it),
+// put windows in the front wall, turn the door, choose material and paint, and
+// hang a sign for Gary to read. Drawn by src/shell.ts; saved by saveShell.
+
+let shellDrag: { from: { x: number; y: number }; move: { dx: number; dy: number } | null; draft: Shell | null; problem: string | null } | null = null;
+let shellPick = { material: "", paint: DEFAULT_PAINT }; // what the next one goes up in
+const shellSaving = new Map<number, Shell | null>(); // our save in flight, over any echo of an older one
+
+const shellKindHere = (f: Filing) => shellKind(f.schedule);
+
+/** The material a shell goes up in: Gary's, else what's been chosen, else timber. */
+function shellMaterial(f: Filing, kind: ShellKind): string {
+  const fixed = scheduledMaterial(f.schedule, kind);
+  if (fixed) return fixed;
+  for (const m of [shellPick.material, f.shell?.material]) if (m && MATERIALS[m]?.kinds.includes(kind)) return m;
+  return DEFAULT_MATERIAL;
+}
+
+/** The Building group of the toolbar, or nothing where the schedule has no shell. */
+function shellGroupHtml(f: Filing, group: (name: string, inner: string) => string, button: (t: Tool, title: string, inner: string) => string): string {
+  const kind = shellKindHere(f);
+  if (!kind) return "";
+  const building = kind === "building";
+  const fixed = scheduledMaterial(f.schedule, kind);
+  const paint = f.shell?.paint ?? shellPick.paint;
+  return group("Building",
+    button("shell", building ? "drag out where it stands; drag it to move it" : "drag out the pen; drag it to move it", building ? "build" : "pen")
+    + (building ? button("window", "put a window in the front wall, or take one out", "windows") + `<button data-shell="door" title="turn the door to the next side">door</button>` : "")
+    + `<button data-shell="down" title="take it down">take down</button>`
+    + (fixed ? "" : materialsFor(kind).map((m) =>
+      `<button data-material="${m}" title="${MATERIALS[m].name}"><img src="${materialSwatch(m, paint).toDataURL()}" width="24" alt="${MATERIALS[m].name}"></button>`).join(""))
+    + (building || MATERIALS[shellMaterial(f, kind)].fence === "picket"
+      ? Object.entries(PAINTS).map(([k, p]) => `<button data-paint="${k}" title="${p.name}"><span style="display:inline-block;width:18px;height:18px;border:2px solid #402e3a;background:${p.ramp[2]}"></span></button>`).join("")
+      : "")
+    + `<form class="sign-in write-in"><input maxlength="24" placeholder="what the sign says" aria-label="the sign" value="${esc(f.shell?.sign ?? "")}"><button>Hang</button></form>`
+    + `<span class="meta sign-status"></span>`);
+}
+
+function bindShellGroup(f: Filing) {
+  const pal = $("palette");
+  for (const b of pal.querySelectorAll<HTMLButtonElement>("[data-material]")) b.addEventListener("click", () => restyle({ material: b.dataset.material! }));
+  for (const b of pal.querySelectorAll<HTMLButtonElement>("[data-paint]")) b.addEventListener("click", () => restyle({ paint: b.dataset.paint! }));
+  pal.querySelector<HTMLButtonElement>('[data-shell="door"]')?.addEventListener("click", () => {
+    const s = focus?.shell;
+    if (!s) return problem("Put the building up first.");
+    const door = (["s", "e", "n", "w"] as const)[(["s", "e", "n", "w"].indexOf(s.door) + 1) % 4];
+    void putShell({ ...s, door, windows: defaultWindows(s, door) });
+  });
+  pal.querySelector<HTMLButtonElement>('[data-shell="down"]')?.addEventListener("click", () => {
+    if (!focus?.shell) return;
+    if (confirm(kindOf(focus.shell) === "building" ? "Take the building down? What's inside stays on your plot's books." : "Take the pen down?")) void putShell(null);
+  });
+  const sign = pal.querySelector<HTMLFormElement>(".sign-in");
+  sign?.addEventListener("submit", (e) => {
+    e.preventDefault();
+    const s = focus?.shell;
+    if (!s) return problem("Put it up first, then hang the sign.");
+    const text = sign.querySelector("input")!.value.trim() || null;
+    if (text !== s.sign) void putShell({ ...s, sign: text, sign_ok: null });
+  });
+  void f;
+}
+
+/** Material and paint: for the next one, and for the one that's up. */
+function restyle(change: { material?: string; paint?: string }) {
+  shellPick = { ...shellPick, ...change };
+  const s = focus?.shell;
+  if (s) void putShell({ ...s, ...change });
+  else renderBuildInfo();
+}
+
+/** The toolbar's Building group, as things stand. */
+function renderShellTools(f: Filing) {
+  const pal = $("palette");
+  const s = f.shell;
+  const material = shellKindHere(f) ? shellMaterial(f, s ? kindOf(s) : shellKindHere(f)!) : "";
+  const paint = s?.paint ?? shellPick.paint;
+  for (const b of pal.querySelectorAll<HTMLButtonElement>("[data-material]")) b.classList.toggle("on", b.dataset.material === material);
+  for (const b of pal.querySelectorAll<HTMLButtonElement>("[data-paint]")) b.classList.toggle("on", b.dataset.paint === paint);
+  const status = pal.querySelector(".sign-status");
+  if (status) status.textContent = !s?.sign ? "" : s.sign_ok === null ? "Gary is reading the sign." : s.sign_ok ? "" : "Gary has declined the sign. It hangs blank.";
+}
+
+/** Save the shell, showing it at once and putting it back if the database says no. */
+async function putShell(next: Shell | null) {
+  const f = focus;
+  if (!f) return;
+  const before = f.shell;
+  f.shell = next;
+  shellSaving.set(f.id, next);
+  problem("");
+  renderBuildInfo();
+  const err = await saveShell(f.id, next);
+  shellSaving.delete(f.id);
+  if (err) {
+    f.shell = before;
+    problem(err);
+    renderBuildInfo();
+  }
+}
+
+/** The footprint between two cells, or the shell moved by the drag. */
+function shellDraft(f: Filing, at: { x: number; y: number }): Shell | null {
+  const kind = shellKindHere(f);
+  if (!kind || !shellDrag) return null;
+  const plot = plotOf(f);
+  const cx = Math.floor(at.x / ZOOM), cy = Math.floor(at.y / ZOOM);
+  const prev = f.shell;
+  if (shellDrag.move && prev) {
+    const x = clamp(cx - shellDrag.move.dx, 0, plot.w - prev.w), y = clamp(cy - shellDrag.move.dy, 0, plot.h - prev.h);
+    return raise(plot, kindOf(prev), { x, y, w: prev.w, h: prev.h }, prev, prev.material, prev.paint);
+  }
+  const { x: fx, y: fy } = shellDrag.from;
+  const r = { x: Math.min(fx, cx), y: Math.min(fy, cy), w: Math.abs(cx - fx) + 1, h: Math.abs(cy - fy) + 1 };
+  return raise(plot, kind, r, prev, shellMaterial(f, kind), prev?.paint ?? shellPick.paint);
+}
+
+/** The close-up's view of a shell being dragged out or moved. */
+function shellScene(scene: FocusScene) {
+  if (!shellDrag?.draft) return;
+  scene.shell = { shell: shellDrag.draft, ok: !shellDrag.problem };
+}
+
+/** Pointer down with the shell tools: start a footprint or a move, or put in a window. */
+function shellDown(b: { x: number; y: number }) {
+  const f = focus!;
+  if (tool === "window") {
+    const s = f.shell;
+    const at = s && frontWallAt(s, b.x, b.y);
+    if (!s || at === null) return problem("Click the front wall where you'd like a window.");
+    const has = s.windows.some((w) => w.side === "s" && w.at === at);
+    if (!has && !windowFits(s, "s", at)) return problem("There isn't room for a window there.");
+    return void putShell({ ...s, windows: has ? s.windows.filter((w) => !(w.side === "s" && w.at === at)) : [...s.windows, { side: "s", at }] });
+  }
+  const cx = Math.floor(b.x / ZOOM), cy = Math.floor(b.y / ZOOM);
+  const s = f.shell;
+  shellDrag = { from: { x: cx, y: cy }, move: s && onShell(s, b.x, b.y) ? { dx: cx - s.x, dy: cy - s.y } : null, draft: null, problem: null };
+  shellMove(b);
+}
+
+function shellMove(b: { x: number; y: number }) {
+  const f = focus;
+  if (!f || !shellDrag) return;
+  const draft = shellDraft(f, b);
+  shellDrag.draft = draft;
+  const others = (built.get(f.id) ?? []);
+  shellDrag.problem = draft && footprintProblem(plotOf(f), kindOf(draft), draft, others);
+}
+
+function shellUp() {
+  const drag = shellDrag;
+  shellDrag = null;
+  if (!drag?.draft || !focus) return;
+  if (drag.problem) return problem(drag.problem);
+  const s = drag.draft, was = focus.shell;
+  if (was && s.x === was.x && s.y === was.y && s.w === was.w && s.h === was.h) return;
+  void putShell(s);
+}
 
 // --- the map ---------------------------------------------------------------
 
@@ -1409,6 +1585,7 @@ async function arrive(f: Filing) {
 
 function upsert(f: Filing) {
   if (painted.has(f.id)) f.ground = painted.get(f.id)!;
+  if (shellSaving.has(f.id)) f.shell = shellSaving.get(f.id)!;
   filings.set(f.id, f);
   if (focus?.id === f.id) focus = f;
 }
