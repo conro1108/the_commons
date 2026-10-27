@@ -38,17 +38,17 @@ function layout(s: Shell): { things: Placement[]; held: Placement[] } {
   let id = 0;
   const thing = (prop: string, x: number, y: number): Placement => ({ id: ++id, filing: 1, prop, x, y, room: "in", parent: null });
   const things = [
-    thing("rack", 1, 1), thing("board", 8, 1), thing("clock", r.w - 3, 1), thing("shelf", r.w - 9, 2),
-    thing("mat", Math.floor(r.w / 2) - 3, 8), thing("cabinet", 1, 6), thing("bag", r.w - 4, 6),
-    thing("lamp", r.w - 3, r.h - 4), thing("table", 1, r.h - 3), thing("stool", 7, r.h - 2), thing("rug", r.w - 9, r.h - 3),
+    thing("sword_rack", 1, 1), thing("peg_board", 8, 1), thing("wall_clock", r.w - 3, 1), thing("wall_shelf", r.w - 9, 2),
+    thing("tatami", Math.floor(r.w / 2) - 3, 8), thing("trophy_cabinet", 1, 6), thing("punching_bag", r.w - 4, 6),
+    thing("floor_lamp", r.w - 3, r.h - 4), thing("table", 1, r.h - 3), thing("stool", 7, r.h - 2), thing("rug", r.w - 9, r.h - 3),
   ].filter((p) => canStand(r, p));
   const on = (holder: string, prop: string, slots: number[]) => {
     const h = things.find((t) => t.prop === holder);
     return h ? slots.map((x) => ({ id: ++id, filing: 1, prop, x, y: 0, room: "in" as const, parent: h.id })) : [];
   };
   const held = [
-    ...on("rack", "sword", [0, 1, 3]), ...on("board", "belt", [0, 1, 2, 3]), ...on("cabinet", "trophy", [0, 3]),
-    ...on("shelf", "book", [0, 1]), ...on("shelf", "plant", [3]), ...on("table", "mug", [1]),
+    ...on("sword_rack", "practice_sword", [0, 1, 3]), ...on("peg_board", "belt", [0, 1, 2, 3]), ...on("trophy_cabinet", "trophy", [0, 3]),
+    ...on("wall_shelf", "books", [0, 1]), ...on("table", "mug", [1]),
   ];
   return { things, held };
 }

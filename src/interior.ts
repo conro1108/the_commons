@@ -18,12 +18,32 @@ import * as C from "./content/palette.ts";
 import { hash, hex, mix, rgb } from "./map/noise.ts";
 import { dark, glow, grade, hourNow } from "./light.ts";
 import type { Cells } from "./closeup.ts";
-// SEAM (slice F): the fittings library. Point this at src/content/fittings.ts's
-// FITTINGS (adapting its shape in fitting() if need be) and delete the stand-in.
-import { FITTINGS, type RoomFitting } from "./interior-fittings.ts";
+// The fittings library (src/content/fittings.ts), in the shape the room draws from.
+import { FITTINGS, slotAt as slotPoint, type FittingDef } from "./content/fittings.ts";
 
-export type { RoomFitting };
-export const fitting = (key: string): RoomFitting | null => FITTINGS[key] ?? null;
+export interface RoomFitting {
+  name: string;
+  rows: string[];
+  palette: Record<string, string>;
+  on: "floor" | "wall";
+  flat?: boolean; // lies on the floor (a mat, a rug): drawn under everything, no shadow
+  slots?: [number, number][]; // where held things go, [centre x, the y it stands on or hangs from]; a held thing's x is the index
+  small?: boolean; // can go in another thing's slot
+  lamp?: boolean; // lit after dark
+  vary?: Record<string, string>[]; // palette overrides for what's in slot i (cycling)
+}
+
+const roomFittings = new Map<string, RoomFitting>();
+const asRoom = (f: FittingDef): RoomFitting => ({
+  name: f.name, rows: f.rows, palette: f.palette, on: f.on, flat: f.flat, small: f.small, lamp: f.lamp,
+  slots: f.slots?.map(slotPoint), vary: f.vary,
+});
+export const fitting = (key: string): RoomFitting | null => {
+  const f = FITTINGS[key];
+  if (!f) return null;
+  if (!roomFittings.has(key)) roomFittings.set(key, asRoom(f));
+  return roomFittings.get(key)!;
+};
 /** What can be laid out inside: standing pieces first, small things after. */
 export const fittingKeys = (): string[] =>
   Object.keys(FITTINGS).sort((a, b) => Number(!!FITTINGS[a].small) - Number(!!FITTINGS[b].small));
@@ -99,9 +119,9 @@ function raster(f: RoomFitting, slot: number | null): HTMLCanvasElement {
   c.width = Math.max(1, ...f.rows.map((r) => r.length));
   c.height = f.rows.length;
   const ctx = c.getContext("2d")!;
-  const v = slot !== null && f.vary ? f.vary[slot % f.vary.length] : null;
+  const palette = { ...f.palette, ...(slot !== null && f.vary ? f.vary[slot % f.vary.length] : {}) };
   f.rows.forEach((row, y) => [...row].forEach((ch, x) => {
-    const colour = ch === "v" && v ? v : f.palette[ch];
+    const colour = palette[ch];
     if (!colour) return;
     ctx.fillStyle = colour;
     ctx.fillRect(x, y, 1, 1);

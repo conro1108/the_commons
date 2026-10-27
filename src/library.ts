@@ -2,12 +2,11 @@
 // shell materials, and the closest piece to a name. The one seam between the
 // schedule (api/gary.ts) and the hand-drawn library.
 //
-// STAND-IN: slice F is building src/content/fittings.ts (FITTINGS and a
-// best-match helper) and slice A the shell materials. Until they land, the
-// lists below stand for them. On merge: build LIBRARY from F's FITTINGS plus the
-// props, point closest() at F's helper, and take MATERIALS from A. Shared by
-// api/gary.ts and the client, so nothing here touches the DOM.
+// The pieces are the outdoor props plus src/content/fittings.ts; the materials
+// mirror src/shell.ts. Shared by api/gary.ts and the client, so nothing here
+// touches the DOM.
 
+import { FITTINGS as DRAWN, bestFitting } from "./content/fittings.ts";
 import { norm, type Where } from "./schedule.ts";
 
 export interface Piece {
@@ -27,19 +26,12 @@ const PROPS: Piece[] = [
   ["headstone", "a headstone"], ["bunting", "bunting"], ["lanterns", "lanterns"],
 ].map(([key, name]) => ({ key, name, where: "out" as const }));
 
-// STAND-IN for F's FITTINGS: the keys B's stand-in uses too (src/interior-fittings.ts on B's branch), plus a few.
-const FITTINGS: Piece[] = [
-  ["mat", "a mat", "in"], ["rug", "a rug", "in"], ["rack", "a rack", "either"], ["board", "a board on the wall", "in"],
-  ["bag", "a punching bag", "in"], ["cabinet", "a cabinet", "in"], ["shelf", "a shelf", "in"], ["table", "a table", "either"],
-  ["plant", "a pot plant", "either"], ["lamp", "a lamp", "in"], ["stool", "a stool", "either"], ["clock", "a clock", "in"],
-  ["picture", "a picture", "in"], ["counter", "a counter", "in"], ["chair", "a chair", "either"], ["stove", "a stove", "in"],
-  ["bookcase", "a bookcase", "in"], ["bed", "a bed", "in"], ["crate", "a crate", "either"], ["barrel", "a barrel", "either"],
-].map(([key, name, where]) => ({ key, name, where: where as Piece["where"] }));
+// The hand-drawn fittings: inside things, though anything small enough can go out.
+const FITTINGS: Piece[] = Object.entries(DRAWN).map(([key, f]) => ({ key, name: f.name, where: f.small ? "either" : "in" }));
 
 export const LIBRARY: Piece[] = [...PROPS, ...FITTINGS];
 export const pieceOf = (key: string) => LIBRARY.find((p) => p.key === key);
 
-// STAND-IN for A's shell materials.
 // Mirrors MATERIALS in src/shell.ts (which draws them, and so can't be imported by api/): keep the keys in step.
 export const MATERIALS: Record<string, string> = {
   timber: "timber (a building or a rail fence)", brick: "brick (a building or a wall)", stone: "stone (a building or a dry wall)",
@@ -51,7 +43,9 @@ export const MATERIALS: Record<string, string> = {
  *  Anything less clear is left to the decision model. */
 export function closest(name: string): Piece | null {
   const n = norm(name);
+  const best = bestFitting(name);
   return LIBRARY.find((p) => norm(p.name) === n || p.key === n)
+    ?? (best && best.score >= 0.6 ? pieceOf(best.key) : undefined)
     ?? LIBRARY.find((p) => n.endsWith(` ${norm(p.name)}`))
     ?? null;
 }
