@@ -596,7 +596,7 @@ function wireVariation(f: Filing, typed: string, typing: boolean) {
 
 // --- up close: the plot's paper and the dock --------------------------------
 // Along the top: back, the plot's paper (folded to its name while you build),
-// and Step inside. Along the bottom, on your own plot: a tab for each group,
+// and Go inside. Along the bottom, on your own plot: a tab for each group,
 // the tray of that group's things above it, and the tools (src/dock.ts).
 
 const HINTS: Record<string, string> = {
@@ -643,7 +643,7 @@ function renderBuildInfo() {
   wireSpirit(f);
   restoreTyping();
   $("tool-hint").textContent = tool === "shell" && f.shell
-    ? kindOf(f.shell) === "building" ? "Drag it to move it. Step inside to furnish it." : "Drag it to move it."
+    ? kindOf(f.shell) === "building" ? "Drag it to move it. Go inside to furnish it." : "Drag it to move it."
     : HINTS[tool.split(":")[0]] ?? "";
   if (mine) {
     if (paletteKey(f) !== builtKey) renderPalette();
@@ -1817,6 +1817,12 @@ async function putShell(next: Shell | null) {
     f.shell = before;
     problem(err);
     renderBuildInfo();
+  } else if (!before && next) {
+    // Just up: point at the way in.
+    const go = $("go-in");
+    go.classList.remove("nudge");
+    void go.offsetWidth;
+    go.classList.add("nudge");
   }
 }
 

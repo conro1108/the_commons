@@ -144,6 +144,9 @@
       .topbar > button { flex: none; margin: 0; }
       .back { padding: 5px 12px; background: #fffdf3; }
       .go { margin-left: auto !important; padding: 6px 16px; font-size: 15px; background: #ffd66b; }
+      .go.nudge { animation: nudge .5s ease-in-out 4; }
+      @keyframes nudge { 50% { transform: translate(-6px, 2px) rotate(-2deg); } }
+      @media (prefers-reduced-motion: reduce) { .go.nudge { animation: none; } }
       .info { position: relative; width: 300px; padding: 0; transform: rotate(-.4deg); max-height: calc(100dvh - 210px); overflow-y: auto; }
       .info-head { display: flex; align-items: baseline; gap: 8px; width: 100%; margin: 0; padding: 7px 12px; border: 0; background: none;
                    box-shadow: none; text-align: left; font-weight: normal; }
@@ -361,7 +364,7 @@
         <div class="topbar">
           <button id="leave" class="back" title="Back to the commons">←<span class="wide"> The commons</span></button>
           <div id="build-info" class="paper info"></div>
-          <button id="go-in" class="go" hidden>Step inside →</button>
+          <button id="go-in" class="go" hidden>Go inside →</button>
         </div>
         <div id="tools" class="tools" hidden>
           <div class="tool-row"><p id="tool-line" class="caption"><span id="tool-hint"></span><span id="build-problem" class="problem"></span></p><div id="rail" class="paper rail"></div></div>

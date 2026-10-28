@@ -137,3 +137,7 @@ export async function saveShell(id: number, s: Shell | null) {
   if (f) f.shell = s;
   return null;
 }
+
+// Everything src/net.ts exports, or the app won't load offline: tsc names whatever's missing.
+type Missing = Exclude<keyof typeof import("../src/net.ts"), keyof typeof import("./fakenet.ts")>;
+export const complete: [Missing] extends [never] ? true : Missing = true;
