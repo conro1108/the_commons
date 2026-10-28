@@ -665,10 +665,10 @@ function renderTools(f: Filing) {
 
 const icons = new Map<string, string>();
 
-/** An icon's size in a palette button: whole times over where it fits, so the pixels stay square; squeezed only if even once won't. */
+/** An icon's size in a palette button: whole times over where it fits, so the pixels stay square; a tall piece stretches its button a little before it's squeezed. */
 function iconSize(w: number, h: number) {
-  const room = Math.min(44 / w, 30 / h);
-  const k = room >= 1 ? Math.min(Math.floor(room), 4) : room;
+  const room = Math.min(44 / w, 32 / h);
+  const k = room >= 1 ? Math.min(Math.floor(room), 4) : Math.min(1, 40 / h, 56 / w);
   return `width="${Math.round(w * k)}" height="${Math.round(h * k)}"`;
 }
 

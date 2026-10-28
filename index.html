@@ -149,7 +149,7 @@
       #palette { display: flex; flex-wrap: wrap; gap: 8px 14px; }
       #palette .group { flex: none; }
       #palette .row { display: flex; gap: 4px; }
-      #palette button { margin: 0; min-width: 36px; height: 36px; padding: 2px 4px; background: #fffdf3; box-shadow: none;
+      #palette button { margin: 0; min-width: 36px; min-height: 36px; padding: 2px 4px; background: #fffdf3; box-shadow: none;
                         display: grid; place-items: center; font-weight: normal; font-size: 12px; }
       #palette button:hover { background: #fff4c9; }
       #palette button.on { background: #ffe9a8; box-shadow: inset 0 0 0 2px #402e3a; }
@@ -158,6 +158,7 @@
       #tabs { display: none; }
       /* Garden or building: the toolbar shows one at a time. */
       #palette.building .group:not([data-group="Building"]), #palette:not(.building) .group[data-group="Building"] { display: none; }
+      #palette.building h3 { display: none; } /* the switch above says it */
       #mode { display: flex; gap: 0; flex: none; }
       #mode button { margin: 0; padding: 1px 10px; font-size: 12px; font-weight: normal; box-shadow: none; background: #fffdf3; }
       #mode button + button { border-left: none; }
@@ -178,7 +179,7 @@
       #room-tools .line p { margin: 0; }
       #room-palette { display: flex; flex-wrap: wrap; gap: 8px 14px; max-height: 40vh; overflow-y: auto; }
       #room-palette .row { display: flex; flex-wrap: wrap; gap: 4px; }
-      #room-palette button { margin: 0; min-width: 36px; height: 36px; padding: 2px 4px; background: #fffdf3; box-shadow: none;
+      #room-palette button { margin: 0; min-width: 36px; min-height: 36px; padding: 2px 4px; background: #fffdf3; box-shadow: none;
                              display: grid; place-items: center; font-weight: normal; font-size: 12px; }
       #room-palette button:hover { background: #fff4c9; }
       #room-palette button.on { background: #ffe9a8; box-shadow: inset 0 0 0 2px #402e3a; }
@@ -197,7 +198,7 @@
         #palette .group[data-group="Tools"] { flex-basis: 100%; }
         #palette .group[data-group="Tools"] h3 { display: none; }
         #palette .row { flex-wrap: wrap; }
-        #palette button { min-width: 40px; height: 40px; }
+        #palette button { min-width: 40px; min-height: 40px; }
         #tabs { display: flex; flex-wrap: wrap; gap: 4px; flex-basis: 100%; }
         #palette #tabs button { min-width: 0; height: auto; display: inline-block; margin: 0; padding: 2px 7px; font-size: 11px; font-weight: normal; box-shadow: none; background: #fffdf3; }
         #palette #tabs button.on { background: #ffe9a8; font-weight: bold; }
