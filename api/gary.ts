@@ -100,12 +100,12 @@ const STOCK_WANTS: Partial<Record<Condition, string>> = {
 // mirroring PALETTE and footprint() in src/content/props.ts and GROUND in
 // src/content/ground.ts (client code, so not imported here; a test keeps them in step).
 export const SIZES: Record<string, [number, number]> = {
-  flowers: [3, 2], tuft: [2, 1], sunflower: [2, 4], garden: [5, 2], hedge: [3, 2], tree: [4, 4],
-  bench: [4, 3], log: [4, 1], picnic: [5, 2], campfire: [3, 3], rock: [3, 2], pond: [6, 2],
-  flag: [1, 2], plaque: [2, 3], signpost: [3, 3], noticeboard: [4, 4], weathervane: [2, 4], sundial: [3, 2], postbox: [2, 4], lamppost: [2, 4], bin: [2, 2],
-  goose: [3, 3], duck: [3, 2], gnome: [2, 3], scarecrow: [3, 4], beehive: [3, 3], birdbath: [3, 3],
-  fence: [3, 2], shed: [5, 4], well: [4, 4], hay: [3, 2], barn: [6, 3], headstone: [4, 3],
-  bunting: [3, 2], lanterns: [3, 2],
+  flowers: [4, 3], tuft: [2, 1], sunflower: [3, 4], garden: [5, 3], hedge: [3, 3], tree: [4, 4],
+  bench: [4, 3], log: [4, 2], picnic: [5, 3], campfire: [3, 3], rock: [3, 2], pond: [6, 2],
+  flag: [2, 4], plaque: [2, 3], signpost: [3, 4], noticeboard: [4, 4], weathervane: [3, 5], sundial: [3, 3], postbox: [2, 4], lamppost: [2, 5], bin: [2, 3],
+  goose: [3, 4], duck: [3, 2], gnome: [3, 4], scarecrow: [4, 4], beehive: [3, 4], birdbath: [3, 3],
+  fence: [3, 3], shed: [5, 4], well: [4, 4], hay: [3, 3], barn: [6, 4], headstone: [3, 3],
+  bunting: [3, 1], lanterns: [3, 2],
 };
 const PROPS = Object.keys(SIZES);
 const GROUND: Record<string, string> = { ".": "grass", p: "path", c: "stone", s: "soil", w: "water", m: "wildflowers" };

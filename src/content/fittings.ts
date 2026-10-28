@@ -52,7 +52,7 @@ export interface Surface extends PropDef {
 
 // Shared colours, one letter each across the library, so pieces agree. A piece
 // may override any of them in `pal`.
-const C: Record<string, string> = {
+export const C: Record<string, string> = {
   k: K,
   // wood, light to dark (canon's), and pale pine
   W: "#c9a06a", t: "#a97048", b: "#7a5230", d: "#5c3d22", P: "#e3c48e",

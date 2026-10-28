@@ -21,7 +21,7 @@ Most files open with a comment saying what they own; read it before grepping.
 | The gate and Form R-1 (look and name) | `src/papers.ts`; avatars `src/avatar.ts`, people `src/content/people.ts` |
 | Gary's rounds, the goose, ducks, bees | `src/life.ts` |
 | Time-of-day light | `src/light.ts` |
-| Props, ground paint, plot features, colours | `src/content/{props,ground,features,palette}.ts` |
+| Props, ground paint, plot features, colours | `src/content/{props,ground,features,palette}.ts`; the build palette's art `src/content/outdoors.ts` |
 | Map art: ground, scenery, Gary's hut and the board | `src/map/` |
 | The baked world and questions about it; regions | `src/world/` (baked by `scripts/world/`) |
 | Bylaws as shown to players | `src/rulebook.ts` (mirrors `api/gary.ts`) |
