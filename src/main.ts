@@ -93,6 +93,7 @@ let placing = false; // a prop held under the pointer, set down where it's let g
 let drag: { p: Placement; dx: number; dy: number; x: number; y: number } | null = null; // moving a prop
 
 const pad = (n: number) => String(n).padStart(4, "0");
+const capital = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 const esc = (s: string) => s.replace(/[&<>"]/g, (c) => `&${{ "&": "amp", "<": "lt", ">": "gt", '"': "quot" }[c]};`);
 const touch = matchMedia("(pointer: coarse)").matches;
 const phone = matchMedia("(max-width: 600px)"); // papers sit along the bottom, the card as a sheet
@@ -1513,7 +1514,7 @@ function renderRoomInfo() {
   const n = (insides.get(f.id) ?? []).length;
   const name = f.shell?.sign && f.shell.sign_ok ? f.shell.sign : f.intent;
   $("room-info").innerHTML = `<div class="info-head"><h2>${esc(name)}</h2></div>
-    <div class="info-body"><p class="meta">${f.filer === me ? "Yours" : `${esc(who(f.filer))}'s place`}, ${n ? `${n} thing${n === 1 ? "" : "s"} inside` : "nothing inside yet"}.</p></div>`;
+    <div class="info-body"><p class="meta">${f.filer === me ? "Yours" : esc(capital(`${who(f.filer)}'s place`))}, ${n ? `${n} thing${n === 1 ? "" : "s"} inside` : "nothing inside yet"}.</p></div>`;
   fitRoom();
 }
 
