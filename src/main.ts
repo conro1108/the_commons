@@ -85,7 +85,8 @@ let stroke: { cells: string[]; before: string; last: Cells } | null = null; // p
 // Ground we've painted this visit. Only the holder paints a plot, so ours is
 // newer than any echo — echoes of earlier saves can arrive after later strokes.
 const painted = new Map<number, string>();
-let openGroup = "Growing"; // the palette tab showing, on a phone
+let openGroup = "Growing"; // the palette tab showing, on a phone; "Building" anywhere puts the toolbar in building mode
+let gardenTool: Tool = "prop:bench"; // what we were holding before building mode, to hand back
 let placing = false; // a prop held under the pointer, set down where it's let go
 let drag: { p: Placement; dx: number; dy: number; x: number; y: number } | null = null; // moving a prop
 
@@ -618,7 +619,9 @@ function renderBuildInfo() {
   wireLetter($("build-info"));
   wireSpirit(f);
   restoreTyping();
-  $("tool-hint").textContent = HINTS[tool.split(":")[0]];
+  $("tool-hint").textContent = tool === "shell" && f.shell && kindOf(f.shell) === "building"
+    ? "Drag it to move it. Then step inside, or click its door, to furnish it."
+    : HINTS[tool.split(":")[0]];
   if (f.filer === me) {
     if (drawnHere(f).map((d) => d.look).join() !== drawnKey) renderPalette();
     renderTools(f);
@@ -654,10 +657,20 @@ function renderTools(f: Filing) {
     $("tabs").querySelector(`[data-tab="${g.dataset.group}"]`)?.classList.toggle("wanted", !!g.querySelector(".wanted"));
   }
   for (const b of $("tabs").querySelectorAll<HTMLButtonElement>("[data-tab]")) b.classList.toggle("on", b.dataset.tab === openGroup);
+  const building = openGroup === "Building";
+  $("palette").classList.toggle("building", building);
+  for (const b of $("mode").querySelectorAll<HTMLButtonElement>("[data-mode]")) b.classList.toggle("on", (b.dataset.mode === "Building") === building);
   renderShellTools(f);
 }
 
 const icons = new Map<string, string>();
+
+/** An icon's size in a palette button: whole times over where it fits, so the pixels stay square; squeezed only if even once won't. */
+function iconSize(w: number, h: number) {
+  const room = Math.min(44 / w, 30 / h);
+  const k = room >= 1 ? Math.min(Math.floor(room), 4) : room;
+  return `width="${Math.round(w * k)}" height="${Math.round(h * k)}"`;
+}
 
 function icon(key: string, make: () => HTMLCanvasElement) {
   if (!icons.has(key)) icons.set(key, make().toDataURL());
@@ -707,21 +720,23 @@ function renderPalette() {
       button(`ground:${ch}`, groundLabel(ch, p), `<img src="${icon(`ground:${ch}:${p.region}`, () => swatch(ch, p))}" width="24" alt="${groundLabel(ch, p)}">`),
     ).join("")),
     ...PALETTE.map(({ group: name, props }) => group(name, props
-      .map((p) => button(`prop:${p}`, p, `<img src="${icon(p, () => propCanvas(p))}" width="${Math.min(propSize(p).w * 2, 40)}" alt="${p}">`))
+      .map((p) => button(`prop:${p}`, p, `<img src="${icon(p, () => propCanvas(p))}" ${iconSize(propSize(p).w, propSize(p).h)} alt="${p}">`))
       .join(""))),
     // Anything not in the palette, by name: it goes down as a labelled parcel. What Gary has drawn here, again in a tap.
-    group("Write in", drawnHere(focus!).map((d) => button(`item:${esc(d.label)}`, esc(d.label), `<img src="${propCanvas(d.look).toDataURL()}" width="${Math.min(propSize(d.look).w * 2, 40)}" alt="${esc(d.label)}">`)).join("")
+    group("Write in", drawnHere(focus!).map((d) => button(`item:${esc(d.label)}`, esc(d.label), `<img src="${propCanvas(d.look).toDataURL()}" ${iconSize(propSize(d.look).w, propSize(d.look).h)} alt="${esc(d.label)}">`)).join("")
       + `<form class="write-in"><input maxlength="24" placeholder="a lobster" aria-label="something of your own" required><button>Use</button></form>`),
     shellGroupHtml(focus!, group, button),
   ].join("");
   // On a phone the groups are tabs, one open at a time; Tools stays out.
   const names = ["Ground", ...PALETTE.map((g) => g.group), "Write in", ...(shellKindHere(focus!) ? ["Building"] : [])];
   $("tabs").innerHTML = names.map((n) => `<button data-tab="${n}">${n}</button>`).join("");
-  for (const b of $("tabs").querySelectorAll<HTMLButtonElement>("[data-tab]")) {
-    b.addEventListener("click", () => {
-      openGroup = b.dataset.tab!;
-      renderBuildInfo();
-    });
+  for (const b of $("tabs").querySelectorAll<HTMLButtonElement>("[data-tab]")) b.addEventListener("click", () => openTab(b.dataset.tab!));
+  // Off a phone, one switch between the garden and the building, so neither's tools crowd the other's.
+  const kind = shellKindHere(focus!);
+  $("mode").hidden = !kind;
+  $("mode").innerHTML = kind ? `<button data-mode="Growing">Garden</button><button data-mode="Building">${kind === "building" ? "Building" : "Pen"}</button>` : "";
+  for (const b of $("mode").querySelectorAll<HTMLButtonElement>("[data-mode]")) {
+    b.addEventListener("click", () => openTab(b.dataset.mode === "Building" ? "Building" : openGroup === "Building" ? "Growing" : openGroup));
   }
   const writeIn = $("palette").querySelector<HTMLFormElement>(".write-in")!;
   writeIn.addEventListener("submit", (e) => {
@@ -744,6 +759,17 @@ function renderPalette() {
   bindShellGroup(focus!);
 }
 
+/** Open a group of the toolbar; into or out of building mode, swap what's in hand. */
+function openTab(name: string) {
+  const building = name === "Building", was = openGroup === "Building";
+  openGroup = name;
+  if (building && !was) {
+    gardenTool = tool;
+    tool = "shell";
+  } else if (!building && was) tool = gardenTool;
+  renderBuildInfo();
+}
+
 function showPanels() {
   $("tag").hidden = !!focus;
   $("build").hidden = !focus;
@@ -757,7 +783,9 @@ function showPanels() {
 function enterFocus(f: Filing) {
   if (zoom) return;
   focus = f;
-  openGroup = PALETTE.find((g) => f.wants && !f.met_at && g.props.includes(f.wants))?.group ?? openGroup;
+  const next = PALETTE.find((g) => f.wants && !f.met_at && g.props.includes(f.wants))?.group ?? (shellKindHere(f) ? openGroup : "Growing");
+  if (openGroup === "Building" && next !== "Building") tool = gardenTool;
+  openGroup = next;
   zoom = { start: performance.now(), dir: 1, filing: f };
   pointer = null;
   heading = null;
@@ -1418,15 +1446,20 @@ function doorway() {
 }
 $("go-in").addEventListener("click", () => focus && goInside(focus));
 
+/** Whether a point in build space is on the shell's door. */
+function atDoor(f: Filing, b: { x: number; y: number }): boolean {
+  if (!f.shell) return false;
+  const d = doorOutside(f.shell);
+  const cx = Math.floor(b.x / ZOOM), cy = Math.floor(b.y / ZOOM);
+  return cx >= d.x && cy >= d.y && cx < d.x + d.w && cy < d.y + d.h;
+}
+
 /** A press on the shell's door up close goes in. */
 function knock(e: PointerEvent): boolean {
   const f = focus;
   if (!f?.shell || zoom || e.button !== 0) return false;
   const b = toBuild(e);
-  if (!b) return false;
-  const d = doorOutside(f.shell);
-  const cx = Math.floor(b.x / ZOOM), cy = Math.floor(b.y / ZOOM);
-  if (cx < d.x || cy < d.y || cx >= d.x + d.w || cy >= d.y + d.h) return false;
+  if (!b || !atDoor(f, b)) return false;
   e.stopImmediatePropagation(); // the room's own handler would take this press as a click inside
   goInside(f);
   return true;
@@ -1487,11 +1520,14 @@ function renderRoomTools() {
   $("room-tools").hidden = !mine;
   if (mine) {
     const button = (t: string, title: string, inner: string) => `<button data-tool="${t}" title="${esc(title)}">${inner}</button>`;
-    $("room-palette").innerHTML = button("move", "move things", "move") + button("remove", "take down", "take down")
-      + fittingKeys().map((k) => {
+    const groups = new Map<string, string[]>();
+    for (const k of fittingKeys()) groups.set(fitting(k)!.group, [...(groups.get(fitting(k)!.group) ?? []), k]);
+    const group = (name: string, inner: string) => `<div class="group"><h3>${esc(name)}</h3><div class="row">${inner}</div></div>`;
+    $("room-palette").innerHTML = group("Tools", button("move", "move things", "move") + button("remove", "take down", "take down"))
+      + [...groups].map(([name, keys]) => group(name === "Held" ? "Small things" : name, keys.map((k) => {
         const c = spriteOf({ prop: k, x: 0, parent: null });
-        return button(k, fitting(k)!.name, `<img src="${icon(`fitting:${k}`, () => c)}" width="${Math.min(c.width * 2, 40)}" alt="${esc(fitting(k)!.name)}">`);
-      }).join("");
+        return button(k, fitting(k)!.name, `<img src="${icon(`fitting:${k}`, () => c)}" ${iconSize(c.width, c.height)} alt="${esc(fitting(k)!.name)}">`);
+      }).join(""))).join("");
     for (const b of $("room-palette").querySelectorAll<HTMLButtonElement>("[data-tool]")) {
       b.classList.toggle("on", b.dataset.tool === roomTool);
       b.addEventListener("click", () => {
@@ -1663,7 +1699,8 @@ function shellGroupHtml(f: Filing, group: (name: string, inner: string) => strin
       ? Object.entries(PAINTS).map(([k, p]) => `<button data-paint="${k}" title="${p.name}"><span style="display:inline-block;width:18px;height:18px;border:2px solid #402e3a;background:${p.ramp[2]}"></span></button>`).join("")
       : "")
     + `<form class="sign-in write-in"><input maxlength="24" placeholder="what the sign says" aria-label="the sign" value="${esc(f.shell?.sign ?? "")}"><button>Hang</button></form>`
-    + `<span class="meta sign-status"></span>`);
+    + `<span class="meta sign-status"></span>`
+    + (building ? `<button data-shell="in" class="step-in" title="go in and furnish it">Step inside →</button>` : ""));
 }
 
 function bindShellGroup(f: Filing) {
@@ -1680,6 +1717,7 @@ function bindShellGroup(f: Filing) {
     if (!focus?.shell) return;
     if (confirm(kindOf(focus.shell) === "building" ? "Take the building down? What's inside stays on your plot's books." : "Take the pen down?")) void putShell(null);
   });
+  pal.querySelector<HTMLButtonElement>('[data-shell="in"]')?.addEventListener("click", () => focus && goInside(focus));
   const sign = pal.querySelector<HTMLFormElement>(".sign-in");
   sign?.addEventListener("submit", (e) => {
     e.preventDefault();
@@ -1707,6 +1745,8 @@ function renderShellTools(f: Filing) {
   const paint = s?.paint ?? shellPick.paint;
   for (const b of pal.querySelectorAll<HTMLButtonElement>("[data-material]")) b.classList.toggle("on", b.dataset.material === material);
   for (const b of pal.querySelectorAll<HTMLButtonElement>("[data-paint]")) b.classList.toggle("on", b.dataset.paint === paint);
+  const stepIn = pal.querySelector<HTMLButtonElement>('[data-shell="in"]');
+  if (stepIn) stepIn.hidden = !s;
   const status = pal.querySelector(".sign-status");
   if (status) status.textContent = !s?.sign ? "" : s.sign_ok === null ? "Gary is reading the sign." : s.sign_ok ? "" : "Gary has declined the sign. It hangs blank.";
 }
@@ -2159,7 +2199,8 @@ function frame(now: number) {
     viewport(focusView);
     drawFocus(ctx, focusScene(focus), now);
     labelItems();
-    canvas.style.cursor = mineInFocus() && pointer ? (tool === "move" ? (drag ? "grabbing" : "grab") : "crosshair") : "";
+    canvas.style.cursor = pointer && atDoor(focus, pointer) ? "pointer"
+      : mineInFocus() && pointer ? (tool === "move" ? (drag ? "grabbing" : "grab") : "crosshair") : "";
   } else {
     fill(VOID);
     follow();

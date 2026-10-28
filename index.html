@@ -156,11 +156,19 @@
       #palette button.wanted { border-style: dashed; border-color: #b07a1e; background: #fff4c9; }
       #palette img { image-rendering: pixelated; }
       #tabs { display: none; }
-      #tool-line { display: flex; gap: 12px; margin: 0 0 6px; font-size: 12px; }
+      /* Garden or building: the toolbar shows one at a time. */
+      #palette.building .group:not([data-group="Building"]), #palette:not(.building) .group[data-group="Building"] { display: none; }
+      #mode { display: flex; gap: 0; flex: none; }
+      #mode button { margin: 0; padding: 1px 10px; font-size: 12px; font-weight: normal; box-shadow: none; background: #fffdf3; }
+      #mode button + button { border-left: none; }
+      #mode button.on { background: #ffe9a8; font-weight: bold; }
+      #tool-line { display: flex; align-items: center; gap: 12px; margin: 0 0 6px; font-size: 12px; }
       #tool-line p { margin: 0; }
 
       /* Inside a place (src/interior.ts). */
+      #go-in, #palette button.step-in { background: #ffe9a8; font-weight: bold; }
       #go-in { position: absolute; top: 12px; right: 12px; margin: 0; }
+      #palette button.step-in { padding: 2px 10px; }
       #room { position: absolute; inset: 0; pointer-events: none; }
       #room > * { pointer-events: auto; }
       #room-leave { position: absolute; top: 12px; left: 12px; margin: 0; }
@@ -168,7 +176,8 @@
       #room-tools { bottom: 12px; left: 50%; transform: translateX(-50%); max-width: calc(100% - 24px); padding: 8px 10px; }
       #room-tools .line { display: flex; gap: 12px; margin: 0 0 6px; font-size: 12px; }
       #room-tools .line p { margin: 0; }
-      #room-palette { display: flex; flex-wrap: wrap; gap: 4px; }
+      #room-palette { display: flex; flex-wrap: wrap; gap: 8px 14px; max-height: 40vh; overflow-y: auto; }
+      #room-palette .row { display: flex; flex-wrap: wrap; gap: 4px; }
       #room-palette button { margin: 0; min-width: 36px; height: 36px; padding: 2px 4px; background: #fffdf3; box-shadow: none;
                              display: grid; place-items: center; font-weight: normal; font-size: 12px; }
       #room-palette button:hover { background: #fff4c9; }
@@ -183,6 +192,7 @@
         #tools { width: calc(100% - 24px); }
         #palette { gap: 6px; }
         #palette .group:not(.open):not([data-group="Tools"]) { display: none; }
+        #mode { display: none; }
         #palette .group:not([data-group="Tools"]) h3 { display: none; }
         #palette .group[data-group="Tools"] { flex-basis: 100%; }
         #palette .group[data-group="Tools"] h3 { display: none; }
@@ -298,7 +308,7 @@
         <button id="go-in" hidden>Go inside →</button>
         <div id="build-info" class="paper"></div>
         <div id="tools" class="paper">
-          <div id="tool-line"><p id="tool-hint" class="hint"></p><p id="build-problem" class="problem"></p></div>
+          <div id="tool-line"><div id="mode" hidden></div><p id="tool-hint" class="hint"></p><p id="build-problem" class="problem"></p></div>
           <div id="palette"></div>
         </div>
       </section>

@@ -23,6 +23,7 @@ import { FITTINGS, slotAt as slotPoint, type FittingDef } from "./content/fittin
 
 export interface RoomFitting {
   name: string;
+  group: string; // where it sits in the room's toolbar
   rows: string[];
   palette: Record<string, string>;
   on: "floor" | "wall";
@@ -35,7 +36,7 @@ export interface RoomFitting {
 
 const roomFittings = new Map<string, RoomFitting>();
 const asRoom = (f: FittingDef): RoomFitting => ({
-  name: f.name, rows: f.rows, palette: f.palette, on: f.on, flat: f.flat, small: f.small, lamp: f.lamp,
+  name: f.name, group: f.group, rows: f.rows, palette: f.palette, on: f.on, flat: f.flat, small: f.small, lamp: f.lamp,
   slots: f.slots?.map(slotPoint), vary: f.vary,
 });
 export const fitting = (key: string): RoomFitting | null => {
