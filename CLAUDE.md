@@ -15,6 +15,7 @@ Most files open with a comment saying what they own; read it before grepping.
 | Want to change… | File |
 |---|---|
 | Boot, input, views, the corner tag, cards, toolbar, building, realtime | `src/main.ts` (sections marked `// ---`) |
+| The building dock's parts: tabs, tray, tools and their icons | `src/dock.ts`; filled and wired in `src/main.ts` |
 | Drawing the map: plots, walkers, letters, Gary | `src/render.ts` |
 | A plot up close, and its miniature on the map | `src/closeup.ts` |
 | Every Supabase call: sign-in, filings, appeals, placements, profiles | `src/net.ts` |
@@ -31,7 +32,7 @@ Most files open with a comment saying what they own; read it before grepping.
 | The back office (hold the notice board 3s) | `src/backoffice.ts`, `api/backoffice.ts` |
 | Tables | `db/tables.sql` |
 | Policies, triggers, queue, cron, the plots' rows | `db/logic.sql` |
-| Look at the map or a plot with no network | `dev/*.html` |
+| Look at the map or a plot with no network | `dev/*.html`; the whole app offline: `FAKE=1 npm run dev`, then `/?at=12` (`dev/fakenet.ts`); screenshots as a phone: `scripts/shot.mjs` |
 
 ## Gotchas
 

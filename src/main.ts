@@ -14,7 +14,9 @@ import {
 import { fileChangeOfUse, fileVariation, loadVariations, type Variation } from "./net.ts";
 import { scheduleHtml, variationForm, variationHtml } from "./permit.ts";
 import { askForPlot, flipSign, loadSpirit, pinNotice, signBook, summonReader, unpinNotice, type Notice, type Visit } from "./net.ts";
-import { hasDoor, spiritCardHtml, spiritHtml, styleSpirit } from "./spirit.ts";
+import { spiritCardHtml, spiritHtml, styleSpirit } from "./spirit.ts";
+import { bare, item, pic, tab, tool as dockTool, toolIcon } from "./dock.ts";
+import { pieceOf } from "./library.ts";
 import type { RealtimeChannel } from "@supabase/supabase-js";
 import { VOID, colourOf, draw, letterPhase, type Letter, type Walker } from "./render.ts";
 import {
@@ -78,15 +80,15 @@ const unread = new Set<number>();
 
 let focus: Filing | null = null; // the plot we're up close to, if any
 let zoom: { start: number; dir: 1 | -1; filing: Filing } | null = null; // flying in or out
-let tool: Tool = "prop:bench";
+let tool: Tool = "move";
 let size = 1; // how big the next thing goes up
 let pointer: { x: number; y: number } | null = null; // build space, while over the plot
 let stroke: { cells: string[]; before: string; last: Cells } | null = null; // painting ground
 // Ground we've painted this visit. Only the holder paints a plot, so ours is
 // newer than any echo — echoes of earlier saves can arrive after later strokes.
 const painted = new Map<number, string>();
-let openGroup = "Growing"; // the palette tab showing, on a phone; "Building" anywhere puts the toolbar in building mode
-let gardenTool: Tool = "prop:bench"; // what we were holding before building mode, to hand back
+let openGroup = "Growing"; // the dock's open tab
+let gardenTool: Tool = "move"; // what we were holding before the Building tab, to hand back
 let placing = false; // a prop held under the pointer, set down where it's let go
 let drag: { p: Placement; dx: number; dy: number; x: number; y: number } | null = null; // moving a prop
 
@@ -592,89 +594,93 @@ function wireVariation(f: Filing, typed: string, typing: boolean) {
   });
 }
 
-// --- up close: the plot's card and the toolbar --------------------------------
+// --- up close: the plot's paper and the dock --------------------------------
+// Along the top: back, the plot's paper (folded to its name while you build),
+// and Step inside. Along the bottom, on your own plot: a tab for each group,
+// the tray of that group's things above it, and the tools (src/dock.ts).
 
 const HINTS: Record<string, string> = {
-  prop: touch ? "Touch and slide; it goes down where you let go." : "Click to place it. Right-click takes things down.",
-  ground: "Drag to paint the ground.",
+  prop: touch ? "Touch and slide; it lands where you let go." : "Click the plot to put it down.",
+  ground: "Drag across the plot to paint it.",
   move: "Drag things about.",
+  resize: `${touch ? "Tap" : "Click"} something to make it bigger.`,
   remove: `${touch ? "Tap" : "Click"} something to take it down.`,
-  item: `${touch ? "Touch, slide and let go" : "Click"} to set it down. Gary reads the label before anyone else does.`,
-  shell: "Drag out where it stands. Drag it to move it. The door faces your gate; Gary reads the sign first.",
-  window: `${touch ? "Tap" : "Click"} the front wall to put a window in, or take one out.`,
+  item: `${touch ? "Touch, slide and let go" : "Click"} to set it down. Gary reads the label first.`,
+  reclaim: "Put it back where you'd like it.",
+  shell: "Drag out where it stands.",
+  window: `${touch ? "Tap" : "Click"} the front wall for a window.`,
 };
+
+/** Shorter names than Gary's, to fit under a picture. */
+const SHORT: Record<string, string> = { tuft: "tuft", garden: "veg patch", picnic: "picnic", noticeboard: "notices", weathervane: "vane" };
+
+let infoOpen = false; // the plot's paper, unfolded
 
 function renderBuildInfo() {
   if (!focus) return;
   const f = focus;
   const p = plotOf(f);
+  const mine = f.filer === me;
   const count = built.get(f.id)?.length ?? 0;
+  const letter = letterFor(f);
+  const flag = letter ? "Gary's written" : mine && f.condition && BUILT.includes(f.status) && !f.met_at ? "condition" : "";
   const restoreTyping = keepSpiritTyping();
-  $("build-info").innerHTML = `<h2>${esc(plotLabel(p))}</h2><p class="meta where">${esc(REGIONS[p.region].name)}, ${Math.round(p.area / 10) * 10} sq. yd.</p>
-    <p>${f.filer === me ? "Yours" : `Held by ${esc(who(f.filer))}`}: <q>${esc(f.intent)}</q></p>
-    ${foldCondition(f)}
-    ${letterFor(f)}
-    ${f.filer === me ? "" : `<p class="meta">${count ? `${count} thing${count === 1 ? "" : "s"} built.` : "Nothing built yet."}</p>`}
-    ${spiritUp(f)}`;
-  wireLetter($("build-info"));
+  const info = $("build-info");
+  info.classList.add("folds");
+  info.classList.toggle("open", infoOpen);
+  info.innerHTML = `<button class="info-head" aria-expanded="${infoOpen}"><h2>${esc(plotLabel(p))}</h2>${flag && !infoOpen ? `<span class="flag">${flag}</span>` : ""}<span class="caret">${infoOpen ? "▲" : "▼"}</span></button>
+    <div class="info-body"><p class="meta where">${esc(REGIONS[p.region].name)}, ${Math.round(p.area / 10) * 10} sq. yd.</p>
+    <p>${mine ? "Yours" : `Held by ${esc(who(f.filer))}`}: <q>${esc(f.intent)}</q></p>
+    ${conditionHtml(f)}
+    ${letter}
+    ${mine ? "" : `<p class="meta">${count ? `${count} thing${count === 1 ? "" : "s"} built.` : "Nothing built yet."}</p>`}
+    ${spiritUp(f)}</div>`;
+  info.querySelector(".info-head")!.addEventListener("click", () => {
+    infoOpen = !infoOpen;
+    renderBuildInfo();
+  });
+  wireLetter(info);
   wireSpirit(f);
   restoreTyping();
-  $("tool-hint").textContent = tool === "shell" && f.shell && kindOf(f.shell) === "building"
-    ? "Drag it to move it. Then step inside, or click its door, to furnish it."
-    : HINTS[tool.split(":")[0]];
-  if (f.filer === me) {
-    if (drawnHere(f).map((d) => d.look).join() !== drawnKey) renderPalette();
+  $("tool-hint").textContent = tool === "shell" && f.shell
+    ? kindOf(f.shell) === "building" ? "Drag it to move it. Step inside to furnish it." : "Drag it to move it."
+    : HINTS[tool.split(":")[0]] ?? "";
+  if (mine) {
+    if (paletteKey(f) !== builtKey) renderPalette();
     renderTools(f);
   }
-  fitFocus(); // the info's height moves the plot on an upright screen
+  fitFocus();
   doorway();
 }
 
-/** On a phone the condition folds away, so the plot gets the screen; keep it as it was left. */
-let conditionOpen = false;
-function foldCondition(f: Filing) {
-  const html = conditionHtml(f);
-  if (!html || !phone.matches) return html;
-  return `<details class="fold"${conditionOpen ? " open" : ""}><summary>Condition${f.met_at ? ", met" : BUILT.includes(f.status) ? ", outstanding" : ""}</summary>${html}</details>`;
-}
-
-$("build-info").addEventListener("toggle", (e) => {
-  conditionOpen = (e.target as HTMLDetailsElement).open;
-  fitFocus();
-}, true);
-
-/** Flip the toolbar's classes; it only exists on your own plot. */
+/** Flip the dock's classes; it only exists on your own plot. */
 function renderTools(f: Filing) {
-  const wants = new Set(f.wants && !f.met_at ? [f.wants] : []);
-  for (const b of $("palette").querySelectorAll<HTMLButtonElement>("[data-tool]")) {
-    b.classList.toggle("on", b.dataset.tool === tool);
-    b.classList.toggle("wanted", wants.has(b.dataset.tool!.replace(/^prop:/, "")));
+  const wants = f.wants && !f.met_at ? f.wants : null;
+  const tray = $("tray");
+  for (const b of $("tools").querySelectorAll<HTMLButtonElement>("[data-tool]")) b.classList.toggle("on", b.dataset.tool === tool);
+  for (const b of tray.querySelectorAll<HTMLButtonElement>("[data-tool]")) b.classList.toggle("wanted", b.dataset.tool === `prop:${wants}`);
+  tray.querySelector(".write-in")?.classList.toggle("on", tool.startsWith("item:"));
+  for (const g of tray.querySelectorAll<HTMLElement>("[data-group]")) g.hidden = g.dataset.group !== openGroup;
+  for (const t of $("dock").querySelectorAll<HTMLButtonElement>("[data-tab]")) {
+    t.classList.toggle("on", t.dataset.tab === openGroup);
+    t.classList.toggle("wanted", !!wants && !!PALETTE.find((g) => g.group === t.dataset.tab)?.props.includes(wants));
   }
-  $("palette").querySelector(".write-in")?.classList.toggle("on", tool.startsWith("item:"));
-  for (const b of $("palette").querySelectorAll<HTMLButtonElement>("[data-size]")) b.classList.toggle("on", Number(b.dataset.size) === size);
-  for (const g of $("palette").querySelectorAll<HTMLElement>("[data-group]")) {
-    g.classList.toggle("open", g.dataset.group === openGroup);
-    $("tabs").querySelector(`[data-tab="${g.dataset.group}"]`)?.classList.toggle("wanted", !!g.querySelector(".wanted"));
-  }
-  for (const b of $("tabs").querySelectorAll<HTMLButtonElement>("[data-tab]")) b.classList.toggle("on", b.dataset.tab === openGroup);
-  const building = openGroup === "Building";
-  $("palette").classList.toggle("building", building);
-  for (const b of $("mode").querySelectorAll<HTMLButtonElement>("[data-mode]")) b.classList.toggle("on", (b.dataset.mode === "Building") === building);
+  $("rail").hidden = openGroup === "Building";
+  $("rail").querySelector(".size b")!.textContent = `${size}×`;
   renderShellTools(f);
 }
 
 const icons = new Map<string, string>();
 
-/** An icon's size in a palette button: whole times over where it fits, so the pixels stay square; a tall piece stretches its button a little before it's squeezed. */
-function iconSize(w: number, h: number) {
-  const room = Math.min(44 / w, 32 / h);
-  const k = room >= 1 ? Math.min(Math.floor(room), 4) : Math.min(1, 40 / h, 56 / w);
-  return `width="${Math.round(w * k)}" height="${Math.round(h * k)}"`;
-}
-
 function icon(key: string, make: () => HTMLCanvasElement) {
   if (!icons.has(key)) icons.set(key, make().toDataURL());
   return icons.get(key)!;
+}
+
+/** A prop's picture for the dock, fitted to a box. */
+function propPic(name: string, box?: { w: number; h: number }) {
+  const { w, h } = propSize(name);
+  return pic(icon(name, () => propCanvas(name)), w, h, box);
 }
 
 /** A square of one ground, cut from a patch of it on this plot's kind of land. */
@@ -699,74 +705,79 @@ function drawnHere(f: Filing) {
   }
   return [...seen.values()];
 }
-let drawnKey = ""; // which drawings the toolbar has buttons for
 
-/** The toolbar, built once per visit (and when Gary finishes a drawing); tool changes only flip classes. */
+/** What the dock was built for: Gary's drawings here, and whether the shell's up. */
+const paletteKey = (f: Filing) => `${f.id}:${drawnHere(f).map((d) => d.look).join()}:${!!f.shell}`;
+let builtKey = "";
+
+const TAB_PICS: Record<string, string> = { Growing: "flowers", Sitting: "bench", Civic: "noticeboard", Residents: "goose", Structures: "well", Festive: "bunting", "Write in": "item" };
+
+/** The dock, built once per visit (and when Gary finishes a drawing, or the shell goes up or down); tool changes only flip classes. */
 function renderPalette() {
   const mine = focus?.filer === me;
   $("tools").hidden = !mine;
   if (!mine) return;
-  const p = plotOf(focus!);
-  drawnKey = drawnHere(focus!).map((d) => d.look).join();
-  const button = (t: Tool, title: string, inner: string) =>
-    `<button data-tool="${t}" title="${title}">${inner}</button>`;
-  const group = (name: string, inner: string) =>
-    `<div class="group" data-group="${name}"><h3>${name}</h3><div class="row">${inner}</div></div>`;
-  $("palette").innerHTML = [
-    group("Tools", button("move", "move things", "move") + button("resize", "make a thing bigger, then back again", "resize") + button("remove", "take down", "take down")
-      + SCALES.map((k) => `<button data-size="${k}" title="build things ${k} times over">${k}×</button>`).join("")),
-    `<div id="tabs"></div>`,
-    group("Ground", BRUSHES.map((ch) =>
-      button(`ground:${ch}`, groundLabel(ch, p), `<img src="${icon(`ground:${ch}:${p.region}`, () => swatch(ch, p))}" width="24" alt="${groundLabel(ch, p)}">`),
-    ).join("")),
-    ...PALETTE.map(({ group: name, props }) => group(name, props
-      .map((p) => button(`prop:${p}`, p, `<img src="${icon(p, () => propCanvas(p))}" ${iconSize(propSize(p).w, propSize(p).h)} alt="${p}">`))
-      .join(""))),
+  const f = focus!, p = plotOf(f);
+  builtKey = paletteKey(f);
+  const kind = shellKindHere(f);
+  const groups: [string, string, string][] = [
+    ["Ground", pic(icon(`ground:.:${p.region}`, () => swatch(".", p)), 12, 12, { w: 24, h: 24 }), BRUSHES.map((ch) =>
+      item(`data-tool="ground:${ch}"`, pic(icon(`ground:${ch}:${p.region}`, () => swatch(ch, p)), 12, 12, { w: 36, h: 36 }), groundLabel(ch, p))).join("")],
+    ...PALETTE.map(({ group, props }): [string, string, string] => [group, propPic(TAB_PICS[group], { w: 40, h: 32 }),
+      props.map((k) => item(`data-tool="prop:${k}"`, propPic(k), SHORT[k] ?? bare(pieceOf(k)?.name ?? k))).join("")]),
     // Anything not in the palette, by name: it goes down as a labelled parcel. What Gary has drawn here, again in a tap.
-    group("Write in", drawnHere(focus!).map((d) => button(`item:${esc(d.label)}`, esc(d.label), `<img src="${propCanvas(d.look).toDataURL()}" ${iconSize(propSize(d.look).w, propSize(d.look).h)} alt="${esc(d.label)}">`)).join("")
-      + `<form class="write-in"><input maxlength="24" placeholder="a lobster" aria-label="something of your own" required><button>Use</button></form>`),
-    shellGroupHtml(focus!, group, button),
-  ].join("");
-  // On a phone the groups are tabs, one open at a time; Tools stays out.
-  const names = ["Ground", ...PALETTE.map((g) => g.group), "Write in", ...(shellKindHere(focus!) ? ["Building"] : [])];
-  $("tabs").innerHTML = names.map((n) => `<button data-tab="${n}">${n}</button>`).join("");
-  for (const b of $("tabs").querySelectorAll<HTMLButtonElement>("[data-tab]")) b.addEventListener("click", () => openTab(b.dataset.tab!));
-  // Off a phone, one switch between the garden and the building, so neither's tools crowd the other's.
-  const kind = shellKindHere(focus!);
-  $("mode").hidden = !kind;
-  $("mode").innerHTML = kind ? `<button data-mode="Growing">Garden</button><button data-mode="Building">${kind === "building" ? "Building" : "Pen"}</button>` : "";
-  for (const b of $("mode").querySelectorAll<HTMLButtonElement>("[data-mode]")) {
-    b.addEventListener("click", () => openTab(b.dataset.mode === "Building" ? "Building" : openGroup === "Building" ? "Growing" : openGroup));
+    ["Write in", propPic("item", { w: 40, h: 32 }), drawnHere(f).map((d) => item(`data-tool="item:${esc(d.label)}"`, propPic(d.look), d.label)).join("")
+      + `<form class="write-in"><input maxlength="24" placeholder="anything: a lobster" aria-label="something of your own" required><button>Use</button></form>`],
+  ];
+  if (kind) groups.push(["Building", propPic(kind === "building" ? "shed" : "fence", { w: 40, h: 32 }), shellTrayHtml(f)]);
+  const scroll = $("tray").scrollLeft;
+  $("tray").innerHTML = groups.map(([g, , html]) => `<div class="group-items" data-group="${g}">${html}</div>`).join("");
+  $("tray").scrollLeft = scroll;
+  $("dock").innerHTML = groups.map(([g, picture]) =>
+    (g === "Building" ? `<span class="gap"></span>` : "") + tab(g, picture, g === "Building" && kind === "enclosure" ? "Pen" : g)).join("");
+  $("rail").innerHTML = dockTool("move", "move", "move things about") + dockTool("resize", "resize", "make a thing bigger, then back again")
+    + dockTool("remove", "take down", "take things down")
+    + `<button class="size" title="how big the next thing goes up: whole times over"><span class="pic"><b>${size}×</b></span><span class="name">size</span></button>`;
+
+  for (const t of $("dock").querySelectorAll<HTMLButtonElement>("[data-tab]")) t.addEventListener("click", () => openTab(t.dataset.tab!));
+  // Pick a thing to put down; pick it again to put it back and just move things.
+  for (const b of $("tray").querySelectorAll<HTMLButtonElement>("[data-tool]")) {
+    b.addEventListener("click", () => {
+      tool = tool === b.dataset.tool && openGroup !== "Building" ? "move" : b.dataset.tool!;
+      problem("");
+      renderBuildInfo();
+    });
   }
-  const writeIn = $("palette").querySelector<HTMLFormElement>(".write-in")!;
+  for (const b of $("rail").querySelectorAll<HTMLButtonElement>("[data-tool]")) {
+    b.addEventListener("click", () => {
+      tool = b.dataset.tool!;
+      problem("");
+      renderBuildInfo();
+    });
+  }
+  $("rail").querySelector(".size")!.addEventListener("click", () => {
+    size = SCALES[(SCALES.indexOf(size) + 1) % SCALES.length];
+    renderBuildInfo();
+  });
+  const writeIn = $("tray").querySelector<HTMLFormElement>(".write-in")!;
   writeIn.addEventListener("submit", (e) => {
     e.preventDefault();
     tool = `item:${writeIn.querySelector("input")!.value.trim()}`;
     renderBuildInfo();
   });
-  for (const b of $("palette").querySelectorAll<HTMLButtonElement>("[data-tool]")) {
-    b.addEventListener("click", () => {
-      tool = b.dataset.tool!;
-      renderBuildInfo();
-    });
-  }
-  for (const b of $("palette").querySelectorAll<HTMLButtonElement>("[data-size]")) {
-    b.addEventListener("click", () => {
-      size = Number(b.dataset.size);
-      renderBuildInfo();
-    });
-  }
-  bindShellGroup(focus!);
+  bindShellGroup(f);
 }
 
-/** Open a group of the toolbar; into or out of building mode, swap what's in hand. */
+/** Open a group of the dock; into or out of the building, swap what's in hand. */
 function openTab(name: string) {
   const building = name === "Building", was = openGroup === "Building";
+  if (name !== openGroup) $("tray").scrollLeft = 0;
   openGroup = name;
   if (building && !was) {
     gardenTool = tool;
     tool = "shell";
   } else if (!building && was) tool = gardenTool;
+  problem("");
   renderBuildInfo();
 }
 
@@ -783,9 +794,14 @@ function showPanels() {
 function enterFocus(f: Filing) {
   if (zoom) return;
   focus = f;
-  const next = PALETTE.find((g) => f.wants && !f.met_at && g.props.includes(f.wants))?.group ?? (shellKindHere(f) ? openGroup : "Growing");
+  // What Gary's condition wants, if anything; the building, if it isn't up; else where you were.
+  const wanted = PALETTE.find((g) => f.wants && !f.met_at && g.props.includes(f.wants))?.group;
+  const next = wanted ?? (shellKindHere(f) && !f.shell ? "Building" : openGroup === "Building" && !shellKindHere(f) ? "Growing" : openGroup);
   if (openGroup === "Building" && next !== "Building") tool = gardenTool;
+  if (next === "Building" && openGroup !== "Building") [gardenTool, tool] = [tool, "shell"];
   openGroup = next;
+  // Folded while you build, and on a phone, where it'd hide the plot; open to look round someone else's, or when Gary's written.
+  infoOpen = (f.filer !== me && !phone.matches) || !!letterFor(f);
   zoom = { start: performance.now(), dir: 1, filing: f };
   pointer = null;
   heading = null;
@@ -824,7 +840,6 @@ function renderAll() {
 // close, keeps them current, and wires the buttons, up close and on the card.
 
 let spirit: { filing: number; notices: Notice[]; visits: Visit[] } | null = null;
-let spiritOpen = false; // on a phone it folds away like the condition
 
 styleSpirit();
 
@@ -839,9 +854,7 @@ async function loadSpiritFor(f: Filing) {
 
 /** The spirit's part of the build info, for the plot up close. */
 function spiritUp(f: Filing) {
-  const html = spiritHtml({ f, notices: spirit?.filing === f.id ? spirit.notices : [], visits: spirit?.filing === f.id ? spirit.visits : [], me, guest, who });
-  if (!phone.matches) return html;
-  return `<details class="fold spirit-fold"${spiritOpen ? " open" : ""}><summary>${hasDoor(f) ? (f.open_sign ? "Open" : "Closed") : "Visitors"}${f.boarded_at ? ", boarded up" : f.drift ? ", a notice from Gary" : ""}</summary>${html}</details>`;
+  return spiritHtml({ f, notices: spirit?.filing === f.id ? spirit.notices : [], visits: spirit?.filing === f.id ? spirit.visits : [], me, guest, who });
 }
 
 /** What's being typed into the board or the book, kept across a re-render. */
@@ -849,8 +862,6 @@ function keepSpiritTyping() {
   const el = document.activeElement;
   const typing = el instanceof HTMLInputElement && el.closest(".spirit form") ? { form: el.closest("form")!.className, value: el.value } : null;
   return () => {
-    const fold = $("build-info").querySelector<HTMLDetailsElement>(".spirit-fold");
-    fold?.addEventListener("toggle", () => (spiritOpen = fold.open));
     if (!typing) return;
     const box = $("build-info").querySelector<HTMLInputElement>(`form.${typing.form} input`);
     if (!box) return;
@@ -1013,11 +1024,10 @@ function follow() {
 /** The plot between the papers: below the info as well as above the tools when the screen is upright. */
 function fitFocus() {
   const tools = $("tools");
-  const info = $("build-info");
   const f = focus ?? zoom?.filing;
   if (!f) return;
   const below = focus && !tools.hidden ? (tools.offsetHeight + 16) * dpr : 0;
-  const above = focus && canvas.height > canvas.width ? (info.offsetTop + info.offsetHeight + 8) * dpr : 0;
+  const above = focus ? (topOf($("leave"), $("go-in"), $("build-info")) + 8) * dpr : 0;
   const { w, h } = focusSize(plotOf(f));
   focusView = fit(w, h, below, above);
 }
@@ -1501,44 +1511,79 @@ function renderRoomInfo() {
   if (!f) return;
   const n = (insides.get(f.id) ?? []).length;
   const name = f.shell?.sign && f.shell.sign_ok ? f.shell.sign : f.intent;
-  $("room-info").innerHTML = `<h2>${esc(name)}</h2>
-    <p>${f.filer === me ? "Yours, inside." : `${esc(who(f.filer))}'s place. You're visiting.`}</p>
-    <p class="meta">${n ? `${n} thing${n === 1 ? "" : "s"} inside.` : "Nothing inside yet."} The door's the way out.</p>`;
+  $("room-info").innerHTML = `<div class="info-head"><h2>${esc(name)}</h2></div>
+    <div class="info-body"><p class="meta">${f.filer === me ? "Yours" : `${esc(who(f.filer))}'s place`}, ${n ? `${n} thing${n === 1 ? "" : "s"} inside` : "nothing inside yet"}.</p></div>`;
   fitRoom();
 }
 
 const ROOM_HINTS: Record<string, string> = {
   move: "Drag things about. Drop a small thing on a rack, shelf or table to put it there.",
   remove: `${touch ? "Tap" : "Click"} something to take it down.`,
-  wall: "Click the back wall to hang it.",
-  floor: "Click the floor to set it down.",
-  small: "Click a free slot on a rack, shelf or table, or the floor.",
+  wall: `${touch ? "Tap" : "Click"} the back wall to hang it.`,
+  floor: `${touch ? "Tap" : "Click"} the floor to set it down.`,
+  small: `${touch ? "Tap" : "Click"} a free slot on a rack, shelf or table, or the floor.`,
 };
 
+const ROOM_TABS: Record<string, string> = { "Kitchen and shop": "Kitchen", "Sleeping and washing": "Bed and bath", "Light and warmth": "Lights", "On the walls": "Walls" };
+let roomGroup = ""; // the room dock's open tab
+let roomBuilt = false; // whether the room's dock is built for this visit
+
+/** The room's dock: its pieces by group, built once a visit; picking things only flips classes. */
 function renderRoomTools() {
   const mine = mineIndoors();
   $("room-tools").hidden = !mine;
+  if (mine && !roomBuilt) buildRoomDock();
   if (mine) {
-    const button = (t: string, title: string, inner: string) => `<button data-tool="${t}" title="${esc(title)}">${inner}</button>`;
-    const groups = new Map<string, string[]>();
-    for (const k of fittingKeys()) groups.set(fitting(k)!.group, [...(groups.get(fitting(k)!.group) ?? []), k]);
-    const group = (name: string, inner: string) => `<div class="group"><h3>${esc(name)}</h3><div class="row">${inner}</div></div>`;
-    $("room-palette").innerHTML = group("Tools", button("move", "move things", "move") + button("remove", "take down", "take down"))
-      + [...groups].map(([name, keys]) => group(name === "Held" ? "Small things" : name, keys.map((k) => {
-        const c = spriteOf({ prop: k, x: 0, parent: null });
-        return button(k, fitting(k)!.name, `<img src="${icon(`fitting:${k}`, () => c)}" ${iconSize(c.width, c.height)} alt="${esc(fitting(k)!.name)}">`);
-      }).join(""))).join("");
-    for (const b of $("room-palette").querySelectorAll<HTMLButtonElement>("[data-tool]")) {
-      b.classList.toggle("on", b.dataset.tool === roomTool);
-      b.addEventListener("click", () => {
-        roomTool = b.dataset.tool!;
-        renderRoomTools();
-      });
-    }
+    for (const b of $("room-tools").querySelectorAll<HTMLButtonElement>("[data-tool]")) b.classList.toggle("on", b.dataset.tool === roomTool);
+    for (const g of $("room-tray").querySelectorAll<HTMLElement>("[data-group]")) g.hidden = g.dataset.group !== roomGroup;
+    for (const t of $("room-dock").querySelectorAll<HTMLButtonElement>("[data-tab]")) t.classList.toggle("on", t.dataset.tab === roomGroup);
     const f = fitting(roomTool);
     $("room-hint").textContent = ROOM_HINTS[!f ? roomTool : slotted(roomTool) ? "small" : f.on];
   }
   fitRoom();
+}
+
+function buildRoomDock() {
+  roomBuilt = true;
+  const groups = new Map<string, string[]>();
+  for (const k of fittingKeys()) {
+    const g = fitting(k)!.group === "Held" ? "Small things" : fitting(k)!.group;
+    groups.set(g, [...(groups.get(g) ?? []), k]);
+  }
+  if (!groups.has(roomGroup)) roomGroup = [...groups.keys()][0];
+  const piece = (k: string, box?: { w: number; h: number }) => {
+    const c = spriteOf({ prop: k, x: 0, parent: null });
+    return pic(icon(`fitting:${k}`, () => c), c.width, c.height, box);
+  };
+  $("room-tray").innerHTML = [...groups].map(([g, keys]) =>
+    `<div class="group-items" data-group="${esc(g)}">${keys.map((k) => item(`data-tool="${k}"`, piece(k), bare(fitting(k)!.name))).join("")}</div>`).join("");
+  // Each tab shows its group's piece that draws biggest in the space, and a short name.
+  const biggest = (keys: string[]) => keys.map((k) => {
+    const c = spriteOf({ prop: k, x: 0, parent: null });
+    const n = Math.max(1, Math.min(Math.floor(Math.min(40 / c.width, 32 / c.height)), 4));
+    return { k, area: c.width * n <= 40 && c.height * n <= 32 ? c.width * c.height * n * n : 0 };
+  }).sort((a, b) => b.area - a.area)[0].k;
+  $("room-dock").innerHTML = [...groups].map(([g, keys]) => tab(g, piece(biggest(keys), { w: 40, h: 32 }), ROOM_TABS[g] ?? g)).join("");
+  $("room-rail").innerHTML = dockTool("move", "move", "move things about") + dockTool("remove", "take down", "take things out");
+  for (const t of $("room-dock").querySelectorAll<HTMLButtonElement>("[data-tab]")) {
+    t.addEventListener("click", () => {
+      if (roomGroup !== t.dataset.tab) $("room-tray").scrollLeft = 0;
+      roomGroup = t.dataset.tab!;
+      renderRoomTools();
+    });
+  }
+  for (const b of $("room-tray").querySelectorAll<HTMLButtonElement>("[data-tool]")) {
+    b.addEventListener("click", () => {
+      roomTool = roomTool === b.dataset.tool ? "move" : b.dataset.tool!;
+      renderRoomTools();
+    });
+  }
+  for (const b of $("room-rail").querySelectorAll<HTMLButtonElement>("[data-tool]")) {
+    b.addEventListener("click", () => {
+      roomTool = b.dataset.tool!;
+      renderRoomTools();
+    });
+  }
 }
 
 /** The room as big as whole pixels allow, clear of the papers. */
@@ -1546,10 +1591,19 @@ function fitRoom() {
   const f = indoorFiling();
   if (!f?.shell) return;
   const art = roomArt(roomSize(f.shell));
-  const tools = $("room-tools"), info = $("room-info");
+  const tools = $("room-tools");
   const below = !tools.hidden ? (tools.offsetHeight + 16) * dpr : 0;
-  const above = canvas.height > canvas.width ? (info.offsetTop + info.offsetHeight + 8) * dpr : 0;
+  const above = (topOf($("room-leave"), $("room-info")) + 8) * dpr;
   roomView = fit(art.w, art.h, below, above);
+}
+
+/** How far down the screen the top row reaches: its buttons, and a paper's head (an unfolded paper hangs over the scene). */
+function topOf(...els: HTMLElement[]) {
+  const top = $("field").getBoundingClientRect().top;
+  return Math.max(0, ...els.filter((el) => !el.hidden && el.offsetParent).map((el) => {
+    const head = el.classList.contains("folds") ? el.querySelector<HTMLElement>(".info-head") ?? el : el;
+    return head.getBoundingClientRect().bottom - top;
+  }));
 }
 
 /** What's in the room, with whatever's being placed or dragged shown where it would go. */
@@ -1682,43 +1736,41 @@ function shellMaterial(f: Filing, kind: ShellKind): string {
   return DEFAULT_MATERIAL;
 }
 
-/** The Building group of the toolbar, or nothing where the schedule has no shell. */
-function shellGroupHtml(f: Filing, group: (name: string, inner: string) => string, button: (t: Tool, title: string, inner: string) => string): string {
-  const kind = shellKindHere(f);
-  if (!kind) return "";
+/** The Building tab's tray: its shape, its walls and paint, its sign. Before it's up, only what it'll go up as. */
+function shellTrayHtml(f: Filing): string {
+  const kind = shellKindHere(f)!;
   const building = kind === "building";
+  const s = f.shell;
   const fixed = scheduledMaterial(f.schedule, kind);
-  const paint = f.shell?.paint ?? shellPick.paint;
-  return group("Building",
-    button("shell", building ? "drag out where it stands; drag it to move it" : "drag out the pen; drag it to move it", building ? "build" : "pen")
-    + (building ? button("window", "put a window in the front wall, or take one out", "windows") + `<button data-shell="door" title="turn the door to the next side">door</button>` : "")
-    + `<button data-shell="down" title="take it down">take down</button>`
-    + (fixed ? "" : materialsFor(kind).map((m) =>
-      `<button data-material="${m}" title="${MATERIALS[m].name}"><img src="${materialSwatch(m, paint).toDataURL()}" width="24" alt="${MATERIALS[m].name}"></button>`).join(""))
-    + (building || MATERIALS[shellMaterial(f, kind)].fence === "picket"
-      ? Object.entries(PAINTS).map(([k, p]) => `<button data-paint="${k}" title="${p.name}"><span style="display:inline-block;width:18px;height:18px;border:2px solid #402e3a;background:${p.ramp[2]}"></span></button>`).join("")
-      : "")
-    + `<form class="sign-in write-in"><input maxlength="24" placeholder="what the sign says" aria-label="the sign" value="${esc(f.shell?.sign ?? "")}"><button>Hang</button></form>`
-    + `<span class="meta sign-status"></span>`
-    + (building ? `<button data-shell="in" class="step-in" title="go in and furnish it">Step inside →</button>` : ""));
+  const paint = s?.paint ?? shellPick.paint;
+  const cluster = (name: string, inner: string, cls = "row") => `<div class="cluster"><h3>${name}</h3><div class="${cls}">${inner}</div></div>`;
+  const shape = item(`data-tool="shell"`, toolIcon("shell"), s ? "move it" : "put it up")
+    + (building && s ? item(`data-tool="window"`, toolIcon("window"), "windows") + item(`data-shell="door"`, toolIcon("door"), "turn door") : "");
+  const walls = fixed ? "" : cluster(building ? "Walls" : "Made of", materialsFor(kind).map((m) =>
+    `<button class="swatch-btn" data-material="${m}" title="${MATERIALS[m].name}"><img src="${materialSwatch(m, paint).toDataURL()}" width="24" alt="${MATERIALS[m].name}"></button>`).join(""), "row grid");
+  const paints = building || MATERIALS[shellMaterial(f, kind)].fence === "picket" ? cluster("Paint", Object.entries(PAINTS).map(([k, p]) =>
+    `<button class="swatch-btn" data-paint="${k}" title="${p.name}"><span style="background:${p.ramp[2]}"></span></button>`).join(""), "row grid") : "";
+  const sign = s ? cluster("Sign", `<form class="sign-in write-in"><input maxlength="24" placeholder="what it says" aria-label="the sign" value="${esc(s.sign ?? "")}"><button>Hang</button></form>`
+    + `<span class="meta sign-status"></span>`, "") : "";
+  const down = s ? `<div class="cluster">${item(`data-shell="down"`, toolIcon("remove"), "take down", "quiet")}</div>` : "";
+  return cluster(building ? "The building" : "The pen", shape) + walls + paints + sign + down;
 }
 
 function bindShellGroup(f: Filing) {
-  const pal = $("palette");
-  for (const b of pal.querySelectorAll<HTMLButtonElement>("[data-material]")) b.addEventListener("click", () => restyle({ material: b.dataset.material! }));
-  for (const b of pal.querySelectorAll<HTMLButtonElement>("[data-paint]")) b.addEventListener("click", () => restyle({ paint: b.dataset.paint! }));
-  pal.querySelector<HTMLButtonElement>('[data-shell="door"]')?.addEventListener("click", () => {
+  const tray = $("tray");
+  for (const b of tray.querySelectorAll<HTMLButtonElement>("[data-material]")) b.addEventListener("click", () => restyle({ material: b.dataset.material! }));
+  for (const b of tray.querySelectorAll<HTMLButtonElement>("[data-paint]")) b.addEventListener("click", () => restyle({ paint: b.dataset.paint! }));
+  tray.querySelector<HTMLButtonElement>('[data-shell="door"]')?.addEventListener("click", () => {
     const s = focus?.shell;
     if (!s) return problem("Put the building up first.");
     const door = (["s", "e", "n", "w"] as const)[(["s", "e", "n", "w"].indexOf(s.door) + 1) % 4];
     void putShell({ ...s, door, windows: defaultWindows(s, door) });
   });
-  pal.querySelector<HTMLButtonElement>('[data-shell="down"]')?.addEventListener("click", () => {
+  tray.querySelector<HTMLButtonElement>('[data-shell="down"]')?.addEventListener("click", () => {
     if (!focus?.shell) return;
     if (confirm(kindOf(focus.shell) === "building" ? "Take the building down? What's inside stays on your plot's books." : "Take the pen down?")) void putShell(null);
   });
-  pal.querySelector<HTMLButtonElement>('[data-shell="in"]')?.addEventListener("click", () => focus && goInside(focus));
-  const sign = pal.querySelector<HTMLFormElement>(".sign-in");
+  const sign = tray.querySelector<HTMLFormElement>(".sign-in");
   sign?.addEventListener("submit", (e) => {
     e.preventDefault();
     const s = focus?.shell;
@@ -1737,18 +1789,16 @@ function restyle(change: { material?: string; paint?: string }) {
   else renderBuildInfo();
 }
 
-/** The toolbar's Building group, as things stand. */
+/** The Building tab's tray, as things stand. */
 function renderShellTools(f: Filing) {
-  const pal = $("palette");
+  const tray = $("tray");
   const s = f.shell;
   const material = shellKindHere(f) ? shellMaterial(f, s ? kindOf(s) : shellKindHere(f)!) : "";
   const paint = s?.paint ?? shellPick.paint;
-  for (const b of pal.querySelectorAll<HTMLButtonElement>("[data-material]")) b.classList.toggle("on", b.dataset.material === material);
-  for (const b of pal.querySelectorAll<HTMLButtonElement>("[data-paint]")) b.classList.toggle("on", b.dataset.paint === paint);
-  const stepIn = pal.querySelector<HTMLButtonElement>('[data-shell="in"]');
-  if (stepIn) stepIn.hidden = !s;
-  const status = pal.querySelector(".sign-status");
-  if (status) status.textContent = !s?.sign ? "" : s.sign_ok === null ? "Gary is reading the sign." : s.sign_ok ? "" : "Gary has declined the sign. It hangs blank.";
+  for (const b of tray.querySelectorAll<HTMLButtonElement>("[data-material]")) b.classList.toggle("on", b.dataset.material === material);
+  for (const b of tray.querySelectorAll<HTMLButtonElement>("[data-paint]")) b.classList.toggle("on", b.dataset.paint === paint);
+  const status = tray.querySelector(".sign-status");
+  if (status) status.textContent = !s?.sign ? "" : s.sign_ok === null ? "Gary is reading it." : s.sign_ok ? "" : "Gary declined it. It hangs blank.";
 }
 
 /** Save the shell, showing it at once and putting it back if the database says no. */
@@ -2368,6 +2418,15 @@ async function start() {
   renderAll();
   requestAnimationFrame(frame);
   if (guest && !localStorage.getItem("looking")) door();
+  if (import.meta.env.DEV) openAt(new URLSearchParams(location.search));
+}
+
+/** Dev only: ?at=12 goes straight up close to whoever holds plot 12, and &in=1 on inside. */
+function openAt(q: URLSearchParams) {
+  const f = [...filings.values()].find((f) => f.plot === Number(q.get("at")) && HELD.includes(f.status));
+  if (!f) return;
+  enterFocus(f);
+  if (q.get("in")) setTimeout(() => goInside(f), ZOOM_MS + 50);
 }
 
 resize();
