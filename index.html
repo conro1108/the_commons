@@ -215,6 +215,8 @@
       .tray .sign-in { padding: 0; }
       .tray .sign-in input { width: 9em; }
       .tray .sign-status { font-size: 11px; }
+      .tray .cluster > .meta { margin: 0; font-size: 11px; white-space: normal; max-width: 34em; }
+      .tray .cluster:has(.write-in:not(.sign-in)) { flex: 0 1 auto; }
 
       /* Phones: papers out of the way of the map, and the toolbar one swipeable row. */
       @media (max-width: 600px), (max-height: 500px) {
@@ -243,7 +245,8 @@
         .info-head h2 { text-transform: none; letter-spacing: 0; font-size: 13px; }
         .palette { border-width: 2px 0 0; box-shadow: none; padding-bottom: env(safe-area-inset-bottom); }
         .tray { padding: 8px 8px 4px; min-height: 88px; }
-        .tray .item { width: 66px; }
+        .tray .item { width: 68px; }
+        .tray .write-in input { flex: 1; min-width: 0; width: auto; }
         .dock .tab { min-width: 62px; }
         .caption { font-size: 11.5px; }
         /* The card as a sheet along the bottom, leaving the map above it to walk on. */

@@ -727,7 +727,8 @@ function renderPalette() {
       props.map((k) => item(`data-tool="prop:${k}"`, propPic(k), SHORT[k] ?? bare(pieceOf(k)?.name ?? k))).join("")]),
     // Anything not in the palette, by name: it goes down as a labelled parcel. What Gary has drawn here, again in a tap.
     ["Write in", propPic("item", { w: 40, h: 32 }), drawnHere(f).map((d) => item(`data-tool="item:${esc(d.label)}"`, propPic(d.look), d.label)).join("")
-      + `<form class="write-in"><input maxlength="24" placeholder="anything: a lobster" aria-label="something of your own" required><button>Use</button></form>`],
+      + `<div class="cluster"><h3>Something not on the shelves</h3><form class="write-in"><input maxlength="24" placeholder="a lobster" aria-label="something of your own" required><button>Use</button></form>`
+      + `<p class="meta">It goes down as a parcel with its name on, and Gary draws it.</p></div>`],
   ];
   if (kind) groups.push(["Building", propPic(kind === "building" ? "shed" : "fence", { w: 40, h: 32 }), shellTrayHtml(f)]);
   const scroll = $("tray").scrollLeft;
