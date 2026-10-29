@@ -549,6 +549,10 @@ function renderBoard() {
 }
 
 board.addEventListener("click", (e) => {
+  // Standing at the board, the first click of a double-click opens it and the second lands here.
+  const last = lastClick;
+  if (last && e.timeStamp - last.t <= 400 && Math.hypot(e.clientX - last.x, e.clientY - last.y) <= 30 && onBoard(toArt(e, mapView))
+    && !(e.target as HTMLElement).closest("button, [data-filing], textarea, input")) return boardTwice(e);
   if (e.target === board) closeBoard();
 });
 
@@ -1481,7 +1485,7 @@ canvas.addEventListener("click", (e) => {
   if (zoom) return;
   if (!focus) {
     if (onGary(toArt(e, mapView), touch ? 4 : 0)) return void summon();
-    if (onBoard(toArt(e, mapView))) return void summon(true);
+    if (onBoard(toArt(e, mapView))) return boardTwice(e);
     const f = enterableAt(e);
     if (f) {
       e.stopImmediatePropagation(); // or the map's own click opens the card again and walks off to the gate
@@ -1996,6 +2000,15 @@ function speak(line?: string) {
   const lines = GARY_LINES.filter((l) => l !== said?.line);
   said = { line: line ?? lines[Math.floor(Math.random() * lines.length)], until: performance.now() + 4500 };
   $("bubble").textContent = said.line;
+}
+
+/** The board double-clicked: summon rather than read it, so not open it on arrival either. */
+function boardTwice(e: MouseEvent) {
+  e.stopImmediatePropagation();
+  lastClick = null;
+  heading = null;
+  closeBoard();
+  void summon(true);
 }
 
 /** Double-clicked, Gary comes round your outstanding conditions now; from the board, the committee sits on what of yours awaits it too. */
