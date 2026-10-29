@@ -57,7 +57,8 @@
 
       #card { width: 290px; transform: rotate(-.6deg); animation: pop .18s ease-out; cursor: grab; }
       #card :is(button, input, textarea, a, label) { cursor: auto; }
-      #card button { cursor: pointer; }
+      #card button, #card summary, #card select, #card label { cursor: pointer; }
+      #card input, #card textarea { cursor: text; }
       #card .bar { float: right; display: flex; margin: -8px -10px 0 6px; }
       #card .bar button { position: static; margin: 0; padding: 0 6px; border: 0; background: none; box-shadow: none; font-size: 16px; color: #7a6a8a; }
       #card.folded, #card.folded:has(.schedule) { width: auto; max-width: 290px; }

@@ -493,7 +493,7 @@ card.addEventListener("click", (e) => {
 // Drag the card anywhere (not on a phone, where it's a sheet); it stays put after.
 let carrying: { dx: number; dy: number } | null = null;
 card.addEventListener("pointerdown", (e) => {
-  if (phone.matches || e.button !== 0 || (e.target as HTMLElement).closest("button, input, textarea, a, label")) return;
+  if (phone.matches || e.button !== 0 || (e.target as HTMLElement).closest("button, input, textarea, select, a, label, summary")) return;
   e.preventDefault();
   carrying = { dx: e.clientX - card.offsetLeft, dy: e.clientY - card.offsetTop };
   card.setPointerCapture(e.pointerId);
@@ -503,7 +503,7 @@ card.addEventListener("pointermove", (e) => {
   cardAt = { x: e.clientX - carrying.dx, y: e.clientY - carrying.dy };
   placeCard();
 });
-card.addEventListener("pointerup", () => void (carrying = null));
+for (const ev of ["pointerup", "pointercancel", "lostpointercapture"]) card.addEventListener(ev, () => void (carrying = null));
 
 // The notice board, read up close.
 const board = $("board");
