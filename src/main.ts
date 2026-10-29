@@ -90,6 +90,9 @@ const painted = new Map<number, string>();
 let openGroup = "Growing"; // the dock's open tab
 let gardenTool: Tool = "move"; // what we were holding before the Building tab, to hand back
 let placing = false; // a prop held under the pointer, set down where it's let go
+let fromTray: { tool: Tool; x: number; y: number; id: number; on: boolean } | null = null; // a thing being dragged out of the tray
+let dragged = false; // the click that ends a drag out of the tray isn't a pick
+let stamps: Cells[] | null = null; // shift held while putting down: what's gone down this stroke
 let drag: { p: Placement; dx: number; dy: number; x: number; y: number } | null = null; // moving a prop
 
 const pad = (n: number) => String(n).padStart(4, "0");
@@ -447,7 +450,7 @@ function setAppeal(a: Appeal) {
   appeals.set(a.filing, [...list, a].sort((x, y) => x.n - y.n));
 }
 
-/** Hang the card beside its plot, above or below, kept on screen. */
+/** Hang the card by its plot: above, below, then to either side, wherever it fits clear of it; else kept on screen. */
 function placeCard() {
   if (card.hidden || selected === null) return;
   if (phone.matches) return void (card.style.left = card.style.top = "");
@@ -460,12 +463,24 @@ function placeCard() {
   }
   const p = plotById(selected)!;
   const v = mapView;
-  const x = (v.ox + (p.x + p.w / 2) * v.s) / dpr - w / 2;
-  let y = (v.oy + p.y * v.s) / dpr - h - 12;
-  if (y < 8) y = (v.oy + (p.y + p.h) * v.s) / dpr + 12;
-  card.style.left = `${clamp(x, 8, canvas.width / dpr - w - 8)}px`;
-  card.style.top = `${clamp(y, 8, canvas.height / dpr - h - 8)}px`;
+  const W = canvas.width / dpr, H = canvas.height / dpr;
+  const l = (v.ox + p.x * v.s) / dpr, t = (v.oy + p.y * v.s) / dpr, r = l + (p.w * v.s) / dpr, b = t + (p.h * v.s) / dpr;
+  const cx = (l + r) / 2 - w / 2, cy = (t + b) / 2 - h / 2;
+  const spots = [[cx, t - h - 12], [cx, b + 12], [r + 12, cy], [l - w - 12, cy]];
+  const [x, y] = spots.find(([x, y], i) => (i < 2 ? y >= 8 && y + h <= H - 8 : x >= 8 && x + w <= W - 8)) ?? spots[0];
+  card.style.left = `${clamp(x, 8, W - w - 8)}px`;
+  card.style.top = `${clamp(y, 8, H - h - 8)}px`;
 }
+
+// The card can come up under the second click of a double-click: that still goes in.
+card.addEventListener("click", (e) => {
+  const last = lastClick;
+  if (!last || e.timeStamp - last.t > 400 || Math.hypot(e.clientX - last.x, e.clientY - last.y) > 30) return;
+  if ((e.target as HTMLElement).closest("button, input, textarea, a, label, summary")) return;
+  lastClick = null;
+  const f = selected !== null && heldPlots().get(selected);
+  if (f && BUILT.includes(f.status) && !focus && !zoom) walkInto(f);
+});
 
 // Drag the card anywhere (not on a phone, where it's a sheet); it stays put after.
 let carrying: { dx: number; dy: number } | null = null;
@@ -601,7 +616,7 @@ function wireVariation(f: Filing, typed: string, typing: boolean) {
 // the tray of that group's things above it, and the tools (src/dock.ts).
 
 const HINTS: Record<string, string> = {
-  prop: touch ? "Touch and slide; it lands where you let go." : "Click the plot to put it down.",
+  prop: touch ? "Touch and slide; it lands where you let go." : "Click the plot to put it down, or drag it there. Shift-drag puts down a row.",
   ground: "Drag across the plot to paint it.",
   move: "Drag things about.",
   resize: `${touch ? "Tap" : "Click"} something to make it bigger.`,
@@ -744,7 +759,12 @@ function renderPalette() {
   for (const t of $("dock").querySelectorAll<HTMLButtonElement>("[data-tab]")) t.addEventListener("click", () => openTab(t.dataset.tab!));
   // Pick a thing to put down; pick it again to put it back and just move things.
   for (const b of $("tray").querySelectorAll<HTMLButtonElement>("[data-tool]")) {
+    // Or drag it straight out onto the plot.
+    b.addEventListener("pointerdown", (e) => {
+      if (e.button === 0 && /^(prop|item):/.test(b.dataset.tool!)) fromTray = { tool: b.dataset.tool!, x: e.clientX, y: e.clientY, id: e.pointerId, on: false };
+    });
     b.addEventListener("click", () => {
+      if (dragged) return void (dragged = false);
       tool = tool === b.dataset.tool && openGroup !== "Building" ? "move" : b.dataset.tool!;
       problem("");
       renderBuildInfo();
@@ -1110,7 +1130,7 @@ function toBuild(e: MouseEvent) {
   if (!focus) return null;
   const plot = plotOf(focus);
   const p = toArt(e, focusView);
-  const lift = placing && (e as PointerEvent).pointerType !== "mouse" ? (LIFT * dpr) / focusView.s : 0;
+  const lift = (placing || fromTray?.on) && (e as PointerEvent).pointerType !== "mouse" ? (LIFT * dpr) / focusView.s : 0;
   const b = { x: p.x - FOCUS_PAD, y: p.y - FOCUS_PAD - lift };
   return b.x >= 0 && b.y >= 0 && b.x < plot.w * ZOOM && b.y < plot.h * ZOOM ? b : null;
 }
@@ -1260,6 +1280,7 @@ canvas.addEventListener("pointerdown", (e) => {
   if (kind === "resize") return void regrow(b);
   if (e.button !== 0) return;
   canvas.setPointerCapture(e.pointerId);
+  if (placing && e.shiftKey && kind !== "reclaim") return stamp((stamps = [], b));
   if (kind === "shell" || kind === "window") return shellDown(b);
   if (kind === "ground") {
     const before = focus.ground ?? empty(plotOf(focus));
@@ -1297,6 +1318,7 @@ canvas.addEventListener("pointermove", (e) => {
     return;
   }
   pointer = b;
+  if (stamps && placing) stamp(b);
   if (stroke) paintTo(brushAt(b.x, b.y));
   if (shellDrag) shellMove(b);
   if (drag) {
@@ -1312,9 +1334,9 @@ canvas.addEventListener("pointerup", async (e) => {
     placing = false;
     const at = pointer;
     if (e.pointerType !== "mouse") pointer = null;
-    if (!at || !focus) return;
-    const [kind, arg] = tool.split(":");
-    return void (kind === "item" ? placeAt("item", at, tool.slice(5)) : kind === "reclaim" ? putBack(at) : placeAt(arg, at));
+    if (stamps) return void (stamps = null);
+    if (at && focus) putDown(at);
+    return;
   }
   if (stroke && focus) {
     const { before } = stroke;
@@ -1342,7 +1364,57 @@ canvas.addEventListener("pointerup", async (e) => {
   }
 });
 
-canvas.addEventListener("pointercancel", () => void (placing = false));
+canvas.addEventListener("pointercancel", () => void (placing = false, stamps = null));
+
+/** Put down whatever's in hand. */
+function putDown(at: { x: number; y: number }) {
+  const [kind, arg] = tool.split(":");
+  void (kind === "item" ? placeAt("item", at, tool.slice(5)) : kind === "reclaim" ? putBack(at) : placeAt(arg, at));
+}
+
+/** Shift-dragging: another one wherever it fits clear of the ones already put down this stroke. */
+function stamp(at: { x: number; y: number }) {
+  if (!focus || !stamps) return;
+  const shape = sized(tool.startsWith("item:") ? drawnAs(tool.slice(5)) : tool.split(":")[1], size);
+  const { w, h } = propSize(shape);
+  const c = { ...propAt(shape, at.x, at.y), w: Math.ceil(w / ZOOM), h: Math.ceil(h / ZOOM) };
+  if (stamps.some((s) => c.x < s.x + s.w && c.x + c.w > s.x && c.y < s.y + s.h && c.y + c.h > s.y)) return;
+  if (!canPlace(plotOf(focus), shape, c.x, c.y, focus.shell)) return;
+  stamps.push(c);
+  putDown(at);
+}
+
+// Dragging a thing out of the tray: the browser's own image drag would cancel it. It's in hand once it leaves the button, and goes down where it's let go over the plot.
+$("tray").addEventListener("dragstart", (e) => e.preventDefault());
+const overCanvas = (e: PointerEvent) => document.elementFromPoint(e.clientX, e.clientY) === canvas;
+window.addEventListener("pointermove", (e) => {
+  if (!fromTray || e.pointerId !== fromTray.id || !focus) return;
+  if (!fromTray.on) {
+    if (Math.hypot(e.clientX - fromTray.x, e.clientY - fromTray.y) < 8) return;
+    fromTray.on = true;
+    tool = fromTray.tool;
+    problem("");
+    renderBuildInfo();
+  }
+  pointer = overCanvas(e) ? toBuild(e) : null;
+  if (e.shiftKey && !stamps) stamps = [];
+  if (stamps && pointer) stamp(pointer);
+});
+window.addEventListener("pointerup", (e) => {
+  if (!fromTray || e.pointerId !== fromTray.id) return;
+  const { on } = fromTray;
+  const at = on && overCanvas(e) ? toBuild(e) : null;
+  fromTray = null;
+  if (!on) return;
+  dragged = true; // any click this release makes comes next, in the same task
+  setTimeout(() => void (dragged = false));
+  if (e.pointerType !== "mouse") pointer = null;
+  if (stamps) return void (stamps = null);
+  if (at && focus) putDown(at);
+});
+window.addEventListener("pointercancel", (e) => {
+  if (fromTray?.id === e.pointerId) fromTray = stamps = null;
+});
 
 canvas.addEventListener("pointerleave", () => {
   hover = null;
@@ -1411,7 +1483,10 @@ canvas.addEventListener("click", (e) => {
     if (onGary(toArt(e, mapView), touch ? 4 : 0)) return void summon();
     if (onBoard(toArt(e, mapView))) return void summon(true);
     const f = enterableAt(e);
-    if (f) walkInto(f);
+    if (f) {
+      e.stopImmediatePropagation(); // or the map's own click opens the card again and walks off to the gate
+      walkInto(f);
+    }
   } else if (!toBuild(e)) {
     leaveFocus();
   }
