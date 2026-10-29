@@ -51,8 +51,24 @@ export const shown = (tags: Tag[], now = Date.now()) =>
 export function letterHtml(tags: Tag[], o: { mine: boolean; here: Set<number>; now?: number }) {
   const list = shown(tags, o.now).sort((a, b) => b.id - a.id);
   if (!list.length) return "";
+  // What's settled folds to a line each, as the appeal trail does; what still wants something stays open.
   const okayed = list.filter(waved);
-  return `<div class="letter">${list.filter((t) => !waved(t)).map((t) => tagHtml(t, o.mine, o.here.has(t.id))).join("")}${okayed.length ? okayedHtml(okayed) : ""}</div>`;
+  const settled = list.filter((t) => !isOpen(t) && !waved(t));
+  const folds = [...settled.map((t) => settledHtml(t, o.mine)), ...(okayed.length ? [okayedHtml(okayed)] : [])];
+  return `<div class="letter">${list.filter(isOpen).map((t) => tagHtml(t, o.mine, o.here.has(t.id))).join("")}${folds.length ? `<div class="trail">${folds.join("")}</div>` : ""}</div>`;
+}
+
+const fold = (title: string, said: string, outcome: string, good: boolean, body: string) =>
+  `<details><summary><b>${esc(title)}</b><q>${esc(said)}</q><span${good ? ` class="good"` : ""}>${outcome}</span></summary>${body}</details>`;
+
+/** A settled tag as a line: the thing, what it was said to be for, how it came out. Opened, what Gary asked and said. */
+function settledHtml(t: Tag, mine: boolean) {
+  const what = capital(t.what);
+  const reply = t.reply ? `<p class="permit">${esc(t.reply)}</p>` : "";
+  if (t.status === "lawful") return fold(what, "up a week and nobody asked", "lawful", true, reply);
+  const good = t.status === "ancillary";
+  const pound = good ? "" : `<p class="meta">The ${esc(t.what)} is in the pound at Gary's hut.${mine ? " Get it back there." : ""}</p>`;
+  return fold(what, t.answer ?? t.question, good ? "on the schedule" : "impounded", good, `<p><b>Gary:</b> <q>${esc(t.question)}</q></p>${reply}${pound}`);
 }
 
 /** Put on the schedule by Gary himself on his rounds, without asking: plainly part of the place. */
@@ -63,7 +79,8 @@ const listOf = (xs: string[]) => (xs.length < 2 ? xs.join("") : `${xs.slice(0, -
 
 function okayedHtml(ts: Tag[]) {
   const names = [...new Set(ts.map((t) => t.what.toLowerCase()))].map((w) => `the ${w}`);
-  return `<div class="condition"><p><b>Gary:</b> <q>Been round. ${esc(capital(listOf(names)))}: all part of the place. On the schedule.</q></p></div>`;
+  const line = `${capital(listOf(names))}: all part of the place.`;
+  return fold("His round", line, "on the schedule", true, `<p><b>Gary:</b> <q>Been round. ${esc(line)} On the schedule.</q></p>`);
 }
 const capital = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 

@@ -59,7 +59,7 @@
       #card :is(button, input, textarea, a, label) { cursor: auto; }
       #card button, #card summary, #card select, #card label { cursor: pointer; }
       #card input, #card textarea { cursor: text; }
-      /* An appeal's history, a line a round. */
+      /* An appeal's history, a line a round; settled letters, a line each. */
       .trail { margin: 6px 0; border-left: 2px solid #c9b88f; padding-left: 6px; }
       .trail summary { display: flex; gap: 5px; align-items: baseline; list-style: none; font-size: 12px; color: #7a6a8a; padding: 1px 0; }
       .trail summary::-webkit-details-marker { display: none; }
@@ -68,6 +68,7 @@
       .trail summary b { white-space: nowrap; color: #402e3a; }
       .trail summary q { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-style: italic; }
       .trail summary span { white-space: nowrap; color: #b5404f; }
+      .trail summary span.good { color: #3d7a3a; }
       .trail details[open] { margin-bottom: 4px; }
       .trail details[open] > summary { flex-wrap: wrap; }
       .trail details[open] > summary q { white-space: normal; flex-basis: 100%; order: 1; padding-left: 12px; }
