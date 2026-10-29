@@ -5,6 +5,7 @@
 //   ?shell=0     no building up yet          ?kind=enclosure  a pen, not a building
 //   ?theirs=1    the plot is someone else's  ?bare=1          nothing placed on it
 //   ?in=1        and step inside (with ?at)
+//   ?appeal=gary or committee   a denial of yours on plot 7, its appeal not yet heard
 
 import type { PropDef } from "../src/content/canon/props.ts";
 import type { Avatar } from "../src/avatar.ts";
@@ -51,6 +52,8 @@ const filing = (id: number, filer: string, plot: number, intent: string): Filing
   ground: null, schedule, shell: q.get("shell") === "0" ? null : { ...shell }, open_sign: true,
 });
 const filings: Filing[] = [filing(1, q.get("theirs") ? THEM : ME, PLOT, "a karate studio"), filing(2, THEM, PLOT === 3 ? 4 : 3, "a quiet bench")];
+const court = q.get("appeal") as Appeal["court"] | null;
+if (court) filings.push({ ...filing(3, ME, 7, "a moat"), status: "denied", bylaw: 2, permit: null, shell: null });
 
 let nextId = 100;
 const placements: Placement[] = q.get("bare") ? [] : [
@@ -81,7 +84,8 @@ export const avatarOf = (_id: string): Avatar | null => null;
 export const rehandle = async (_id: string) => handles;
 export const saveProfile = async (id: string, name: string, _a: Avatar) => (handles.set(id, name), null);
 export const fileClaim = async () => "The fake in-tray is closed.";
-export const loadAppeals = async (): Promise<Appeal[]> => [];
+export const loadAppeals = async (): Promise<Appeal[]> =>
+  court ? [{ id: 1, filing: 3, n: 1, court, plea: "It's a very small moat.", heard_at: null, allowed: null, bylaw: null, reply: null, minutes: null }] : [];
 export const fileAppeal = async (): Promise<Appeal | string> => "The fake committee isn't sitting.";
 export const loadPlacements = async () => placements.map((p) => ({ ...p }));
 

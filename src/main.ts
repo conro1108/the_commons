@@ -108,10 +108,18 @@ const clamp = (v: number, lo: number, hi: number) => Math.min(Math.max(v, lo), M
 function heldPlots() {
   const held = new Map<number, Filing>();
   for (const f of filings.values()) {
+    const waiting = awaiting(f);
     if (unread.has(f.id)) held.set(f.plot, { ...f, status: "pending" });
     else if (HELD.includes(f.status)) held.set(f.plot, f);
+    else if (waiting) held.set(f.plot, { ...f, status: waiting === "committee" ? "committee" : "pending" });
   }
   return held;
+}
+
+/** Which court has one of our denials before it now, if any. Only the filer can see an appeal before it's heard, so only ours count. */
+function awaiting(f: Filing) {
+  if (f.filer !== me || (f.status !== "denied" && f.status !== "refused")) return null;
+  return appeals.get(f.id)?.find((a) => !a.heard_at)?.court ?? null;
 }
 
 const plotOf = (f: Filing) => plotById(f.plot)!;
@@ -267,7 +275,7 @@ function door() {
 function renderTag() {
   const names = [...walkers.keys()].map(who).sort((a, b) => (a === "you" ? -1 : b === "you" ? 1 : a.localeCompare(b)));
   const held = [...filings.values()]
-    .filter((f) => f.filer === me && (HELD.includes(f.status) || unread.has(f.id)))
+    .filter((f) => f.filer === me && (HELD.includes(f.status) || unread.has(f.id) || awaiting(f)))
     .sort((a, b) => a.plot - b.plot);
   const mine = handles.get(me) ?? "…";
   $("tag").innerHTML = `<h1>The Commons</h1><p class="meta">Administered by Gary. Here: ${names.map(esc).join(", ")}</p>
@@ -276,7 +284,7 @@ function renderTag() {
       : `On file as <button class="plot-link rename" title="Amend your papers">${esc(mine)}</button>`}</p>
     ${held.length
       ? `<p class="yours"><span class="swatch" style="background:${colourOf(me)}"></span>${held
-          .map((f) => `<button data-filing="${f.id}" class="plot-link ${unread.has(f.id) ? "pending" : f.status}" title="${esc(labelOf(f.plot))}">${f.plot}</button>`)
+          .map((f) => `<button data-filing="${f.id}" class="plot-link ${unread.has(f.id) ? "pending" : (awaiting(f) && "pending") || f.status}" title="${esc(labelOf(f.plot))}">${f.plot}</button>`)
           .join("")}</p>`
       : `<p class="hint">${touch ? "Tap" : "Click"} a plot to read its permit, or an empty one to claim it.</p>`}`;
   for (const b of $("tag").querySelectorAll<HTMLButtonElement>("[data-filing]")) {
