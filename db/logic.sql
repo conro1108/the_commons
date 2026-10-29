@@ -786,6 +786,9 @@ begin
           -- nothing open on it, or on another of the same kind (three geese are one question)
           and not exists (select 1 from the_commons.tags t where t.filing = g.id and t.status in ('asked', 'tagged', 'filed')
             and (t.placement = p.id or lower(t.what) = lower(the_commons.thing_name(p.prop, p.label)))))
+        -- summoned, he takes a second look at questions still unanswered on the door, and may wave them through
+        or asked_by is not null and g.filer = asked_by and g.status in ('approved', 'conditional') and g.schedule is not null
+          and exists (select 1 from the_commons.tags t where t.filing = g.id and t.status = 'asked' and t.answer is null)
     order by g.built_at desc nulls last
     limit case when asked_by is null then 2 else 10 end
   loop

@@ -27,7 +27,7 @@ import {
   onShell, raise, scheduledMaterial, shellKind, windowFits, type Kind as ShellKind,
 } from "./shell.ts";
 import { saveShell } from "./net.ts";
-import type { Shell } from "./schedule.ts";
+import { scheduled, type Shell } from "./schedule.ts";
 import { BOARD_BOX } from "./map/landmarks.ts";
 import { GARY_LINES, garyAt } from "./life.ts";
 import { looksLike } from "./avatar.ts";
@@ -681,12 +681,26 @@ function renderBuildInfo() {
   doorway();
 }
 
+/** A tick on a tray piece the permit's schedule already covers there: put it down and Gary won't ask. */
+function covered(b: HTMLButtonElement, f: Filing, room: "out" | "in") {
+  const t = b.dataset.tool!;
+  const [kind, arg] = t.split(":");
+  const thing = room === "in" ? { prop: t, room } : kind === "prop" ? { prop: arg, room } : kind === "item" ? { prop: "item", label: t.slice(5), room } : null;
+  const on = !!thing && !!f.schedule && scheduled(f.schedule, thing);
+  b.classList.toggle("covered", on);
+  if (on) b.title = "On your permit";
+  else if (b.title === "On your permit") b.removeAttribute("title");
+}
+
 /** Flip the dock's classes; it only exists on your own plot. */
 function renderTools(f: Filing) {
   const wants = f.wants && !f.met_at ? f.wants : null;
   const tray = $("tray");
   for (const b of $("tools").querySelectorAll<HTMLButtonElement>("[data-tool]")) b.classList.toggle("on", b.dataset.tool === tool);
-  for (const b of tray.querySelectorAll<HTMLButtonElement>("[data-tool]")) b.classList.toggle("wanted", b.dataset.tool === `prop:${wants}`);
+  for (const b of tray.querySelectorAll<HTMLButtonElement>("[data-tool]")) {
+    b.classList.toggle("wanted", b.dataset.tool === `prop:${wants}`);
+    covered(b, f, "out");
+  }
   tray.querySelector(".write-in")?.classList.toggle("on", tool.startsWith("item:"));
   for (const g of tray.querySelectorAll<HTMLElement>("[data-group]")) g.hidden = g.dataset.group !== openGroup;
   for (const t of $("dock").querySelectorAll<HTMLButtonElement>("[data-tab]")) {
@@ -1624,7 +1638,10 @@ function renderRoomTools() {
   $("room-tools").hidden = !mine;
   if (mine && !roomBuilt) buildRoomDock();
   if (mine) {
-    for (const b of $("room-tools").querySelectorAll<HTMLButtonElement>("[data-tool]")) b.classList.toggle("on", b.dataset.tool === roomTool);
+    for (const b of $("room-tools").querySelectorAll<HTMLButtonElement>("[data-tool]")) {
+      b.classList.toggle("on", b.dataset.tool === roomTool);
+      if (b.closest("#room-tray")) covered(b, indoorFiling()!, "in");
+    }
     for (const g of $("room-tray").querySelectorAll<HTMLElement>("[data-group]")) g.hidden = g.dataset.group !== roomGroup;
     for (const t of $("room-dock").querySelectorAll<HTMLButtonElement>("[data-tab]")) t.classList.toggle("on", t.dataset.tab === roomGroup);
     const f = fitting(roomTool);

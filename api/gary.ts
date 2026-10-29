@@ -1685,31 +1685,72 @@ export const questionFor = (id: number, what: string, where: Where) =>
 const thingName = (prop: string, label?: string | null) =>
   prop === "item" ? (label ?? "parcel").trim().replace(/^(a|an|the|some)\s+/i, "") : prop.replace(/_/g, " ");
 
-/** One visit: a question for each kind of thing off the schedule he hasn't already asked about. */
+// Before asking, he looks: what plainly belongs (beds in a cabin, a kettle in a dojo) he puts on the schedule himself, and
+// asks only about the rest. Questions still unanswered on the door get the same second look.
+const FITS = {
+  belongs: "Anyone would expect such a place to have it, or it's small, ordinary and harmless anywhere: a bed or a stove in a cabin, shelves, a kettle in a dojo, a lamp, a plant pot, a bird box, a bench.",
+  doubtful: "It isn't obvious why it's here: a substantial thing with a use of its own (a hot tub at a karate studio, a stage, a pony, a second shop), or something odd enough that you'd want to hear what it's for.",
+} as const;
+const MAX_LOOK = 12; // things judged in one visit
+
+type Placed = { id: number; prop: string; label: string | null; label_ok: boolean | null; room: Where };
+
+/** One visit: what plainly belongs goes on the schedule; a question for each other kind of thing off it he hasn't asked about. */
 async function round(db: Db, id: number): Promise<Response> {
-  const { data: f } = await db.from("filings").select("id, status, schedule").eq("id", id).single();
+  const { data: f } = await db.from("filings").select("id, status, intent, schedule").eq("id", id).single();
   if (!f || !BUILT_STATUSES.includes(f.status) || !f.schedule) return Response.json({ skipped: true });
+  const s = f.schedule as Schedule;
   const { data: placed } = await db.from("placements").select("id, prop, label, label_ok, room").eq("filing", id).is("impounded_at", null).order("id");
-  const { data: open } = await db.from("tags").select("placement, what").eq("filing", id).in("status", ["asked", "tagged", "filed"]);
+  const byId = new Map(((placed ?? []) as Placed[]).map((p) => [p.id, p]));
+  const { data: open } = await db.from("tags").select("id, placement, what, status, answer").eq("filing", id).in("status", ["asked", "tagged", "filed"]);
   const asked = new Set((open ?? []).map((t) => t.placement as number));
   const askedOf = new Set((open ?? []).map((t) => (t.what as string).toLowerCase()));
   // Three geese are one question: the first of each, and the answer covers the rest (the schedule goes by kind).
-  const kinds = new Map<string, { id: number; what: string; where: Where }>();
-  for (const p of (placed ?? []) as { id: number; prop: string; label: string | null; label_ok: boolean | null; room: Where }[]) {
-    if ((p.prop === "item" && !p.label_ok) || asked.has(p.id) || scheduled(f.schedule as Schedule, p)) continue;
+  const kinds = new Map<string, { p: Placed; what: string; tag?: number }>();
+  for (const p of byId.values()) {
+    if ((p.prop === "item" && !p.label_ok) || asked.has(p.id) || scheduled(s, p)) continue;
     const what = thingName(p.prop, p.label);
     if (askedOf.has(what.toLowerCase())) continue;
     const key = `${p.room}:${what.toLowerCase()}`;
-    if (!kinds.has(key)) kinds.set(key, { id: p.id, what, where: p.room });
+    if (!kinds.has(key)) kinds.set(key, { p, what });
   }
-  const ask = [...kinds.values()].slice(0, PER_VISIT);
-  let n = 0;
-  for (const k of ask) {
-    // One open tag per thing (tags_open): a visit retried alongside asks nothing twice.
-    const { error } = await db.from("tags").insert({ filing: id, placement: k.id, what: k.what, question: questionFor(k.id, k.what, k.where) });
-    if (!error) n++;
+  const waiting = (open ?? []).filter((t) => t.status === "asked" && !t.answer && byId.has(t.placement))
+    .map((t) => ({ p: byId.get(t.placement)!, what: t.what as string, tag: t.id as number }));
+  const look = [...waiting, ...kinds.values()].slice(0, MAX_LOOK);
+  if (!look.length) return Response.json({ asked: 0 });
+
+  const { answers } = await ask("round", {
+    use: s.use || f.intent,
+    shell: s.shell.words,
+    schedule: s.fittings.map((x) => `${x.name} (${x.where === "in" ? "inside" : "outside"})`),
+    things: look.map((k, i) => `${i}: ${k.what}, ${k.p.room === "in" ? "inside" : "outside"}`),
+  }, Object.fromEntries(look.map((k, i) => [`t${i}`, {
+    type: "choice" as const,
+    instructions: `Thing ${i}, the ${k.what} (${k.p.room === "in" ? "inside" : "outside"}): would ${s.use || f.intent} plainly have it? Be generous: most things people put about a place are fine.`,
+    criteria: FITS as Record<keyof typeof FITS, string>,
+  }])));
+  const at = new Date().toISOString();
+  const record = { answers, judge: JUDGE };
+  let waved = 0, n = 0;
+  for (const [i, k] of look.entries()) {
+    const a = answers[`t${i}`];
+    const fits = a.probabilities ? (a.probabilities.belongs ?? 0) >= 0.5 : a.choice === "belongs";
+    if (fits) {
+      // Waved through: a settled tag with no answer, which the paper shows as his note of what he's okayed.
+      const { data: done } = k.tag
+        ? await db.from("tags").update({ status: "ancillary", closed_at: at, record }).eq("id", k.tag).eq("status", "asked").is("answer", null).select("id")
+        : await db.from("tags").insert({ filing: id, placement: k.p.id, what: k.what, question: "", status: "ancillary", closed_at: at, record }).select("id");
+      if (!done?.length) continue;
+      const fitting: Fitting = { name: k.p.prop === "item" ? k.p.label!.trim() : k.what, key: k.p.prop, where: k.p.room, how: "ancillary", at };
+      await db.rpc("add_fitting", { p_filing: id, p_fitting: fitting });
+      waved++;
+    } else if (!k.tag && n < PER_VISIT) {
+      // One open tag per thing (tags_open): a visit retried alongside asks nothing twice.
+      const { error } = await db.from("tags").insert({ filing: id, placement: k.p.id, what: k.what, question: questionFor(k.p.id, k.what, k.p.room) });
+      if (!error) n++;
+    }
   }
-  return Response.json({ asked: n });
+  return Response.json({ asked: n, waved });
 }
 const BUILT_STATUSES = ["approved", "conditional"];
 

@@ -34,6 +34,8 @@ if (out) {
     fakeTag(5, 1, "ancillary", { id: 5 }),
     fakeTag(6, 1, "lawful", { id: 6 }),
     fakeTag(7, 1, "impounded", { id: 7, what: "jukebox", question: "What's the jukebox for?" }),
+    // waved through on his round, unasked
+    ...["fridge", "stove", "wall shelf"].map((what, i) => fakeTag(8 + i, 1, "ancillary", { id: 8 + i, what, question: "", answer: null, reply: null })),
   ];
   const here = new Set(q.get("here") ? [1] : []);
   const icon = (name: string) => propCanvas(name).toDataURL();

@@ -51,8 +51,21 @@ export const shown = (tags: Tag[], now = Date.now()) =>
 export function letterHtml(tags: Tag[], o: { mine: boolean; here: Set<number>; now?: number }) {
   const list = shown(tags, o.now).sort((a, b) => b.id - a.id);
   if (!list.length) return "";
-  return `<div class="letter">${list.map((t) => tagHtml(t, o.mine, o.here.has(t.id))).join("")}</div>`;
+  const okayed = list.filter(waved);
+  return `<div class="letter">${list.filter((t) => !waved(t)).map((t) => tagHtml(t, o.mine, o.here.has(t.id))).join("")}${okayed.length ? okayedHtml(okayed) : ""}</div>`;
 }
+
+/** Put on the schedule by Gary himself on his rounds, without asking: plainly part of the place. */
+export const waved = (t: Tag) => t.status === "ancillary" && !t.answer;
+
+/** "The fridge, the stove and the wall shelf" */
+const listOf = (xs: string[]) => (xs.length < 2 ? xs.join("") : `${xs.slice(0, -1).join(", ")} and ${xs.at(-1)}`);
+
+function okayedHtml(ts: Tag[]) {
+  const names = [...new Set(ts.map((t) => t.what.toLowerCase()))].map((w) => `the ${w}`);
+  return `<div class="condition"><p><b>Gary:</b> <q>Been round. ${esc(capital(listOf(names)))}: all part of the place. On the schedule.</q></p></div>`;
+}
+const capital = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
 function tagHtml(t: Tag, mine: boolean, here: boolean) {
   const said = `${t.answer ? ` <span class="meta">${mine ? "You" : "The holder"}:</span> <q>${esc(t.answer)}</q>` : ""}`;
