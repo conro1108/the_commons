@@ -55,10 +55,22 @@
       .swatch { display: inline-block; width: 10px; height: 10px; border: 2px solid #402e3a; margin-right: 6px; vertical-align: -1px; }
       .plot-link { margin: 2px 2px 0 0; padding: 0 6px; background: #fffdf3; border-color: currentColor; box-shadow: none; }
 
-      #card { width: 290px; transform: rotate(-.6deg); animation: pop .18s ease-out; cursor: grab; }
+      #card { width: 290px; transform: rotate(-.6deg); animation: pop .18s ease-out; cursor: grab; max-height: calc(100dvh - 16px); overflow-y: auto; }
       #card :is(button, input, textarea, a, label) { cursor: auto; }
       #card button, #card summary, #card select, #card label { cursor: pointer; }
       #card input, #card textarea { cursor: text; }
+      /* An appeal's history, a line a round. */
+      .trail { margin: 6px 0; border-left: 2px solid #c9b88f; padding-left: 6px; }
+      .trail summary { display: flex; gap: 5px; align-items: baseline; list-style: none; font-size: 12px; color: #7a6a8a; padding: 1px 0; }
+      .trail summary::-webkit-details-marker { display: none; }
+      .trail summary::before { content: "▸"; }
+      .trail details[open] > summary::before { content: "▾"; }
+      .trail summary b { white-space: nowrap; color: #402e3a; }
+      .trail summary q { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-style: italic; }
+      .trail summary span { white-space: nowrap; color: #b5404f; }
+      .trail details[open] { margin-bottom: 4px; }
+      .trail details[open] > summary { flex-wrap: wrap; }
+      .trail details[open] > summary q { white-space: normal; flex-basis: 100%; order: 1; padding-left: 12px; }
       #card .bar { float: right; display: flex; margin: -8px -10px 0 6px; }
       #card .bar button { position: static; margin: 0; padding: 0 6px; border: 0; background: none; box-shadow: none; font-size: 16px; color: #7a6a8a; }
       #card.folded, #card.folded:has(.schedule) { width: auto; max-width: 290px; }

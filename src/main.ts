@@ -144,7 +144,15 @@ function ruling(f: Filing, fresh = false) {
   if (unread.has(f.id)) return `<p class="stamp pending">In the post</p><p class="meta">Gary's reply is on its way.</p>`;
   // Appealed, the filing reads as first denied, whatever came of it after.
   const heard = appeals.get(f.id) ?? [];
-  if (heard.length) return stamped({ ...f, status: "denied" }) + heard.map((a, i) => appealHtml(a, f, heard, fresh && i === heard.length - 1)).join("");
+  // How it got here a line a round, each opening to what was said; the latest word on it in full.
+  if (heard.length) {
+    const k = heard.length - 1;
+    const line = (title: string, said: string | null, outcome: string, body: string) =>
+      `<details><summary><b>${title}</b><q>${esc(said ?? "")}</q><span>${outcome}</span></summary>${body}</details>`;
+    return `<div class="trail">${line("Gary", f.permit, "denied", stamped({ ...f, status: "denied" }))}${heard.slice(0, k).map((a) =>
+      line(a.court === "gary" ? `Appeal ${a.n}` : "Committee", a.plea, a.allowed ? "allowed" : "dismissed",
+        `<p class="permit">${esc(a.reply ?? "")}</p>${a.minutes ? membersHtml(a.minutes, f) : ""}`)).join("")}</div>${appealHtml(heard[k], f, heard, fresh)}`;
+  }
   return stamped(f, fresh);
 }
 
