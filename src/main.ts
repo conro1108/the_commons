@@ -8,7 +8,7 @@ import {
 import {
   APPEALS, HELD, nextCourt, avatarOf, fileAppeal, fileClaim, handlesFor, isGuest, keepPapers, logIn, loadAppeals, loadFilings, loadPlacements, move, paint,
   place, placeInside, moveInside, rehandle, saveProfile, signIn, summonGary, supabase, unplace,
-  answerTag, fileRetrospective, loadTags, reclaim, summonRounds,
+  answerTag, fileRetrospective, loadTags, reclaim, summonRounds, summonCommittee,
   type Appeal, type Filing, type Placement,
 } from "./net.ts";
 import { fileChangeOfUse, fileVariation, loadVariations, type Variation } from "./net.ts";
@@ -1409,6 +1409,7 @@ canvas.addEventListener("click", (e) => {
   if (zoom) return;
   if (!focus) {
     if (onGary(toArt(e, mapView), touch ? 4 : 0)) return void summon();
+    if (onBoard(toArt(e, mapView))) return void summon(true);
     const f = enterableAt(e);
     if (f) walkInto(f);
   } else if (!toBuild(e)) {
@@ -1922,10 +1923,11 @@ function speak(line?: string) {
   $("bubble").textContent = said.line;
 }
 
-/** Double-clicked, Gary comes round your outstanding conditions now. */
-async function summon() {
-  const [n, r] = await Promise.all([summonGary(), summonRounds()]);
-  speak(n === null && r === null ? "Not now. The kettle." : n || r ? "Right. I'll come round now." : "Nothing outstanding that I haven't already seen.");
+/** Double-clicked, Gary comes round your outstanding conditions now; from the board, the committee sits on what of yours awaits it too. */
+async function summon(board = false) {
+  const [n, r, c] = await Promise.all([summonGary(), summonRounds(), board ? summonCommittee() : 0]);
+  speak(n === null && r === null && c === null ? "Not now. The kettle."
+    : c ? "Fine. I'll ring round the committee." : n || r ? "Right. I'll come round now." : "Nothing outstanding that I haven't already seen.");
 }
 
 // Hold the notice board for three seconds and the back office opens (src/backoffice.ts).

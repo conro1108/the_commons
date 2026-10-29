@@ -110,6 +110,7 @@ export const loadTags = async (): Promise<Tag[]> => [];
 export const answerTag = async () => null;
 export const reclaim = async (): Promise<boolean | string> => true;
 export const summonRounds = async () => 0;
+export const summonCommittee = async () => 0;
 export const fileRetrospective = async (_t: Tag): Promise<Variation | string> => "Not offline.";
 export const loadSpirit = async (_f: number): Promise<{ notices: Notice[]; visits: Visit[] }> => ({
   notices: [{ id: 1, filing: 1, line: "Beginners' class, Tuesdays", posted_at: now, ok: true }],

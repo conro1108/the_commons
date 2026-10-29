@@ -258,6 +258,12 @@ export async function summonGary(): Promise<number | null> {
   return error ? null : data;
 }
 
+/** Double-tap the notice board: the committee sits now on what of yours is waiting for it. How many, or null. */
+export async function summonCommittee(): Promise<number | null> {
+  const { data, error } = await supabase.rpc("summon_committee");
+  return error ? null : data;
+}
+
 export async function unplace(id: number): Promise<boolean> {
   const { error } = await supabase.from("placements").delete().eq("id", id);
   return !error;

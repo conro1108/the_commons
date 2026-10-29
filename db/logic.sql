@@ -649,6 +649,40 @@ end $$;
 revoke execute on function the_commons.convene_variations() from public, anon, authenticated;
 select cron.schedule('the_commons_committee_variations', '0 4 * * *', 'select the_commons.convene_variations()');
 
+-- Double-tap the notice board and the committee sits now on whatever of yours
+-- is waiting for it: referrals, appeals, material variations.
+create function the_commons.summon_committee() returns int
+language plpgsql security definer set search_path = '' as $$
+declare
+  secret text;
+  item jsonb;
+  n int := 0;
+begin
+  if auth.uid() is null then return 0; end if;
+  select decrypted_secret into secret from vault.decrypted_secrets where name = 'the_commons_gary';
+  if secret is null then return null; end if;
+  for item in
+    select jsonb_build_object('committee', id) from the_commons.filings where status = 'committee' and filer = auth.uid()
+    union all
+    select jsonb_build_object('committee_appeal', a.id) from the_commons.appeals a
+      join the_commons.filings f on f.id = a.filing
+      where a.court = 'committee' and a.heard_at is null and f.filer = auth.uid()
+    union all
+    select jsonb_build_object('committee_variation', id) from the_commons.variations where status = 'committee' and filer = auth.uid()
+  loop
+    n := n + 1;
+    perform net.http_post(
+      url := 'https://the-commons-eosin.vercel.app/api/gary',
+      body := item,
+      headers := jsonb_build_object('Content-Type', 'application/json',
+                                    'Authorization', 'Bearer ' || secret),
+      timeout_milliseconds := 30000);
+  end loop;
+  return n;
+end $$;
+revoke execute on function the_commons.summon_committee() from public, anon;
+grant execute on function the_commons.summon_committee() to authenticated;
+
 -- --- the letter (slice D) -----------------------------------------------------
 -- Gary's rounds against the schedule: he asks about anything built that isn't
 -- on it (tags), the holder answers, /api/gary rules (explained: ancillary, on
