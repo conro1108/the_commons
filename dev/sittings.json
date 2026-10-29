@@ -1,0 +1,181 @@
+[
+ {
+  "intent": "A little scenic barn with sheep’s",
+  "plot": 12,
+  "plea": "I think gary is being unreasonable. Sheep are not categorically larger than goats. This breed of sheep is smaller than many goats",
+  "condition": "A trough beside the barn, and no fence, sign or second shelter.",
+  "minutes": {
+   "finding": "The committee approved the filing for a small scenic barn for sheep on Plot 12, the Glebe, on condition, 4 for and 1 against, on appeal against Gary's denial under Bylaw 5, which bars livestock larger than a goat. The condition is a sheep trough beside the barn, with no fence, sign or second shelter on the Green. Bramble, Pike, Ashdown and Moth voted in favour, each wanting the adult sheep shown to be no larger than a goat, and Pike and Ashdown read Bylaw 5 as limiting size, not kind. Bramble said the barn gave the animals a purpose under Bylaw 7. Fenwick voted against, saying no breed name or measurement had been given, so the sheep's size was only asserted.",
+   "members": [
+    {
+     "seat": "Councillor Bramble",
+     "vote": "conditional",
+     "speech": "Gary's reply said sheep as a kind are larger than goats, which is broader than the bylaw needs, and the filer is right that breeds differ. Bylaw 5 turns on size, though, and nothing in the filing shows how large these sheep grow as adults. A barn in the middle of the Green, in full view of the bench, would be worth looking at, and sheltering the animals gives it a clear purpose under Bylaw 7. I vote in favour on condition that the breed's full-grown size is shown to be no larger than a goat. Without that, the denial stands."
+    },
+    {
+     "seat": "Councillor Pike",
+     "vote": "conditional",
+     "speech": "Gary read Bylaw 5 as banning sheep outright, but that's not what it says: it limits livestock by size, not by kind. A sheep no bigger than a goat meets the letter of it, and the Green's covenant is met too, since a tidy barn with small sheep is exactly the sort of thing worth looking at from the bench. What I won't pass is a loophole where \"tiny breed\" turns into full-grown ewes later. In favour, on the condition that the sheep kept there never exceed a goat in size, or the barn comes down."
+    },
+    {
+     "seat": "Councillor Ashdown",
+     "vote": "conditional",
+     "speech": "I’m not persuaded by cuteness or by calling the breed special; Bylaw 5 turns on the animal’s actual size, not its age or name. If these sheep are genuinely no larger than a goat, the bylaw doesn’t bar them, and a little scenic shelter on the Green can satisfy the covenant by being worth looking at from the bench. But I won’t write a blank cheque: I’d allow it on condition that the sheep are shown to be no bigger than a goat, and the barn stays a small open shelter, not a fence or sign. In favour on that condition."
+    },
+    {
+     "seat": "Councillor Moth",
+     "vote": "conditional",
+     "speech": "A small barn could suit this level, sheltered plot, and be worth looking at from the bench, but the covenant makes its appearance matter and the filing gives little detail on that. A barn for sheep has a clear purpose; the remaining issue is Bylaw 5, since saying this breed is smaller than many goats does not establish that the sheep are no larger than a goat. I vote in favour on condition that it house only sheep no larger than a goat."
+    },
+    {
+     "seat": "Councillor Fenwick",
+     "vote": "b5",
+     "speech": "The bylaw is about how big the animal stands, not what it's called, and this filing has never given me a breed name or a measurement to work with. Three times the filer has told me these sheep are tiny without proving it, and I can't wave through livestock on a bare assertion. The little barn itself might suit the Green, but the animals inside it have to meet the size rule first. I vote against under Bylaw 5."
+    }
+   ],
+   "outcome": "The committee has met, and the filing is approved on condition, 4 for, 1 against."
+  }
+ },
+ {
+  "intent": "A tall pole with a lantern on top for signalling to the ducks at night",
+  "plot": 10,
+  "condition": "A hedge between the pole and the neighbours.",
+  "minutes": {
+   "finding": "Filing 9999, a tall pole topped with a lantern to signal ducks at night on Plot 10, the Osier, was approved on condition by 3 votes to 2. Councillors Bramble and Ashdown opposed it under the covenant, since the Wet End's clay, spring and puddle would soak and rot a lantern and pole there, and Ashdown also found no good reason under bylaw 1 for a pole taller than six geese. Councillor Moth wanted the geese consulted, and Councillor Pike worried about light spilling after dark. Councillors Pike, Moth and Fenwick voted in favour, holding that signalling ducks meets bylaw 7. The approval is conditional on the pole standing on stone ground clear of the puddle and spring, its base set in stone, not clay.",
+   "members": [
+    {
+     "seat": "Councillor Bramble",
+     "vote": "covenant",
+     "speech": "I like the idea of signalling to the ducks, but a lantern on a pole standing in the Wet End is a thing that minds getting wet. The ground is heavy clay with a spring rising under it and a puddle that never dries, and a lantern and its pole would be soaked and rot where they stand. The covenant rules that out, so I'm voting against under the covenant. Bylaw 7 is satisfied, since the purpose is plain enough, so the covenant is the only reason I need."
+    },
+    {
+     "seat": "Councillor Pike",
+     "vote": "conditional",
+     "speech": "A lantern pole at the Wet End doesn't mind getting wet, so the covenant leaves it be, and the ducks are unlikely to object to a light where they already have the stream. It will clear six stacked geese, so bylaw 1 wants a good reason, and signalling to ducks at night is at least a reason someone holds, which satisfies bylaw 7 too. My worry is the light itself spilling where it isn't wanted after dark. In favour on a condition: the lantern must be hooded so it shines down at the water, not across the plots."
+    },
+    {
+     "seat": "Councillor Ashdown",
+     "vote": "covenant",
+     "speech": "A lantern on a tall pole to signal ducks after dark strikes me as a solution looking for a problem. The Wet End is boggy clay with a spring and a never-drying puddle, and the Flood Easement says nothing may be built there that minds getting wet; a pole and lantern likely would. Bylaw 1 also wants a good reason for something taller than six geese, and I don't see one. I vote against under the covenant."
+    },
+    {
+     "seat": "Councillor Moth",
+     "vote": "conditional",
+     "speech": "A signal pole topped with a lantern has a purpose here, but the spring, permanent puddle and heavy clay mean it must be made to tolerate getting wet. Bylaw 1 requires a good reason for something this tall and consultation with the geese; signalling the ducks is a reason, but I can’t assume the geese have been consulted. Bylaw 3 bars noise after dark, not a quiet lantern, and the purpose meets bylaw 7. I vote in favour on condition that the geese are consulted and the pole and lantern can withstand the Wet End’s conditions."
+    },
+    {
+     "seat": "Councillor Fenwick",
+     "vote": "conditional",
+     "speech": "A lantern that minds the wet is barred outright by the covenant here; I need assurance it will not short out in standing water. A tall pole on that never-drying clay also needs anchoring without disturbing the spring. The purpose satisfies bylaw seven, though I doubt the ducks read lanterns. In favour, provided the pole stands within six geese and the lantern is watertight."
+    }
+   ],
+   "outcome": "The committee has met, and the filing is approved on condition, 3 to 2."
+  }
+ },
+ {
+  "intent": "Undecided",
+  "plot": 10,
+  "minutes": {
+   "finding": "The committee denied filing 9999 under Bylaw 7, by one vote in favour to two against, with two abstentions. The filing gives only a plot number, Plot 10 the Osier, and no stated purpose, so no structure or use could be identified. Councillors Pike and Ashdown held that Bylaw 7, which requires every structure to have a purpose, could not be met, and that with nothing to weigh against the ground or the covenant there was nothing to decide. Councillor Moth voted in favour, noting that no physical change is specified, that the Flood Easement bars only wet-intolerant building and none is proposed, and that Bylaw 7 applies to structures. Councillor Bramble abstained, asking for a plain description before judging the Wet End ground, and Councillor Fenwick abstained because no purpose had been put forward.",
+   "members": [
+    {
+     "seat": "Councillor Bramble",
+     "vote": "abstain",
+     "speech": "I can't tell from the paper what filing 9999 actually asks for, only that Gary has referred it because it's unusual. On a plot of wet clay that floods, I'd want to know what it is before anything else. The Wet End's covenant says nothing built there may mind getting wet, and bylaw 7 requires every structure to have a purpose. I abstain until the filing is described plainly."
+    },
+    {
+     "seat": "Councillor Pike",
+     "vote": "b7",
+     "speech": "There is nothing here to weigh. A filing with no stated purpose gives the committee nothing to judge against the ground, the covenant, or the bylaws, and I won't vote a blank into the record on the off chance it means something later. Wet End or not, the Flood Easement doesn't come into it, because there is no thing to get wet. Bylaw 7 asks that someone understand a structure's purpose; nobody can, including whoever filed it. Against under bylaw 7."
+    },
+    {
+     "seat": "Councillor Ashdown",
+     "vote": "b7",
+     "speech": "There's nothing here I can weigh: an undecided filing names no structure, no use, nobody to keep it, and on the Wet End's boggy clay that matters more than anywhere. Bylaw 7 asks every structure to have a purpose, and someone answerable for it; this has neither, and the flood easement would bite hard on anything built to mind water. I vote against under bylaw 7."
+    },
+    {
+     "seat": "Councillor Moth",
+     "vote": "approved",
+     "speech": "I can identify only a four-digit number, not a structure or use; on this 700-square-yard, sunny, breezy but boggy clay plot beside the stream and pond, with a spring and southern hedge, that means no physical change is specified. The Flood Easement bars wet-intolerant building, but none is proposed, and bylaw 7 applies to structures. I vote in favour of the number as filed."
+    },
+    {
+     "seat": "Councillor Fenwick",
+     "vote": "abstain",
+     "speech": "There is no filing here, only a plot number and a blank where the intent should be. The Wet End is the worst ground on this commons for standing still with a question mark over your head; it holds water, breeds puddles, and will sink anything built without thought. Bylaw seven asks someone to state a purpose, and nobody has. I abstain; I cannot vote on what has not been asked for."
+    }
+   ],
+   "outcome": "The committee has met, and the filing is denied under Bylaw 7, 1 to 2, 2 abstaining."
+  }
+ },
+ {
+  "intent": "a weathervane, taller than six geese, on the highest point of the Saddle",
+  "plot": 1,
+  "plea": "ok ive decided, its gonna be 5 geese tall",
+  "minutes": {
+   "finding": null,
+   "members": [
+    {
+     "seat": "Councillor Bramble",
+     "vote": "b7",
+     "speech": "The height is no longer the problem: five geese is under Bylaw 1's limit. But the filing still has no purpose, and that is what Bylaw 7 asks for. Nothing in this plea says what the vane is for, and \"deciding\" is not a reason. It also doesn't say how the vane would be anchored, which the Knoll covenant requires on this exposed, stony ground. I vote against under Bylaw 7. If the filer comes back with a stated purpose and a plan to weigh it down, I would look at it again."
+    },
+    {
+     "seat": "Councillor Pike",
+     "vote": "b7",
+     "speech": "The plea gets the height sorted, I'll grant that: five geese tall takes it out from under Bylaw 1 entirely, and no geese need be consulted. But it does nothing for Bylaw 7. The purpose was the whole ground for the denial, and it's still undecided. A shorter weathervane is no more given a purpose than a taller one. If the filer had said what the thing is for, even simply, I'd have been back in favour with conditions on anchoring. As it stands the denial stands. Against, under Bylaw 7."
+    },
+    {
+     "seat": "Councillor Ashdown",
+     "vote": "b7",
+     "speech": "Lowering it to five geese settles the height, and I'll accept that. But the plea says nothing about what the vane is for, and Bylaw 7 still asks for a purpose someone can name; deciding the height isn't deciding that. Nor does it say how a light thing stays put on a bare, windy knoll, as the covenant demands. Against, under Bylaw 7."
+    },
+    {
+     "seat": "Councillor Moth",
+     "vote": "conditional",
+     "speech": "A weathervane has a clear purpose: showing the wind, and at five geese tall it does not trigger Bylaw 1’s height restriction. On the exposed, stony Saddle, though, it must be secured so it cannot blow away, as the Knoll covenant requires. I vote in favour on condition that it is securely anchored."
+    },
+    {
+     "seat": "Councillor Fenwick",
+     "vote": "b7",
+     "speech": "The height clears Bylaw 1, fair enough, but the purpose still hasn't been given, and that's what the committee denied this for the first time round. A weathervane on bare stone in that wind also needs proper anchoring under the covenant, and nothing here addresses that either. Without a stated purpose I can't vote for it; against under Bylaw 7."
+    }
+   ],
+   "outcome": "The committee has met, and the filing is denied under Bylaw 7, 1 for, 4 against."
+  }
+ },
+ {
+  "intent": "hello",
+  "plot": 10,
+  "minutes": {
+   "finding": "Filing 9999 on Plot 10 (the Osier) was denied under Bylaw 7, 2 to 3. It describes no structure and no use of the plot, so there was nothing to measure against the bylaws. Councillor Bramble wanted a proper description of what was meant to go on the Wet End and why, and would look again on receiving one. Councillors Pike and Fenwick held that without a described structure there was no purpose for Bylaw 7 to test. Councillors Ashdown and Moth voted in favour, finding nothing in the filing that conflicted with Bylaw 7 or the covenant's Flood Easement, though Moth would not assume a structure was intended. The majority view was that the filing offered nothing to approve or refuse on its merits, and the denial carried on that basis.",
+   "members": [
+    {
+     "seat": "Councillor Bramble",
+     "vote": "b7",
+     "speech": "Gary has sent us a filing numbered 9999 whose only stated intent is \"hello\". Nothing in it describes a structure, so I can't tell what would stand on the Wet End, and I can't see a purpose for it. Bylaw 7 says every structure must have a purpose, and that the administrator need not understand it but someone must. I'd like the filer to say what they mean to put there and why, and I'd check it against the covenant's rule about things that mind getting wet. I vote against under bylaw 7 for now, and I'd happily look again on a proper description."
+    },
+    {
+     "seat": "Councillor Pike",
+     "vote": null,
+     "speech": null
+    },
+    {
+     "seat": "Councillor Ashdown",
+     "vote": "approved",
+     "speech": "A hello on the Osier. There is nothing built here, so the height bylaw and the purpose bylaw have nothing to bite on, and the covenant's Flood Easement only forbids building something that minds getting wet. A greeting minds nothing. It keeps no one out and makes no noise beyond the ducks, so I see no ground in the bylaws against it. I vote in favour."
+    },
+    {
+     "seat": "Councillor Moth",
+     "vote": "approved",
+     "speech": "All I can make out is an unexplained entry, not a described work or use on Plot 10. The permanent puddle, rising spring and heavy clay make the Flood Easement relevant to anything built here, and bylaw 7 applies if this is a structure, but I won’t assume either from the filing. Nothing stated conflicts with those rules, so I vote in favour as filed."
+    },
+    {
+     "seat": "Councillor Fenwick",
+     "vote": "b7",
+     "speech": "The filing is a word. Not a thing to build, not an activity to run on the plot, not a structure of any description — just hello. There is no structure here for bylaw seven to catch, and the Flood Easement governs what you build that minds getting wet; a greeting does not mind. I cannot vote for or against a filing that proposes nothing for the land. I refuse it for want of substance."
+    }
+   ],
+   "outcome": "The committee has met, and the filing is denied under Bylaw 7, 2 to 3."
+  }
+ }
+]

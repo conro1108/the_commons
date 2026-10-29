@@ -30,6 +30,7 @@ Most files open with a comment saying what they own; read it before grepping.
 | His rounds against the schedule: questions, red tags, the pound, lawful by time | `src/letter.ts`; the round in `api/gary.ts` ("the letter"), timings `keep_tags()` in `db/logic.sql` |
 | Logging in by name | `api/door.ts` |
 | The back office (hold the notice board 3s) | `src/backoffice.ts`, `api/backoffice.ts` |
+| The committee acted out, when summoned from the board or ticked in the back office | `src/chamber.ts`; offline `dev/chamber.html` |
 | Tables | `db/tables.sql` |
 | Policies, triggers, queue, cron, the plots' rows | `db/logic.sql` |
 | Look at the map or a plot with no network | `dev/*.html`; the whole app offline: `FAKE=1 npm run dev`, then `/?at=12` (`dev/fakenet.ts`); screenshots as a phone: `scripts/shot.mjs` |

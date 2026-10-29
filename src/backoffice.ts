@@ -187,6 +187,7 @@ const STYLE = `
   #dev .flow b { display: block; } #dev .flow span { display: block; font-size: 12px; color: #7a6a8a; line-height: 1.35; }
   #dev .flows + textarea { margin-top: 14px; }
   #dev .go { margin-top: 12px; padding: 8px 26px; font-size: 15px; }
+  #dev .act { margin-left: 14px; cursor: pointer; } #dev .act input { vertical-align: middle; }
   #dev .dim, #dev .k { color: #8a7a98; } #dev .k { margin-right: 6px; }
   #dev blockquote { margin: 10px 0 14px; padding: 10px 14px; background: #fbf4dc; border: 1px dashed #c9b88f; white-space: pre-wrap; }
   #dev .stamp { display: inline-block; padding: 1px 8px; border: 2px solid; font-weight: bold; font-size: 12px; text-transform: uppercase; letter-spacing: .06em; }
@@ -236,6 +237,7 @@ function mount(first: number): HTMLElement {
         `<label class="flow"><input type="radio" name="flow" value="${k}"${i ? "" : " checked"}><b>${name}</b><span>${blurb}</span></label>`).join("")}</div>
       <textarea name="intent" rows="3" maxlength="120" placeholder="a bench, for looking at the pond with"></textarea>
       <button class="go">Run</button>
+      <label class="act"><input type="checkbox" name="act"> Act out the committee</label>
     </section>
     <section class="out" hidden>
       <button class="copy-all">Copy JSON</button>
@@ -328,6 +330,16 @@ function mount(first: number): HTMLElement {
     }
   }
 
+  // A sitting that came back can be acted out in the chamber (src/chamber.ts) before you read it here.
+  const act = field("act");
+  act.checked = localStorage.getItem("the_commons:act") === "1";
+  act.addEventListener("change", () => localStorage.setItem("the_commons:act", act.checked ? "1" : "0"));
+  async function chamber(r: any, intent: string, plot: number, plea?: string) {
+    if (!act.checked || !r?.minutes) return;
+    const { chamber } = await import("./chamber.ts");
+    await chamber({ intent, plot, minutes: r.minutes, plea, condition: () => r.written?.condition });
+  }
+
   /** Where the case stands: open to a plea (to Gary, or against the committee), or closed. */
   function standing(why?: string) {
     const n = open?.exchange.length ?? 0;
@@ -366,6 +378,7 @@ function mount(first: number): HTMLElement {
     busy = true;
     const r = await stage({ life: "Gary rules", committee: "The committee", draw: "Drawn" }[f], f, { intent, label: intent, plot },
       filed(intent, f === "draw" ? undefined : plot));
+    if (f !== "draw") await chamber(f === "life" ? r?.sat : r, intent, plot);
     busy = false;
     if (r && f !== "draw") settle(f === "life" ? (r.sat?.verdict ?? r.ruled.verdict) : r.verdict, intent, plot);
   }
@@ -383,6 +396,7 @@ function mount(first: number): HTMLElement {
     /** The committee hears it on appeal; against them, one plea more. */
     async function upstairs(before = "") {
       const sat = await stage("The committee, on appeal", "escalate", base(), before);
+      await chamber(sat, c.intent, c.plot, c.exchange.at(-1)?.plea);
       if (sat === undefined) return close("Something went wrong at the desk.");
       if (!sat) return close("No quorum, so it'd sit again tomorrow night. The case is closed here.");
       if (sat.verdict.status !== "denied" && sat.verdict.status !== "refused") return close("Allowed on appeal. The case is closed.");
@@ -392,7 +406,8 @@ function mount(first: number): HTMLElement {
     }
 
     if (c.finding) {
-      await stage("Final appeal, to the committee", "escalate", { ...base(), against: { finding: c.finding, plea, said: c.said } }, pleaded(plea));
+      const sat = await stage("Final appeal, to the committee", "escalate", { ...base(), against: { finding: c.finding, plea, said: c.said } }, pleaded(plea));
+      await chamber(sat, c.intent, c.plot, plea);
       close("That was final.");
     } else if (c.refused || c.exchange.length === 2) {
       c.exchange.push({ plea, reply: null });

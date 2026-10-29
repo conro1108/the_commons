@@ -31,6 +31,7 @@ import { scheduled, type Shell } from "./schedule.ts";
 import { BOARD_BOX } from "./map/landmarks.ts";
 import { GARY_LINES, garyAt } from "./life.ts";
 import { looksLike } from "./avatar.ts";
+import type { Sitting } from "./chamber.ts";
 import { openDoor, openPapers, papersOpen } from "./papers.ts";
 import { isWaiting, letterHtml, poundHtml, thingName, type Tag } from "./letter.ts";
 import {
@@ -2047,6 +2048,7 @@ function boardTwice(e: MouseEvent) {
 /** Double-clicked, Gary comes round your outstanding conditions now; from the board, the committee sits on what of yours awaits it too. */
 async function summon(board = false) {
   const [n, r, c] = await Promise.all([summonGary(), summonRounds(), board ? summonCommittee() : 0]);
+  if (c) watching = Date.now() + 10 * 60_000;
   speak(n === null && r === null && c === null ? "Not now. The kettle."
     : c ? "Fine. I'll ring round the committee." : n || r ? "Right. I'll come round now." : "Nothing outstanding that I haven't already seen.");
 }
@@ -2409,10 +2411,20 @@ function post(now: number) {
   }
 }
 
+// A sitting you summoned from the board is acted out in the chamber (src/chamber.ts) as it comes in, one after another.
+let watching = 0; // until when
+let sittings = Promise.resolve();
+function sitting(s: Sitting) {
+  if (Date.now() > watching) return;
+  sittings = sittings.then(() => import("./chamber.ts")).then(({ chamber }) => chamber(s)).catch(console.error);
+}
+
 /** A filing as the database now has it, by Realtime (or from the dev back office). */
 async function arrive(f: Filing) {
   // Gary's ruling on one of ours, or an appeal allowed: it comes by post.
   const was = filings.get(f.id);
+  if (f.filer === me && was?.status === "committee" && f.status !== "committee" && f.minutes)
+    sitting({ intent: f.intent, plot: f.plot, minutes: f.minutes, condition: () => f.condition });
   if (f.filer === me && (was?.status === "pending" || was?.status === "committee" || was?.status === "denied" || was?.status === "refused") && f.status !== was.status) {
     unread.add(f.id);
     letters.push({ plot: f.plot, out: false, status: f.status, filing: f.id });
@@ -2515,6 +2527,8 @@ async function start() {
       const f = filings.get(a.filing);
       const was = appeals.get(a.filing)?.find((x) => x.id === a.id);
       // A dismissal of one of ours comes by post (one allowed came with the filing, in arrive()).
+      if (f?.filer === me && a.court === "committee" && a.heard_at && !was?.heard_at && a.minutes)
+        sitting({ intent: f.intent, plot: f.plot, minutes: a.minutes, plea: a.plea, condition: () => filings.get(f.id)?.condition });
       if (f?.filer === me && a.heard_at && !was?.heard_at && !a.allowed) {
         unread.add(f.id);
         letters.push({ plot: f.plot, out: false, status: "denied", filing: f.id });
