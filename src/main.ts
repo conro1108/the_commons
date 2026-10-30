@@ -935,7 +935,7 @@ const spiritProblem = (root: HTMLElement, text: string) => {
 function wireSpirit(f: Filing) {
   const root = $("build-info");
   const s = spirit?.filing === f.id ? spirit : null;
-  root.querySelector(".spirit-sign")?.addEventListener("click", async () => {
+  root.querySelector("button.spirit-sign")?.addEventListener("click", async () => {
     const problem = await flipSign(f.id, !f.open_sign);
     if (problem) return spiritProblem(root, problem);
     f.open_sign = !f.open_sign;
