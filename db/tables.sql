@@ -55,11 +55,11 @@ create table if not exists the_commons.filings (
   audited_at   timestamptz, -- when Gary last came back to audit it (send_auditor)
   schedule     jsonb, -- Gary's: what the permit lets you build (Schedule, src/schedule.ts); null for filings granted before schedules
   shell        jsonb, -- the holder's: the building as put up (Shell, src/schedule.ts)
-  -- The spirit (what the place is used for): the holder's open sign; the last
-  -- sign of life that isn't building (sign, board, book: trigger-set); boarded up
+  -- The spirit (what the place is used for): the last sign of life that isn't
+  -- building (board, book: trigger-set); boarded up
   -- for disuse, and the week's notice to reopen once someone asks for the plot;
   -- Gary's latest reading of the use (in full in readings), and what it's drifted to.
-  open_sign  boolean not null default false,
+  open_sign  boolean not null default false, -- nothing uses it: the sign's gone from the game
   stirred_at timestamptz,
   boarded_at timestamptz,
   quit_by    timestamptz,

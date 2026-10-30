@@ -13,7 +13,7 @@ import {
 } from "./net.ts";
 import { fileChangeOfUse, fileVariation, loadVariations, type Variation } from "./net.ts";
 import { scheduleHtml, variationForm, variationHtml } from "./permit.ts";
-import { askForPlot, flipSign, loadSpirit, pinNotice, signBook, summonReader, unpinNotice, type Notice, type Visit } from "./net.ts";
+import { askForPlot, loadSpirit, pinNotice, signBook, summonReader, unpinNotice, type Notice, type Visit } from "./net.ts";
 import { spiritCardHtml, spiritHtml, styleSpirit } from "./spirit.ts";
 import { bare, item, pic, tab, tool as dockTool, toolIcon } from "./dock.ts";
 import { pieceOf } from "./library.ts";
@@ -892,7 +892,7 @@ function renderAll() {
   renderPound();
 }
 
-// --- the spirit: the sign, the board, the book, Gary's reading ---------------
+// --- the spirit: the board, the book, Gary's reading -------------------------
 // The HTML is src/spirit.ts; this loads a place's board and book when we go up
 // close, keeps them current, and wires the buttons, up close and on the card.
 
@@ -935,12 +935,6 @@ const spiritProblem = (root: HTMLElement, text: string) => {
 function wireSpirit(f: Filing) {
   const root = $("build-info");
   const s = spirit?.filing === f.id ? spirit : null;
-  root.querySelector("button.spirit-sign")?.addEventListener("click", async () => {
-    const problem = await flipSign(f.id, !f.open_sign);
-    if (problem) return spiritProblem(root, problem);
-    f.open_sign = !f.open_sign;
-    renderBuildInfo();
-  });
   root.querySelector<HTMLFormElement>(".spirit-pin")?.addEventListener("submit", async (e) => {
     e.preventDefault();
     const box = (e.currentTarget as HTMLFormElement).querySelector("input")!;

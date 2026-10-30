@@ -1,5 +1,5 @@
-// The spirit of a place, as shown: the open sign, the what's-on board by the
-// door, the visitors' book, Gary's last reading of its use, a drift notice, and
+// The spirit of a place, as shown: the what's-on board by the door, the
+// visitors' book, Gary's last reading of its use, a drift notice, and
 // boarding up for disuse (and the planks across it on the map). Pure HTML and
 // pixels from data, so dev/spirit.html can show every state with no network;
 // src/main.ts (its "the spirit" section) loads the data and wires the buttons.
@@ -56,17 +56,10 @@ export function spiritCardHtml(f: Filing, me: string, guest: boolean): string {
   return `${readingHtml(f)}${boardedHtml(f, f.filer === me, guest)}`;
 }
 
-/** Only a building has a door to hang an open sign on; a garden just has visitors. */
-export const hasDoor = (f: Filing) => f.schedule?.shell.kind === "building";
-
-/** Up close: the sign (a building's), the board, the book, the reading, and any notice from Gary. */
+/** Up close: the board, the book, the reading, and any notice from Gary. */
 export function spiritHtml(v: SpiritView): string {
   const { f, me, guest } = v;
   const mine = f.filer === me;
-  const open = !!f.open_sign;
-  const sign = mine
-    ? `<span>On your door:</span><button class="spirit-sign ${open ? "open" : "closed"}" title="Flip the sign">${open ? "Open" : "Closed"}</button><span class="meta">flip it</span>`
-    : `<span>On the door:</span><span class="spirit-sign ${open ? "open" : "closed"}">${open ? "Open" : "Closed"}</span>`;
 
   const notices = v.notices.filter((n) => n.ok || mine);
   const board = `<div class="spirit-board"><h3>What's on</h3>
@@ -93,7 +86,7 @@ export function spiritHtml(v: SpiritView): string {
     : "";
 
   return `<div class="spirit">${boardedHtml(f, mine, guest)}${drift}
-    ${hasDoor(f) ? `<div class="spirit-door">${sign}</div>${useOf(f) !== f.intent ? `<p class="meta">In use as ${esc(useOf(f))}.</p>` : ""}` : ""}
+    ${useOf(f) !== f.intent ? `<p class="meta">In use as ${esc(useOf(f))}.</p>` : ""}
     ${readingHtml(f)}${board}${book}<p class="problem spirit-problem"></p></div>`;
 }
 
@@ -107,15 +100,6 @@ export const SPIRIT_CSS = `
 .spirit form { display: flex; gap: 4px; margin-top: 4px; }
 .spirit form input { flex: 1; min-width: 0; font: inherit; padding: 2px 6px; border: 2px solid #402e3a; background: #fbf4dc; }
 .spirit form button { margin: 0; padding: 0 8px; }
-.spirit-door { display: flex; align-items: baseline; gap: 8px; white-space: nowrap; }
-.spirit-sign { position: relative; display: inline-block; margin: 10px 0 2px; padding: 0 8px; font-weight: bold; text-transform: uppercase; letter-spacing: .1em;
-  border: 2px solid #402e3a; box-shadow: 2px 2px 0 #402e3a; }
-.spirit-sign::before { content: ""; position: absolute; left: 50%; top: -8px; width: 11px; height: 11px; margin-left: -6px; /* its string, over a nail */
-  border: solid #402e3a; border-width: 1px 0 0 1px; transform: rotate(45deg); }
-.spirit-sign.open { background: #c8e6b0; color: #2d5a2a; }
-.spirit-sign.closed { background: #e8d8d0; color: #7a3a40; }
-button.spirit-sign { margin: 10px 0 2px; }
-button.spirit-sign:active { transform: translate(1px, 1px); }
 .spirit-unpin { margin: 0 0 0 4px; padding: 0 4px; border: 0; background: none; box-shadow: none; color: #7a6a8a; }
 .spirit-reading { background: #fbf4dc; border-left: 3px solid #7a6a8a; padding: 2px 8px; margin: 6px 0; }
 .spirit-drift { background: #fbe4e0; border: 2px solid #b5404f; padding: 4px 8px; margin: 6px 0; }

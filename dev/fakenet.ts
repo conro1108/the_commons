@@ -49,7 +49,7 @@ const shell: Shell = {
 const filing = (id: number, filer: string, plot: number, intent: string): Filing => ({
   id, filer, plot, intent, status: "approved", condition: null, wants: null, bylaw: null, permit: "P-0001",
   minutes: null, filed_at: now, stamped_at: now, built_at: null, inspected_at: null, remark: null, met_at: null,
-  ground: null, schedule, shell: q.get("shell") === "0" ? null : { ...shell }, open_sign: true,
+  ground: null, schedule, shell: q.get("shell") === "0" ? null : { ...shell },
 });
 const filings: Filing[] = [filing(1, q.get("theirs") ? THEM : ME, PLOT, "a karate studio"), filing(2, THEM, PLOT === 3 ? 4 : 3, "a quiet bench")];
 const court = q.get("appeal") as Appeal["court"] | "heard" | null;
@@ -132,7 +132,6 @@ export const loadSpirit = async (_f: number): Promise<{ notices: Notice[]; visit
   notices: [{ id: 1, filing: 1, line: "Beginners' class, Tuesdays", posted_at: now, ok: true }],
   visits: [{ id: 1, filing: 1, visitor: THEM, line: "Very calm in here.", day: now.slice(0, 10), at: now, ok: true }],
 });
-export const flipSign = async () => null;
 export const pinNotice = async (filing: number, line: string): Promise<Notice | string> => ({ id: nextId++, filing, line, posted_at: now, ok: true });
 export const unpinNotice = async () => true;
 export const signBook = async (filing: number, line: string): Promise<Visit | string> => ({ id: nextId++, filing, visitor: ME, line, day: now, at: now, ok: true });

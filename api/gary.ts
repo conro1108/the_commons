@@ -1876,7 +1876,6 @@ const FINDINGS = (use: string): Record<Finding, string> => ({
 /** What Gary looks at to read a place's use. */
 export type Spirit = {
   use: string; // what the permit is for
-  open: boolean; // the sign on the door
   board: string[]; // the what's-on board, a notice a line
   book: string[]; // the visitors' book, latest first, the last month
   outside: string[]; // what's set out on the plot (survey())
@@ -1889,7 +1888,7 @@ const READER = `${GARY}
 You've been round to see what a place is actually being used for, and you've made your finding ("finding") against what its permit is for ("use"). Write exactly two lines, plain text, no markdown:
 Line 1: if the finding is "mostly" or "drifted", what else it's being used as, in two to four words starting "a" or "an" ("a tea room"). Otherwise "none".
 Line 2: your reading of the place for its file: at most 12 words, one or two short sentences, the way you'd jot it down. For example "Still a karate studio." / "Mostly a karate studio. Some tea." / "A tea room, really."
-Go by the evidence only: the what's-on board ("board"), the visitors' book ("book"), whether it's open, and what's set out outside and inside. Never invent anything that isn't there, and never give coordinates.`;
+Go by the evidence only: the what's-on board ("board"), the visitors' book ("book"), and what's set out outside and inside. Never invent anything that isn't there, and never give coordinates.`;
 
 const READING_CHECKS = {
   invents: "Does the reading (or the other use) rest on something that isn't in the evidence: a notice, a visitor's remark, or a thing set out that isn't there?",
@@ -1907,7 +1906,7 @@ export async function readUse(spirit: Spirit) {
   const { answers } = await ask("reading", spirit, {
     finding: {
       type: "choice",
-      instructions: `Is this place still ${spirit.use}? Read what's on, what visitors say, whether it's open and how it's laid out, as a whole; don't count things. If there's hardly anything to go on, it's still what it was.`,
+      instructions: `Is this place still ${spirit.use}? Read what's on, what visitors say and how it's laid out, as a whole; don't count things. If there's hardly anything to go on, it's still what it was.`,
       criteria: FINDINGS(spirit.use),
     },
   });
@@ -1945,7 +1944,7 @@ export async function readUse(spirit: Spirit) {
 }
 
 /** What Gary sees of a place's use, as of now. */
-async function spiritOf(db: Db, f: { id: number; plot: number; ground: string | null; intent: string; schedule: Schedule | null; open_sign?: boolean }): Promise<Spirit> {
+async function spiritOf(db: Db, f: { id: number; plot: number; ground: string | null; intent: string; schedule: Schedule | null }): Promise<Spirit> {
   const month = new Date(Date.now() - 30 * 864e5).toISOString();
   const [{ data: board }, { data: book }, { data: placed }, out] = await Promise.all([
     db.from("notices").select("line").eq("filing", f.id).eq("ok", true).order("posted_at"),
@@ -1958,7 +1957,6 @@ async function spiritOf(db: Db, f: { id: number; plot: number; ground: string | 
   const byId = new Map(things.map((p) => [p.id, p]));
   return {
     use: useOf(f),
-    open: !!f.open_sign,
     board: (board ?? []).map((n) => n.line),
     book: (book ?? []).map((v) => v.line),
     outside: out.things,

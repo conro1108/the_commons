@@ -946,13 +946,10 @@ create trigger variations_retro_filed after insert or update of status on the_co
 
 -- --- the spirit ----------------------------------------------------------------
 -- What a place is used for (plans/building-and-enforcement.md, "The spirit").
--- The holder flips the open sign and pins notices on the what's-on board;
--- residents who visit sign the book. Lines are read for fitness by /api/gary
--- before anyone else sees them. Gary reads the use now and then (send_reader),
--- and a place with nothing going on for a month is boarded up (board_up).
-
--- The open sign is the holder's, on the same rows as the ground ("paint your own granted plot").
-grant update (open_sign) on the_commons.filings to authenticated;
+-- The holder pins notices on the what's-on board; residents who visit sign the
+-- book. Lines are read for fitness by /api/gary before anyone else sees them.
+-- Gary reads the use now and then (send_reader), and a place with nothing going
+-- on for a month is boarded up (board_up).
 
 -- How many notices are on a board, for the insert policy (which can't count its own table under RLS).
 create function the_commons.notices_on(bigint) returns int
@@ -997,12 +994,11 @@ create policy "readings are public"
 grant select on the_commons.readings to anon, authenticated;
 grant all on the_commons.readings to service_role;
 
--- Signs of life. The holder flipping the sign stirs the place; and anything
--- that stirs it or builds on it takes the boards down, notice and all.
+-- Signs of life. Anything that stirs a place or builds on it takes the boards
+-- down, notice and all.
 create function the_commons.spirit_stirred() returns trigger
 language plpgsql set search_path = '' as $$
 begin
-  if new.open_sign is distinct from old.open_sign and auth.uid() = new.filer then new.stirred_at := now(); end if;
   if old.boarded_at is not null and new.boarded_at is not distinct from old.boarded_at
       and (new.stirred_at is distinct from old.stirred_at or new.built_at is distinct from old.built_at) then
     new.boarded_at := null;
@@ -1120,7 +1116,7 @@ declare
 begin
   line := 'Boarded up. Nothing on, nobody in, and nothing changed in a month. It''s all still there.';
   for f in
-    update the_commons.filings set boarded_at = now(), open_sign = false, reading = line, read_at = now()
+    update the_commons.filings set boarded_at = now(), reading = line, read_at = now()
     where status in ('approved', 'conditional') and boarded_at is null
       and greatest(stamped_at, built_at, stirred_at) < now() - interval '30 days'
     returning id, intent, schedule

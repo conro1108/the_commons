@@ -13,7 +13,7 @@ const base: Filing = {
   id: 112, filer: "holder", plot: plot.id, intent: "a karate studio", status: "approved", condition: null, wants: null, bylaw: null,
   permit: "Approved.", minutes: null, filed_at: ago(40), stamped_at: ago(40), built_at: ago(2), inspected_at: null, remark: null, met_at: null,
   ground: null, schedule: { shell: { kind: "building", words: "a hall, timber, one room", material: "timber" }, fittings: [], use: "a karate studio" }, shell: null,
-  open_sign: true, reading: "Mostly a karate studio. Some tea.", read_at: ago(1), drift: null, boarded_at: null, quit_by: null,
+  reading: "Mostly a karate studio. Some tea.", read_at: ago(1), drift: null, boarded_at: null, quit_by: null,
 };
 const notices: Notice[] = [
   { id: 1, filing: 112, line: "Beginners' kata, Thursdays at six", posted_at: ago(5), ok: true },
@@ -28,13 +28,13 @@ const names: Record<string, string> = { holder: "Keiko", marjorie: "Marjorie", b
 const who = (id: string) => names[id] ?? "a resident";
 
 const states: [string, SpiritView | { card: Filing; me: string; guest: boolean }][] = [
-  ["Up close, yours, open", { f: base, notices, visits, me: "holder", guest: false, who }],
+  ["Up close, yours", { f: base, notices, visits, me: "holder", guest: false, who }],
   ["Up close, visiting: sign the book", { f: base, notices, visits, me: "visitor", guest: false, who }],
-  ["Up close, a guest, closed", { f: { ...base, open_sign: false }, notices, visits, me: "someone", guest: true, who }],
+  ["Up close, a guest", { f: base, notices, visits, me: "someone", guest: true, who }],
   ["Yours, drifted", { f: { ...base, drift: "a tea room", reading: "A tea room, really." }, notices: [...notices, { id: 4, filing: 112, line: "Teas every day", posted_at: ago(1), ok: true }], visits, me: "holder", guest: false, who }],
-  ["Yours, boarded up and asked for", { f: { ...base, open_sign: false, boarded_at: ago(3), quit_by: ago(-4), reading: "Boarded up. Nothing on, nobody in, and nothing changed in a month. It's all still there." }, notices: [], visits: [], me: "holder", guest: false, who }],
-  ["Yours, nothing up yet", { f: { ...base, open_sign: false, reading: null }, notices: [], visits: [], me: "holder", guest: false, who }],
-  ["Yours, a change of use later", { f: { ...base, open_sign: false, reading: null, schedule: { ...base.schedule!, use: "a tea room" } }, notices: [], visits: [], me: "holder", guest: false, who }],
+  ["Yours, boarded up and asked for", { f: { ...base, boarded_at: ago(3), quit_by: ago(-4), reading: "Boarded up. Nothing on, nobody in, and nothing changed in a month. It's all still there." }, notices: [], visits: [], me: "holder", guest: false, who }],
+  ["Yours, nothing up yet", { f: { ...base, reading: null }, notices: [], visits: [], me: "holder", guest: false, who }],
+  ["Yours, a change of use later", { f: { ...base, reading: null, schedule: { ...base.schedule!, use: "a tea room" } }, notices: [], visits: [], me: "holder", guest: false, who }],
   ["The card on the map: reading", { card: base, me: "visitor", guest: false }],
   ["The card: boarded, ask for it", { card: { ...base, boarded_at: ago(3) }, me: "visitor", guest: false }],
   ["The card: boarded, asked for", { card: { ...base, boarded_at: ago(3), quit_by: ago(-6) }, me: "visitor", guest: false }],

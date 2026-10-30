@@ -59,7 +59,6 @@ export interface Filing {
   schedule: Schedule | null; // Gary's, once granted; null for filings from before schedules
   shell: Shell | null; // the holder's building, once put up
   // The spirit's columns (see the spirit, at the end): optional so made-up filings needn't give them.
-  open_sign?: boolean;
   boarded_at?: string | null;
   quit_by?: string | null; // someone's asked for it while boarded: reopen by then or it's freed
   reading?: string | null; // Gary's latest reading of the use
@@ -366,7 +365,7 @@ export async function summonRounds(): Promise<number | null> {
 export const fileRetrospective = (t: Tag) =>
   vary({ filing: t.filing, kind: "addition", what: t.what.length < 3 ? `a ${t.what}` : t.what.slice(0, 80), tag: t.id });
 
-// --- the spirit: the open sign, the what's-on board, the visitors' book -------
+// --- the spirit: the what's-on board, the visitors' book ----------------------
 
 /** A notice on the what's-on board by a place's door. ok: Gary's read of it, null while he hasn't. */
 export interface Notice { id: number; filing: number; line: string; posted_at: string; ok: boolean | null }
@@ -380,11 +379,6 @@ export async function loadSpirit(filing: number): Promise<{ notices: Notice[]; v
     supabase.from("visits").select("id, filing, visitor, line, day, at, ok").eq("filing", filing).order("at", { ascending: false }).limit(30),
   ]);
   return { notices: n.data ?? [], visits: v.data ?? [] };
-}
-
-export async function flipSign(filing: number, open: boolean): Promise<string | null> {
-  const { error } = await supabase.from("filings").update({ open_sign: open }).eq("id", filing);
-  return error && said(error);
 }
 
 export async function pinNotice(filing: number, line: string): Promise<Notice | string> {
