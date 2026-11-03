@@ -49,3 +49,7 @@ Most files open with a comment saying what they own; read it before grepping.
   db/logic.sql, used by Gary's rounds and lawful-by-time. Change one without
   the other and he asks about, or certifies, the wrong things.
 - Non-integer `ctx.scale()`/`ctx.rotate()` smears sprite art off the pixel grid.
+- Every cron run costs two lines of metered Supabase logs. Anything that needs
+  to run more often than hourly goes in `the_commons.tick()` (db/logic.sql),
+  not a cron job of its own; a job per drain once used most of the org's log
+  quota.

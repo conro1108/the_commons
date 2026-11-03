@@ -491,8 +491,6 @@ revoke execute on function the_commons.summon_gary() from public, anon;
 grant execute on function the_commons.summon_gary() to authenticated;
 
 select cron.unschedule(jobname) from cron.job where jobname like 'the_commons_%';
-select cron.schedule('the_commons_gary', '5 seconds', 'select the_commons.drain_gary()');
-select cron.schedule('the_commons_inspector', '30 seconds', 'select the_commons.send_inspector(null)');
 select cron.schedule('the_commons_auditor', '0 15 * * *', 'select the_commons.send_auditor()');
 -- The committee meets at 4am: each referral, and each appeal that's come up to
 -- it, is sent to /api/gary to be debated. One that can't make quorum waits for
@@ -623,7 +621,6 @@ begin
   end loop;
 end $$;
 revoke execute on function the_commons.drain_variations() from public, anon, authenticated;
-select cron.schedule('the_commons_variations', '5 seconds', 'select the_commons.drain_variations()');
 
 -- Material variations go to the committee's 4am sitting, alongside convene().
 create function the_commons.convene_variations() returns int
@@ -1159,7 +1156,6 @@ end $$;
 revoke execute on function the_commons.ask_for_plot(smallint) from public, anon;
 grant execute on function the_commons.ask_for_plot(smallint) to authenticated;
 
-select cron.schedule('the_commons_spirit', '15 seconds', 'select the_commons.send_spirit()');
 select cron.schedule('the_commons_disuse', '17 * * * *', 'select the_commons.board_up()');
 
 do $$
@@ -1253,5 +1249,30 @@ begin
     end if;
   end loop;
 end $$;
+
+-- The fast jobs share one cron job. pg_cron logs two lines per run to Postgres
+-- logs (metered by Supabase; its log settings are fixed) and keeps a row in
+-- cron.job_run_details, so a job per drain was most of the org's log quota.
+-- Each 5-second tick drains Gary's queues; every third, the spirit; every
+-- sixth, the inspector.
+create function the_commons.tick() returns void
+language plpgsql security definer set search_path = '' as $$
+declare
+  slot bigint := floor(extract(epoch from now()) / 5);
+begin
+  perform the_commons.drain_gary();
+  perform the_commons.drain_variations();
+  if slot % 3 = 0 then perform the_commons.send_spirit(); end if;
+  if slot % 6 = 0 then perform the_commons.send_inspector(null); end if;
+end $$;
+revoke execute on function the_commons.tick() from public, anon, authenticated;
+select cron.schedule('the_commons_tick', '5 seconds', 'select the_commons.tick()');
+
+-- pg_cron never prunes its run history. Keep a day of it, but leave other
+-- projects' live jobs' rows to them (rows whose job is gone are anyone's).
+select cron.schedule('the_commons_cron_history', '23 5 * * *', $$
+  delete from cron.job_run_details where end_time < now() - interval '1 day'
+    and jobid not in (select jobid from cron.job where jobname not like 'the_commons_%')
+$$);
 
 commit;
