@@ -1,6 +1,7 @@
 // The time of day, by the resident's own clock: a grade over the finished
 // frame, so every sprite gets it for free. Warm and low at either end of the
-// day, blue at night. ?hour= overrides it, for looking.
+// day, blue at night: moonlit, never so dark the land turns to mud. ?hour=
+// overrides it, for looking.
 
 const forced = new URLSearchParams(location.search).get("hour");
 
@@ -13,16 +14,16 @@ export function hourNow(): number {
 
 // [hour, multiply colour, its strength]
 const KEYS: [number, string, number][] = [
-  [0, "#3c4a8c", 0.62],
-  [4.5, "#3c4a8c", 0.6],
+  [0, "#6c7cc0", 0.56],
+  [4.5, "#6c7cc0", 0.54],
   [6, "#c890a8", 0.38],
   [7.5, "#f0c8a0", 0.16],
   [9, "#ffffff", 0],
   [16.5, "#ffffff", 0],
   [18, "#ffc890", 0.24],
   [19.5, "#c07890", 0.42],
-  [21, "#4a4a8c", 0.56],
-  [24, "#3c4a8c", 0.62],
+  [21, "#7474b8", 0.52],
+  [24, "#6c7cc0", 0.56],
 ];
 
 const lerp = (a: number, b: number, t: number) => a + (b - a) * t;

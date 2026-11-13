@@ -410,11 +410,14 @@ function letterUpClose(ctx: CanvasRenderingContext2D, scene: FocusScene, now: nu
   if (post && tags.some(isWaiting)) drawQuestionnaire(ctx, post.x * ZOOM - 7, post.y * ZOOM - 15);
 }
 
-/** One plot up close, in focus-space art pixels. */
-export function drawFocus(ctx: CanvasRenderingContext2D, scene: FocusScene, now: number) {
+/**
+ * One plot up close, in focus-space art pixels. `backdrop`: the land is already
+ * drawn behind and the caller lights the whole screen (focusLights after its grade).
+ */
+export function drawFocus(ctx: CanvasRenderingContext2D, scene: FocusScene, now: number, backdrop = false) {
   const { plot, filing: f } = scene;
   const { w, h } = focusSize(plot);
-  ctx.drawImage(surround(plot), 0, 0);
+  if (!backdrop) ctx.drawImage(surround(plot), 0, 0);
   ctx.save();
   ctx.translate(FOCUS_PAD, FOCUS_PAD);
   ctx.drawImage(groundCanvas(plot, f), 0, 0);
@@ -455,13 +458,19 @@ export function drawFocus(ctx: CanvasRenderingContext2D, scene: FocusScene, now:
   if (post) sign(ctx, String(plot.id), post.x * ZOOM + 5, post.y * ZOOM - 12);
   if (scene.tags) letterUpClose(ctx, scene, now);
   ctx.restore();
+  if (backdrop) return;
   grade(ctx, w, h);
-  if (shell && dark(hourNow())) {
-    ctx.save();
-    ctx.translate(FOCUS_PAD, FOCUS_PAD);
-    shellLights(ctx, shell);
-    ctx.restore();
-  }
+  focusLights(ctx, scene);
+}
+
+/** The building's lit windows after dark, over the grade. */
+export function focusLights(ctx: CanvasRenderingContext2D, scene: FocusScene) {
+  const shell = scene.shell ? scene.shell.shell : scene.filing.shell;
+  if (!shell || !dark(hourNow())) return;
+  ctx.save();
+  ctx.translate(FOCUS_PAD, FOCUS_PAD);
+  shellLights(ctx, shell);
+  ctx.restore();
 }
 
 /** Whether a build-space point is on the shell, as the close-up draws it. */

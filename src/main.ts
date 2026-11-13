@@ -20,8 +20,9 @@ import { pieceOf } from "./library.ts";
 import type { RealtimeChannel } from "@supabase/supabase-js";
 import { VOID, colourOf, draw, letterPhase, type Letter, type Walker } from "./render.ts";
 import {
-  FOCUS_PAD, SURROUND, canPaint, canPlace, drawFocus, focusSize, land, placementAt, type Cells, type FocusScene,
+  FOCUS_PAD, SURROUND, canPaint, canPlace, drawFocus, focusLights, focusSize, land, placementAt, type Cells, type FocusScene,
 } from "./closeup.ts";
+import { grade } from "./light.ts";
 import {
   DEFAULT_MATERIAL, DEFAULT_PAINT, MATERIALS, PAINTS, defaultWindows, footprintProblem, frontWallAt, kindOf, materialSwatch, materialsFor,
   onShell, raise, scheduledMaterial, shellKind, windowFits, type Kind as ShellKind,
@@ -1111,6 +1112,36 @@ function fill(colour: string) {
   ctx.fillRect(0, 0, canvas.width, canvas.height);
 }
 
+/**
+ * A plot up close with the commons carrying on round it to the screen's edges,
+ * a touch dimmer so the plot is what you look at: the map at build scale, each
+ * of its pixels a cell, then the plot at full detail over the top.
+ */
+function drawPlotView(c: CanvasRenderingContext2D, f: Filing, now: number) {
+  const p = plotOf(f);
+  const k = focusView.s * ZOOM;
+  c.setTransform(1, 0, 0, 1, 0, 0);
+  c.fillStyle = VOID;
+  c.fillRect(0, 0, canvas.width, canvas.height);
+  c.setTransform(k, 0, 0, k, focusView.ox + focusView.s * FOCUS_PAD - p.x * k, focusView.oy + focusView.s * FOCUS_PAD - p.y * k);
+  draw(c, { held: heldPlots(), built, me, hover: null, selected: null, walkers: [], look: lookOf, letters: [], t: Date.now(), recent: [], backdrop: p.id });
+  c.setTransform(1, 0, 0, 1, 0, 0);
+  c.globalCompositeOperation = "multiply";
+  c.fillStyle = "#b4b0c4";
+  c.fillRect(0, 0, canvas.width, canvas.height);
+  c.globalCompositeOperation = "source-over";
+  const scene = focusScene(f);
+  c.setTransform(focusView.s, 0, 0, focusView.s, focusView.ox, focusView.oy);
+  drawFocus(c, scene, now, true);
+  c.setTransform(1, 0, 0, 1, 0, 0);
+  grade(c, canvas.width, canvas.height);
+  c.setTransform(focusView.s, 0, 0, focusView.s, focusView.ox, focusView.oy);
+  focusLights(c, scene);
+}
+
+/** Where the close-up is drawn while it fades in over the zooming map. */
+let stage: CanvasRenderingContext2D | null = null;
+
 const ease = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - (-2 * t + 2) ** 3 / 2);
 
 /**
@@ -1139,10 +1170,16 @@ function drawZoom(now: number) {
   draw(ctx, { held: heldPlots(), built, me, hover: null, selected: null, walkers: [...walkers.values()], look: lookOf, letters: [], t: Date.now(), recent: recent(), tags: tagsOf, pound: pounded });
   const fade = Math.max(0, (u - 0.65) / 0.35);
   if (fade > 0) {
+    stage ??= document.createElement("canvas").getContext("2d")!;
+    if (stage.canvas.width !== canvas.width || stage.canvas.height !== canvas.height) {
+      stage.canvas.width = canvas.width;
+      stage.canvas.height = canvas.height;
+      stage.imageSmoothingEnabled = false;
+    }
+    drawPlotView(stage, z.filing, now);
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.globalAlpha = fade;
-    fill(SURROUND);
-    viewport(focusView);
-    drawFocus(ctx, focusScene(z.filing), now);
+    ctx.drawImage(stage.canvas, 0, 0);
     ctx.globalAlpha = 1;
   }
   if (t >= 1) zoom = null;
@@ -2372,9 +2409,7 @@ function frame(now: number) {
   } else if (indoors !== null) {
     drawInside(now);
   } else if (focus) {
-    fill(SURROUND);
-    viewport(focusView);
-    drawFocus(ctx, focusScene(focus), now);
+    drawPlotView(ctx, focus, now);
     labelItems();
     canvas.style.cursor = pointer && atDoor(focus, pointer) ? "pointer"
       : mineInFocus() && pointer ? (tool === "move" ? (drag ? "grabbing" : "grab") : "crosshair") : "";

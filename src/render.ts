@@ -41,6 +41,8 @@ export interface Scene {
   recent: number[]; // newest granted plots, newest first: where Gary goes to look
   tags?: Map<number, Tag[]>; // filing id -> Gary's tags on it (the letter)
   pound?: number; // how many things are in the pound at his hut
+  /** Drawn as the land behind this plot's close-up: the plot itself, anyone walking, the light and the air left out. */
+  backdrop?: number;
 }
 
 /**
@@ -299,6 +301,7 @@ export function draw(ctx: CanvasRenderingContext2D, scene: Scene) {
   ctx.drawImage(background, 0, 0);
   drawUnder(ctx, scene.t);
   for (const p of PLOTS) {
+    if (p.id === scene.backdrop) continue;
     const f = scene.held.get(p.id);
     drawPlot(ctx, p, f, f ? (scene.built.get(f.id) ?? NONE) : NONE, scene.me);
   }
@@ -312,12 +315,13 @@ export function draw(ctx: CanvasRenderingContext2D, scene: Scene) {
     { y: LANDMARKS.board.y + LANDMARKS.board.h, draw: () => drawBoard(ctx) },
     { y: LANDMARKS.oak.y + LANDMARKS.oak.h, draw: () => drawOak(ctx) },
     ...(scene.pound ? [{ y: POUND.y + 5, draw: () => drawPound(ctx, POUND.x, POUND.y, scene.pound!) }] : []),
-    ...critters(ctx, scene.t, scene.recent),
+    ...(scene.backdrop === undefined ? critters(ctx, scene.t, scene.recent) : []),
     ...scene.walkers.map((w) => ({ y: w.y, draw: () => drawWalker(ctx, w, scene.look(w.id), w.id === scene.me, scene.t) })),
   ];
   for (const s of standing.sort((a, b) => a.y - b.y)) s.draw();
   const c = LANDMARKS.canopy;
   ctx.drawImage(canopy, c.x - 4, c.y - 4);
+  if (scene.backdrop !== undefined) return;
   drawAir(ctx, scene.t, hour);
   const now = performance.now();
   for (const l of scene.letters) drawLetter(ctx, l, now);
