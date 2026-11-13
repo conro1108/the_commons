@@ -282,3 +282,19 @@ create table if not exists the_commons.readings (
 );
 create index if not exists readings_filing on the_commons.readings (filing, id);
 alter table the_commons.readings enable row level security;
+
+-- The gazette: what happened on the commons each day, an item a row, written
+-- once a day by /api/gary from every built place at once (send_gazette). The
+-- place it happened at, and the other it involved if any; answers keeps the
+-- checks, and on a day's first row the drafts.
+create table if not exists the_commons.happenings (
+  id      bigint generated always as identity primary key,
+  day     date not null default current_date,
+  filing  bigint not null references the_commons.filings on delete cascade,
+  other   bigint references the_commons.filings on delete set null,
+  line    text not null,
+  at      timestamptz not null default now(),
+  answers jsonb
+);
+create index if not exists happenings_day on the_commons.happenings (day desc, id);
+alter table the_commons.happenings enable row level security;

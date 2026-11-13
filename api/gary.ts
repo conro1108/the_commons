@@ -2017,6 +2017,123 @@ export async function driftOf(db: Db, filing: number, asOf?: string) {
   };
 }
 
+// --- the gazette: what happened on the commons today ---------------------------
+
+// Once a day the whole commons is read at once (every built place, its board
+// and book, what's beside it, the last paper) and a few things are found to
+// have happened: one place's use running into its neighbour's, the goose taking
+// an interest. Stored like the rest of what's written here, so everyone reads
+// the same paper. A holder answers on their own what's-on board: tomorrow's
+// paper reads it, so the story moves.
+
+const EDITOR = "anthropic/claude-sonnet-5.5"; // one call a day, and the one place the writing is the whole point
+
+const GAZETTE = `You write the Commons Gazette, the daily paper of the Commons: a shared patch of land whose plots people have filed to build on. Gary administers it from a hut on the Green; it's a job, and he's tired. Also resident, and not on anybody's permit: a goose, the ducks on the pond, the bees, a mole.
+
+"places" is every plot that has been built on: who holds it, what it's for ("use"), what actually stands there ("outside", "inside"), what its holder has pinned on its board, what visitors wrote in its book, and what lies along its sides ("beside"; a "Plot N" there is another place if it's in the list, and bare land if not). "yesterday" is what the paper last printed.
+
+Write today's paper: as many items as "items" says, one to a line and nothing else, each in the form
+<plot number>: <the item>
+or, for something between two places,
+<plot number>+<plot number>: <the item>
+An item is one or two sentences, at most 40 words, plain text.
+
+An item is something small that happened today because of what these places are and what is really on them: one place's use running into another's, the goose or the ducks or the bees or the mole or the weather taking an interest in one particular thing, a visitor doing what the place invites, Gary having to come out and look. Give the cause and the effect. Report it flat, the way a parish newsletter reports a missing ladder: the comedy is in small things taken seriously, so never wink, never explain, no puns, no exclamation marks, no "reportedly".
+At least half the items should join two places, and those need not be next to each other: sound, smell, animals and visitors all travel. No plot in more than two items, and a different one first each time.
+Use only what's listed: never add a building or an object to a place. What is listed can be sat on, borrowed, climbed, admired, complained about, moved a yard. Call places by what they are ("the climbing wall", "the botanical garden") and holders by name where it helps.
+Nothing is destroyed and nobody is hurt. Nothing is granted, denied or ordered here: Gary may take a note, have a word or open a file, no more.
+If a board answers something in "yesterday", carry that story on a step; otherwise leave yesterday's stories alone and never print the same thing twice.`;
+
+const ITEM_CHECKS = {
+  invents: "Does the item say a place has a building or an object standing on it that is not given for that place in \"places\" (its use, sign, outside, inside or board)? People, animals, weather, sounds, smells and things that merely happen are fine, and so is naming a listed thing loosely.",
+  rules: "Does the item say that Gary or the committee granted, denied, ordered, fined or ruled on something? Taking a note, having a word or opening a file is fine.",
+  unfit: "Is the item cruel about a named person, hateful or graphic, or does it contain a link or personal information? Gentle fun at a place's expense is fine.",
+} as const;
+
+export type Item = { plot: number; other: number | null; line: string };
+
+/** A paper as written, a line an item: `7: …` or `7+12: …`. Lines about plots that aren't places are dropped and said. */
+export function itemsOf(raw: string, plots: Set<number>): { items: Item[]; problems: string[] } {
+  const items: Item[] = [], problems: string[] = [];
+  for (const row of raw.split("\n").map((r) => r.trim()).filter(Boolean)) {
+    const m = row.match(/^(?:plot\s*)?(\d+)(?:\s*\+\s*(?:plot\s*)?(\d+))?\s*:\s*(.+)$/i);
+    if (!m) { problems.push(`not in the form "<plot>: <item>": ${row.slice(0, 60)}`); continue; }
+    const plot = Number(m[1]), other = m[2] ? Number(m[2]) : null, line = m[3].trim();
+    if (!plots.has(plot) || (other !== null && (!plots.has(other) || other === plot))) problems.push(`a plot that isn't in "places": ${row.slice(0, 60)}`);
+    else if (words(line) > 50) problems.push(`it ran to ${words(line)} words; keep an item to 40: ${row.slice(0, 60)}`);
+    else if (problemsWith(line, {}).length) problems.push(`a link or handle: ${row.slice(0, 60)}`);
+    else items.push({ plot, other, line });
+  }
+  return { items, problems };
+}
+
+/** Today's paper, written and checked but not printed. Exported so the back office can try one. */
+export async function gazette(db: Db) {
+  const { data: held } = await db.from("filings").select("id, filer, plot, ground, intent, schedule, shell, boarded_at").in("status", BUILT_STATUSES).order("plot");
+  const fs = (held ?? []) as { id: number; filer: string; plot: number; ground: string | null; intent: string; schedule: Schedule | null; shell: { sign?: string | null; sign_ok?: boolean | null } | null; boarded_at: string | null }[];
+  if (!fs.length) return { places: [], items: [], drafts: [] };
+  const [{ data: people }, { data: before }, spirits] = await Promise.all([
+    db.schema("app").from("profiles").select("id, handle").in("id", fs.map((f) => f.filer)),
+    db.from("happenings").select("filing, other, line").order("id", { ascending: false }).limit(6),
+    Promise.all(fs.map((f) => spiritOf(db, f))),
+  ]);
+  const handle = new Map(((people ?? []) as { id: string; handle: string }[]).map((p) => [p.id, p.handle]));
+  const plotOfFiling = new Map(fs.map((f) => [f.id, f.plot]));
+  const places = fs.map((f, i) => {
+    const plot = plotOf(f.plot), s = spirits[i];
+    return {
+      plot: f.plot, name: plot.name, ground: regionOf(plot).name, holder: handle.get(f.filer) ?? "someone", use: s.use,
+      ...(f.shell?.sign && f.shell.sign_ok && { sign: f.shell.sign }),
+      outside: s.outside.map((t) => t.replace(/, across \d.*$/, "")), inside: s.inside, board: s.board, book: s.book.slice(0, 4),
+      beside: [...new Set(Object.values(plot.edges).flat())],
+      ...(f.boarded_at && { boarded_up: true }),
+    };
+  });
+  const yesterday = ((before ?? []) as { filing: number; other: number | null; line: string }[])
+    .filter((h) => plotOfFiling.has(h.filing))
+    .map((h) => ({ plot: plotOfFiling.get(h.filing)!, ...(h.other && plotOfFiling.has(h.other) && { and: plotOfFiling.get(h.other)! }), line: h.line }));
+  const want = Math.min(4, Math.ceil(places.length / 2));
+  const plots = new Set(places.map((p) => p.plot));
+
+  const drafts: { text: string; problems: string[] }[] = [];
+  let best: (Item & { checks: Record<string, number> })[] = [];
+  for (let attempt = 0; attempt < 2 && best.length < want; attempt++) {
+    const last = drafts.at(-1);
+    const { text } = await write(`gazette, draft ${attempt + 1}`, {
+      model: EDITOR, reasoning: "medium", system: GAZETTE, maxOutputTokens: 8000,
+      prompt: { places, yesterday, items: want, ...(last && { rejected: last.text, rejected_because: last.problems }) },
+    });
+    const { items, problems } = itemsOf(text, plots);
+    const checked = await Promise.all(items.map(async (it) => {
+      const { answers } = await ask("gazette, check", { places: places.filter((p) => p.plot === it.plot || p.plot === it.other), item: it.line },
+        Object.fromEntries(Object.entries(ITEM_CHECKS).map(([k, instructions]) => [k, { type: "boolean" as const, instructions }])));
+      const checks = Object.fromEntries(Object.entries(answers).map(([k, v]) => [k, (v as { probability: number }).probability]));
+      return { ...it, checks, failed: Object.entries(checks).filter(([, p]) => p > FAILS).map(([k]) => ITEM_CHECKS[k as keyof typeof ITEM_CHECKS]) };
+    }));
+    drafts.push({ text, problems: [...problems, ...checked.flatMap((c) => c.failed.map((why) => `"${c.line.slice(0, 60)}…": ${why}`))] });
+    const good = checked.filter((c) => !c.failed.length).slice(0, want).map(({ failed: _, ...it }) => it);
+    if (good.length > best.length) best = good;
+  }
+  return { places, items: best, drafts };
+}
+
+/** Print today's paper, once: a second call the same day finds it printed. */
+async function printGazette(db: Db): Promise<Response> {
+  const day = new Date().toISOString().slice(0, 10);
+  const { count } = await db.from("happenings").select("id", { count: "exact", head: true }).eq("day", day);
+  if (count) return Response.json({ skipped: "printed" });
+  const { items, drafts } = await gazette(db);
+  if (!items.length) return Response.json({ items: 0 });
+  const { data: held } = await db.from("filings").select("id, plot").in("status", BUILT_STATUSES);
+  const filingOn = new Map(((held ?? []) as { id: number; plot: number }[]).map((f) => [f.plot, f.id]));
+  const rows = items.filter((it) => filingOn.has(it.plot)).map((it, i) => ({
+    day, filing: filingOn.get(it.plot)!, other: it.other === null ? null : (filingOn.get(it.other) ?? null), line: it.line,
+    answers: { checks: it.checks, ...(i === 0 && { drafts, editor: EDITOR, judge: JUDGE }) },
+  }));
+  const { error } = await db.from("happenings").insert(rows);
+  return error ? Response.json({ error: error.message }, { status: 500 }) : Response.json({ items: rows.length });
+}
+
 export type SpiritBody = { notice?: number; visit?: number; reading?: number };
 
 /** The spirit's share of the in-tray, or null if it isn't for us. */
@@ -2047,11 +2164,12 @@ export async function desk(
   body: {
     id?: number; inspect?: number; item?: number; committee?: number; committee_appeal?: number; audit?: number; appeal?: number;
     variation?: number; committee_variation?: number; letter?: number; tag?: number;
-    sign?: number;
+    sign?: number; gazette?: boolean;
   } & SpiritBody,
 ): Promise<Response> {
   const spirit = spiritDesk(db, body);
   if (spirit) return spirit;
+  if (body.gazette) return printGazette(db);
   if (body.letter) return round(db, body.letter);
   if (body.tag) return answered(db, body.tag);
   if (body.inspect) return inspectPlot(db, body.inspect);

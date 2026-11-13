@@ -60,6 +60,11 @@ async function run(db: gary.Db, { what, ...b }: Body): Promise<unknown> {
     case "escalate":
       // Not in the game: three appeals dismissed (or a refusal, at once) go up to the committee, which may be appealed once.
       return gary.sit(filing, plot, { bylaw: b.bylaw ?? null, refused: b.refused, exchange: b.earlier ?? [], ...(b.against && { against: b.against }) });
+    case "gazette": {
+      // Today's paper as it would be written, not printed.
+      const { items, drafts } = await gary.gazette(db);
+      return { items, drafts };
+    }
     case "draw":
       return gary.draw(b.label ?? "");
   }
