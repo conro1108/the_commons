@@ -28,6 +28,7 @@ Most files open with a comment saying what they own; read it before grepping.
 | Bylaws as shown to players | `src/rulebook.ts` (mirrors `api/gary.ts`) |
 | Gary's rulings, permits, inspections, audits, appeals, committee, drawings | `api/gary.ts` |
 | His rounds against the schedule: questions, red tags, the pound, lawful by time | `src/letter.ts`; the round in `api/gary.ts` ("the letter"), timings `keep_tags()` in `db/logic.sql` |
+| The gazette: what happened between places each day | written in `api/gary.ts` ("the gazette"), sent by `send_gazette()` in `db/logic.sql`; shown from `src/main.ts` ("The gazette"); try one unprinted: `POST /api/backoffice {"what":"gazette"}` |
 | Logging in by name | `api/door.ts` |
 | The back office (hold the notice board 3s) | `src/backoffice.ts`, `api/backoffice.ts` |
 | The committee acted out, when summoned from the board or ticked in the back office | `src/chamber.ts`; offline `dev/chamber.html` |

@@ -41,6 +41,7 @@ export interface Scene {
   recent: number[]; // newest granted plots, newest first: where Gary goes to look
   tags?: Map<number, Tag[]>; // filing id -> Gary's tags on it (the letter)
   pound?: number; // how many things are in the pound at his hut
+  news?: Set<number>; // plots in today's gazette: a paper on the corner
   /** Drawn as the land behind this plot's close-up: the plot itself, anyone walking, the light and the air left out. */
   backdrop?: number;
 }
@@ -249,6 +250,18 @@ function drawPlot(ctx: CanvasRenderingContext2D, p: PlotDef, f: Filing | undefin
   if (mine) pennant(ctx, p, colourOf(f.filer));
 }
 
+/** Today's paper, folded, bobbing over the plot's top-right corner: something happened here. */
+function paper(ctx: CanvasRenderingContext2D, p: PlotDef, t: number) {
+  const c = outlineOf(p).edge.reduce((a, b) => (b.x - b.y > a.x - a.y ? b : a));
+  const x = c.x - 2, y = c.y - 7 - (Math.floor(t / 600) % 2);
+  ctx.fillStyle = INK;
+  ctx.fillRect(x, y, 6, 5);
+  ctx.fillStyle = "#fffdf3";
+  ctx.fillRect(x + 1, y + 1, 4, 3);
+  ctx.fillStyle = INK;
+  ctx.fillRect(x + 2, y + 2, 2, 1);
+}
+
 function highlight(ctx: CanvasRenderingContext2D, id: number, colour: string) {
   const p = PLOTS.find((q) => q.id === id);
   if (!p) return;
@@ -306,6 +319,7 @@ export function draw(ctx: CanvasRenderingContext2D, scene: Scene) {
     drawPlot(ctx, p, f, f ? (scene.built.get(f.id) ?? NONE) : NONE, scene.me);
   }
   if (scene.tags) mapTags(ctx, scene);
+  if (scene.news && scene.backdrop === undefined) for (const p of PLOTS) if (scene.news.has(p.id)) paper(ctx, p, scene.t);
   if (scene.hover !== null && scene.hover !== scene.selected) highlight(ctx, scene.hover, "#ffffff70");
   if (scene.selected !== null) highlight(ctx, scene.selected, "#fff8e0");
 

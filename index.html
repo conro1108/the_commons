@@ -146,6 +146,24 @@
       .reading { position: absolute; inset: 0; display: grid; place-items: center; background: #402e3a40; }
       .reading .notice { width: min(420px, 86vw); cursor: auto; font-size: 14px; padding: 16px 16px 12px; transform: rotate(-1deg); }
       .reading .notice:hover { transform: rotate(-1deg); }
+      /* The gazette, pinned above the notices: the one printed thing here, so its masthead is set in a serif. */
+      .gazette { position: relative; max-width: 560px; margin: 0 auto 26px; background: #fffdf3; border: 2px solid #402e3a; padding: 14px 18px 10px;
+                 box-shadow: 3px 4px 0 #402e3a66; transform: rotate(-.6deg); font-size: 13px; }
+      .masthead { text-align: center; border-bottom: 3px double #402e3a; padding-bottom: 6px; margin-bottom: 4px; }
+      .masthead h3 { margin: 0; font: 700 24px/1.1 Georgia, "Times New Roman", serif; letter-spacing: .02em; color: #402e3a; }
+      .masthead span { font-size: 10px; letter-spacing: .12em; text-transform: uppercase; color: #6b5a7a; }
+      .gazette ol { list-style: none; margin: 0; padding: 0; }
+      .gazette li { padding: 9px 0; border-bottom: 1px dashed #402e3a55; line-height: 1.45; }
+      .gazette li[data-plot] { cursor: pointer; }
+      .gazette li[data-plot]:hover { background: #f8f0d8; }
+      .gazette li .meta { white-space: nowrap; font-size: 11px; }
+      .gazette > .meta { margin: 8px 0 2px; }
+      .gazette details { margin-top: 6px; font-size: 12px; }
+      .gazette summary { cursor: pointer; color: #6b5a7a; }
+      .gazette h4 { margin: 10px 0 0; font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: #6b5a7a; }
+      .in-paper { margin: 8px 0; padding: 8px 10px; background: #fffdf3; border: 1px solid #402e3a; border-left: 4px double #402e3a; }
+      .in-paper b { font: 700 13px Georgia, "Times New Roman", serif; }
+      .in-paper p { margin: 4px 0 0; }
       .empty-board { color: #fffdf3; text-align: center; padding: 30px 0 10px; }
 
       /* Up close, and inside: a row along the top (back, the place's paper, step inside), the dock along the bottom. */

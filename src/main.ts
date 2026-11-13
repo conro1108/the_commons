@@ -8,7 +8,7 @@ import {
 import {
   APPEALS, HELD, nextCourt, avatarOf, fileAppeal, fileClaim, handlesFor, isGuest, keepPapers, logIn, loadAppeals, loadFilings, loadPlacements, move, paint,
   place, placeInside, moveInside, rehandle, saveProfile, signIn, summonGary, supabase, unplace,
-  answerTag, fileRetrospective, loadTags, reclaim, summonRounds, summonCommittee,
+  answerTag, fileRetrospective, loadTags, reclaim, summonRounds, summonCommittee, loadGazette, type Happening,
   type Appeal, type Filing, type Placement,
 } from "./net.ts";
 import { fileChangeOfUse, fileVariation, loadVariations, type Variation } from "./net.ts";
@@ -355,7 +355,7 @@ function renderCard() {
   } else if (f) {
     body = `<h2>${esc(plotLabel(def))}</h2><p class="meta where">${esc(REGIONS[def.region].name)}</p>
       <p>Held by ${esc(who(f.filer))}: <q>${esc(f.intent)}</q></p>
-      ${ruling(f, fresh)}${conditionHtml(f, true)}${spiritCardHtml(f, me, guest)}${letterFor(f)}${worksHtml(f)}${variationsHtml(f)}${enter}<p class="meta">Filing ${pad(f.id)}</p>`;
+      ${inThePaper(f)}${ruling(f, fresh)}${conditionHtml(f, true)}${spiritCardHtml(f, me, guest)}${letterFor(f)}${worksHtml(f)}${variationsHtml(f)}${enter}<p class="meta">Filing ${pad(f.id)}</p>`;
   } else {
     const denial = appealableOn(plot);
     body = `${particulars(def)}
@@ -515,6 +515,55 @@ card.addEventListener("pointermove", (e) => {
 });
 for (const ev of ["pointerup", "pointercancel", "lostpointercapture"]) card.addEventListener(ev, () => void (carrying = null));
 
+// The gazette: what happened on the commons each day (api/gary.ts writes it).
+// Pinned to the notice board, a paper on the corner of each plot in today's,
+// and on those plots' cards.
+let gazette: Happening[] = [];
+let news = new Set<number>(); // plots in the latest paper
+
+async function loadPaper() {
+  try {
+    gazette = await loadGazette();
+  } catch {
+    return; // no paper today: the commons works without it
+  }
+  const day = gazette[0]?.day;
+  news = new Set(gazette.filter((h) => h.day === day).flatMap((h) => [h.filing, h.other]).map((id) => (id === null ? undefined : filings.get(id)?.plot)).filter((p): p is number => p !== undefined));
+  renderAll();
+  renderBoard();
+}
+
+const paperDay = (day: string) => new Date(`${day}T12:00`).toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long" });
+
+function itemHtml(h: Happening) {
+  const a = filings.get(h.filing), b = h.other === null ? undefined : filings.get(h.other);
+  const where = [a, b].filter((f): f is Filing => !!f).map((f) => `Plot ${f.plot}`).join(" and ");
+  return `<li${a ? ` data-plot="${a.plot}"` : ""}>${esc(h.line)}${where ? ` <span class="meta">${where}</span>` : ""}</li>`;
+}
+
+/** The latest paper in full, earlier ones folded under it. */
+function gazetteHtml() {
+  if (!gazette.length) return "";
+  const days = [...new Set(gazette.map((h) => h.day))];
+  const of = (day: string) => gazette.filter((h) => h.day === day).reverse().map(itemHtml).join("");
+  const mine = [...filings.values()].some((f) => f.filer === me && news.has(f.plot));
+  return `<div class="gazette"><span class="pin" style="background:#b5404f"></span>
+      <div class="masthead"><h3>The Commons Gazette</h3><span>${paperDay(days[0])} · one sheet · free</span></div>
+      <ol>${of(days[0])}</ol>
+      <p class="meta">${mine ? "You're in it. " : ""}Something to say? Pin a line on your own what's-on board: tomorrow's paper reads them.</p>
+      ${days.length > 1 ? `<details><summary>Earlier papers</summary>${days.slice(1).map((d) => `<h4>${paperDay(d)}</h4><ol>${of(d)}</ol>`).join("")}</details>` : ""}
+    </div>`;
+}
+
+/** What today's paper said about one place, for its card. */
+function inThePaper(f: Filing) {
+  const day = gazette[0]?.day;
+  const items = gazette.filter((h) => h.day === day && (h.filing === f.id || h.other === f.id));
+  if (!items.length) return "";
+  return `<div class="in-paper"><b>In today's Gazette</b>${items.map((h) => `<p>${esc(h.line)}</p>`).join("")}${
+    f.filer === me ? `<p class="meta">Answer on your what's-on board, up close: tomorrow's paper reads it.</p>` : ""}</div>`;
+}
+
 // The notice board, read up close.
 const board = $("board");
 let reading: number | null = null; // the notice taken down to read
@@ -523,6 +572,7 @@ function openBoard() {
   closeCard();
   board.hidden = false;
   renderBoard();
+  loadPaper();
 }
 
 function closeBoard() {
@@ -546,11 +596,18 @@ function renderBoard() {
   const open = reading !== null ? filings.get(reading) : null;
   board.innerHTML = `<div class="cork">
       <div class="plank"><h2>Notices</h2><span>by order of the administrator <button class="close" aria-label="Close">×</button></span></div>
+      ${gazetteHtml()}
       ${recent.length ? `<div class="pins">${recent.map(notice).join("")}</div>` : `<p class="empty-board">Nothing pinned up yet. Gary is ready.</p>`}
       ${open ? `<div class="reading"><div class="notice"><span class="pin" style="background:${colourOf(open.filer)}"></span>
         <button class="close back" aria-label="Pin it back">×</button>${exchange(open)}</div></div>` : ""}
     </div>`;
   board.querySelector(".plank .close")!.addEventListener("click", closeBoard);
+  for (const li of board.querySelectorAll<HTMLElement>(".gazette [data-plot]")) {
+    li.addEventListener("click", () => {
+      closeBoard();
+      openCard(Number(li.dataset.plot));
+    });
+  }
   for (const n of board.querySelectorAll<HTMLElement>(".pins [data-filing]")) {
     n.addEventListener("click", () => {
       reading = Number(n.dataset.filing);
@@ -2418,7 +2475,7 @@ function frame(now: number) {
     follow();
     viewport(mapView);
     const t = Date.now();
-    draw(ctx, { held: heldPlots(), built, me, hover, selected, walkers: [...walkers.values()], look: lookOf, letters, t, recent: recent(), tags: tagsOf, pound: pounded });
+    draw(ctx, { held: heldPlots(), built, me, hover, selected, walkers: [...walkers.values()], look: lookOf, letters, t, recent: recent(), tags: tagsOf, pound: pounded, news });
     post(now);
     placeCard();
     overlays(now, t);
@@ -2517,6 +2574,7 @@ async function start() {
   for (const id of new Set(placed.map((p) => p.filing))) regroup(id);
   for (const v of await loadVariations().catch(() => [])) setVariation(v);
   void loadLetter();
+  void loadPaper();
   handles = await handlesFor([me, ...[...filings.values()].map((f) => f.filer)]);
 
   const spawn = { x: LANDMARKS.spawn.x + Math.round((Math.random() - 0.5) * 6), y: LANDMARKS.spawn.y };

@@ -1268,6 +1268,32 @@ end $$;
 revoke execute on function the_commons.tick() from public, anon, authenticated;
 select cron.schedule('the_commons_tick', '5 seconds', 'select the_commons.tick()');
 
+-- The gazette: once a day /api/gary reads every built place at once and prints
+-- what happened between them (the_commons.happenings). Written only there.
+create policy "the gazette is public"
+  on the_commons.happenings for select using (true);
+grant select on the_commons.happenings to anon, authenticated;
+grant all on the_commons.happenings to service_role;
+
+create function the_commons.send_gazette() returns int
+language plpgsql security definer set search_path = '' as $$
+declare
+  secret text;
+begin
+  select decrypted_secret into secret from vault.decrypted_secrets where name = 'the_commons_gary';
+  if secret is null then return 0; end if;
+  perform net.http_post(
+    url := 'https://the-commons-eosin.vercel.app/api/gary',
+    body := jsonb_build_object('gazette', true),
+    headers := jsonb_build_object('Content-Type', 'application/json',
+                                  'Authorization', 'Bearer ' || secret),
+    timeout_milliseconds := 30000);
+  return 1;
+end $$;
+revoke execute on function the_commons.send_gazette() from public, anon, authenticated;
+-- Out before anyone's breakfast, either side of the Atlantic.
+select cron.schedule('the_commons_gazette', '0 9 * * *', 'select the_commons.send_gazette()');
+
 -- pg_cron never prunes its run history. Keep a day of it, but leave other
 -- projects' live jobs' rows to them (rows whose job is gone are anyone's).
 select cron.schedule('the_commons_cron_history', '23 5 * * *', $$

@@ -19,12 +19,15 @@ open; play them and throw out what's dull.
   painted ground. Gary comes round to check conditions, and audits now and
   then.
 - **Appeal** a denial to Gary, then up to the committee, which sits nightly.
+- **The gazette**: each morning, a few things that happened between the places
+  people have built, on the notice board. Answer on your own what's-on board
+  and tomorrow's paper reads it.
 
 ## Next, roughly
 
-Deeper building, and permits held to over time. Then a world tick so the
-commons changes while you're away (hedges spread, paths wear in, the cast
-notices). Maybe a nightly gazette, petitions, mail.
+What the gazette reports should start to show: things moved, worn, grown,
+sat on, so the commons changes while you're away. Then petitions and mail.
+The paperwork is deep enough; what it governs is what's thin.
 
 ## How it fits together
 

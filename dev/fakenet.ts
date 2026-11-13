@@ -11,9 +11,9 @@ import type { PropDef } from "../src/content/canon/props.ts";
 import type { Avatar } from "../src/avatar.ts";
 import type { Schedule, Shell, Where } from "../src/schedule.ts";
 import type { Tag } from "../src/letter.ts";
-import type { Filing, Appeal, Placement, Variation, Notice, Visit, Status } from "../src/net.ts";
+import type { Filing, Appeal, Placement, Variation, Notice, Visit, Status, Happening } from "../src/net.ts";
 
-export type { Filing, Appeal, Placement, Variation, Notice, Visit, Status };
+export type { Filing, Appeal, Placement, Variation, Notice, Visit, Status, Happening };
 
 const q = new URLSearchParams(location.search);
 const ME = "me-0000-0000";
@@ -75,6 +75,11 @@ export function nextCourt(status: string, made: Appeal[]): Appeal["court"] | nul
   return made.filter((a) => a.court === "committee").length < 2 ? "committee" : null;
 }
 
+export const loadGazette = async (): Promise<Happening[]> => [
+  { id: 3, day: now.slice(0, 10), filing: 1, other: 2, line: "The evening class at the karate studio could be heard from the quiet bench, which was not quiet. Marguerite sat through all of it and has asked Gary what the bench is for." },
+  { id: 2, day: now.slice(0, 10), filing: 2, other: null, line: "The goose spent the afternoon on the quiet bench and would not be moved. Gary came out, looked, and went back in." },
+  { id: 1, day: "2026-01-01", filing: 1, other: null, line: "A duck got into the karate studio and stood on the mats. Nobody knew the form for it." },
+];
 export const signIn = async () => ME;
 export const isGuest = async () => false;
 export const keepPapers = async () => null;

@@ -372,6 +372,15 @@ export interface Notice { id: number; filing: number; line: string; posted_at: s
 /** A line in a place's visitors' book; one a visitor a day. */
 export interface Visit { id: number; filing: number; visitor: string; line: string; day: string; at: string; ok: boolean | null }
 
+/** An item in the gazette: something that happened at a place on a day, and the other place it involved, if any. */
+export interface Happening { id: number; day: string; filing: number; other: number | null; line: string }
+
+/** The gazette's last few papers, newest first. Empty if it can't be had: the commons works without it. */
+export async function loadGazette(): Promise<Happening[]> {
+  const { data } = await supabase.from("happenings").select("id, day, filing, other, line").order("id", { ascending: false }).limit(30);
+  return data ?? [];
+}
+
 /** The board and the last month of the book for one place. Unread lines come back only to whoever wrote them. */
 export async function loadSpirit(filing: number): Promise<{ notices: Notice[]; visits: Visit[] }> {
   const [n, v] = await Promise.all([
