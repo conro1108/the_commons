@@ -2038,11 +2038,17 @@ or, for something between two places,
 <plot number>+<plot number>: <the item>
 An item is one or two sentences, at most 40 words, plain text.
 
-An item is something small that happened today because of what these places are and what is really on them: one place's use running into another's, the goose or the ducks or the bees or the mole or the weather taking an interest in one particular thing, a visitor doing what the place invites, Gary having to come out and look. Give the cause and the effect. Report it flat, the way a parish newsletter reports a missing ladder: the comedy is in small things taken seriously, so never wink, never explain, no puns, no exclamation marks, no "reportedly".
-At least half the items should join two places, and those need not be next to each other: sound, smell, animals and visitors all travel. No plot in more than two items, and a different one first each time.
-Use only what's listed: never add a building or an object to a place. What is listed can be sat on, borrowed, climbed, admired, complained about, moved a yard. Call places by what they are ("the climbing wall", "the botanical garden") and holders by name where it helps.
+An item is something small that happened today because of what these places are and what is really on them: one place's use running into another's, the goose or the ducks or the bees or the mole or the weather taking an interest in one particular thing, a visitor doing exactly what the place invites, Gary having to come out and look. One cause, one effect, and then leave it unsettled: a question somebody has now asked, a thing that is not where it was, a note Gary took. The holder will want to answer it.
+Report it flat, the way a parish newsletter reports a missing ladder. The comedy is in small things taken seriously and in what the holder's own words promised ("use" is what they told Gary it was for), so never wink, never explain, no puns, no exclamation marks, no "reportedly". Don't list what a place has; pick the one thing the item is about.
+About half the items join two places, which need not be next to each other: sound, smell, animals and visitors all travel. The rest are one place and the commons' own residents. No plot in more than two items, a different one first each time, and say whose place it is by the holder's name in at least half.
+Use only what's listed: never add a building or an object to a place, and a place with nothing on it has nothing on it, which is itself worth reporting. What is listed can be sat on, borrowed, climbed, admired, complained about, moved a yard. Call places by what they are ("the climbing wall", "the botanical garden").
 Nothing is destroyed and nobody is hurt. Nothing is granted, denied or ordered here: Gary may take a note, have a word or open a file, no more.
-If a board answers something in "yesterday", carry that story on a step; otherwise leave yesterday's stories alone and never print the same thing twice.`;
+If a board answers something in "yesterday", carry that story on a step; otherwise leave yesterday's stories alone and never print the same thing twice.
+
+Examples, for the feel (do not copy their wording or their events):
+3: The goose spent the afternoon on Marguerite's quiet bench and would not be moved. Gary came out, looked at it, and went back in.
+12+3: The evening class at Tom's karate studio could be heard from the quiet bench, which was not quiet. Marguerite sat through all of it and has asked Gary what the bench is for.
+9: Nobody rested at the rest stop. The bees have taken the kettle.`;
 
 const ITEM_CHECKS = {
   invents: "Does the item say a place has a building or an object standing on it that is not given for that place in \"places\" (its use, sign, outside, inside or board)? People, animals, weather, sounds, smells and things that merely happen are fine, and so is naming a listed thing loosely.",
@@ -2084,7 +2090,7 @@ export async function gazette(db: Db) {
     return {
       plot: f.plot, name: plot.name, ground: regionOf(plot).name, holder: handle.get(f.filer) ?? "someone", use: s.use,
       ...(f.shell?.sign && f.shell.sign_ok && { sign: f.shell.sign }),
-      outside: s.outside.map((t) => t.replace(/, across \d.*$/, "")), inside: s.inside, board: s.board, book: s.book.slice(0, 4),
+      outside: s.outside.map((t) => t.replace(/, in the [a-z-]+, across \d.*$/, "")), inside: s.inside, board: s.board, book: s.book.slice(0, 4),
       beside: [...new Set(Object.values(plot.edges).flat())],
       ...(f.boarded_at && { boarded_up: true }),
     };
