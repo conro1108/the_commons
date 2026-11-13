@@ -14,6 +14,7 @@ import { critters, drawAir, drawNight, drawUnder } from "./life.ts";
 import { drawAvatar, type Avatar } from "./avatar.ts";
 import { dark, glow, grade, hourNow } from "./light.ts";
 import { drawMapTag, drawPound, isRed, type Tag } from "./letter.ts";
+import { drawMapMark, type Mark } from "./marks.ts";
 
 export const INK = K;
 export const FENCE = C.PLANK[1];
@@ -41,7 +42,8 @@ export interface Scene {
   recent: number[]; // newest granted plots, newest first: where Gary goes to look
   tags?: Map<number, Tag[]>; // filing id -> Gary's tags on it (the letter)
   pound?: number; // how many things are in the pound at his hut
-  news?: Set<number>; // plots in today's gazette: a paper on the corner
+  news?: Set<number>; // plots in today's gazette with nothing to show for it: a paper on the corner
+  marks?: Mark[]; // what today's gazette left standing on plots (src/marks.ts)
   /** Drawn as the land behind this plot's close-up: the plot itself, anyone walking, the light and the air left out. */
   backdrop?: number;
 }
@@ -330,6 +332,10 @@ export function draw(ctx: CanvasRenderingContext2D, scene: Scene) {
     { y: LANDMARKS.oak.y + LANDMARKS.oak.h, draw: () => drawOak(ctx) },
     ...(scene.pound ? [{ y: POUND.y + 5, draw: () => drawPound(ctx, POUND.x, POUND.y, scene.pound!) }] : []),
     ...(scene.backdrop === undefined ? critters(ctx, scene.t, scene.recent) : []),
+    ...(scene.marks ?? []).filter((m) => m.plot !== scene.backdrop).map((m) => {
+      const p = PLOTS.find((q) => q.id === m.plot)!;
+      return { y: p.y + m.y + 1, draw: () => drawMapMark(ctx, m, p, scene.t) };
+    }),
     ...scene.walkers.map((w) => ({ y: w.y, draw: () => drawWalker(ctx, w, scene.look(w.id), w.id === scene.me, scene.t) })),
   ];
   for (const s of standing.sort((a, b) => a.y - b.y)) s.draw();

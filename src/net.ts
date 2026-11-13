@@ -373,11 +373,12 @@ export interface Notice { id: number; filing: number; line: string; posted_at: s
 export interface Visit { id: number; filing: number; visitor: string; line: string; day: string; at: string; ok: boolean | null }
 
 /** An item in the gazette: something that happened at a place on a day, and the other place it involved, if any. */
-export interface Happening { id: number; day: string; filing: number; other: number | null; line: string }
+/** mark: what it left on the plot for the day (src/marks.ts), if anything. */
+export interface Happening { id: number; day: string; filing: number; other: number | null; line: string; mark: string | null }
 
 /** The gazette's last few papers, newest first. Empty if it can't be had: the commons works without it. */
 export async function loadGazette(): Promise<Happening[]> {
-  const { data } = await supabase.from("happenings").select("id, day, filing, other, line").order("id", { ascending: false }).limit(30);
+  const { data } = await supabase.from("happenings").select("id, day, filing, other, line, mark").order("id", { ascending: false }).limit(30);
   return data ?? [];
 }
 

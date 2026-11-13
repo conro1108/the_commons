@@ -2056,6 +2056,17 @@ const ITEM_CHECKS = {
   unfit: "Is the item cruel about a named person, hateful or graphic, or does it contain a link or personal information? Gentle fun at a place's expense is fine.",
 } as const;
 
+// What an item leaves standing on its plot for the day, so the paper shows (src/marks.ts draws them; keep the two in step).
+const MARKS = {
+  goose: "The goose is at the first place, or did something there.",
+  ducks: "Ducks are at the first place.",
+  bees: "Bees are at the first place, or about something on it.",
+  mole: "The mole, or a fresh molehill, is at the first place.",
+  visitor: "A visitor, hiker, climber or other passer-by is or was at the first place: not its holder, not Gary.",
+  note: "Gary came out to the first place and took a note, had a word or opened a file, and no animal or visitor there is what the item is mainly about.",
+  none: "None of these: nothing would be seen standing at the first place.",
+} as const;
+
 export type Item = { plot: number; other: number | null; line: string };
 
 /** A paper as written, a line an item: `7: …` or `7+12: …`. Lines about plots that aren't places are dropped and said. */
@@ -2102,7 +2113,7 @@ export async function gazette(db: Db) {
   const plots = new Set(places.map((p) => p.plot));
 
   const drafts: { text: string; problems: string[] }[] = [];
-  let best: (Item & { checks: Record<string, number> })[] = [];
+  let best: (Item & { mark: string | null; checks: Record<string, number> })[] = [];
   for (let attempt = 0; attempt < 2 && best.length < want; attempt++) {
     const last = drafts.at(-1);
     const { text } = await write(`gazette, draft ${attempt + 1}`, {
@@ -2111,10 +2122,13 @@ export async function gazette(db: Db) {
     });
     const { items, problems } = itemsOf(text, plots);
     const checked = await Promise.all(items.map(async (it) => {
-      const { answers } = await ask("gazette, check", { places: places.filter((p) => p.plot === it.plot || p.plot === it.other), item: it.line },
-        Object.fromEntries(Object.entries(ITEM_CHECKS).map(([k, instructions]) => [k, { type: "boolean" as const, instructions }])));
-      const checks = Object.fromEntries(Object.entries(answers).map(([k, v]) => [k, (v as { probability: number }).probability]));
-      return { ...it, checks, failed: Object.entries(checks).filter(([, p]) => p > FAILS).map(([k]) => ITEM_CHECKS[k as keyof typeof ITEM_CHECKS]) };
+      const { answers } = await ask("gazette, check", { first_place: it.plot, places: places.filter((p) => p.plot === it.plot || p.plot === it.other), item: it.line }, {
+        ...Object.fromEntries(Object.entries(ITEM_CHECKS).map(([k, instructions]) => [k, { type: "boolean" as const, instructions }])),
+        mark: { type: "choice", instructions: "After what the item reports, what would someone walking past the first place (\"first_place\") see standing there?", criteria: MARKS },
+      }) as unknown as { answers: Record<string, { probability: number; choice: string }> };
+      const { mark: chosen, ...asked } = answers;
+      const checks = Object.fromEntries(Object.entries(asked).map(([k, v]) => [k, v.probability]));
+      return { ...it, mark: chosen.choice === "none" ? null : chosen.choice, checks, failed: Object.entries(checks).filter(([, p]) => p > FAILS).map(([k]) => ITEM_CHECKS[k as keyof typeof ITEM_CHECKS]) };
     }));
     drafts.push({ text, problems: [...problems, ...checked.flatMap((c) => c.failed.map((why) => `"${c.line.slice(0, 60)}…": ${why}`))] });
     const good = checked.filter((c) => !c.failed.length).slice(0, want).map(({ failed: _, ...it }) => it);
@@ -2133,7 +2147,7 @@ async function printGazette(db: Db): Promise<Response> {
   const { data: held } = await db.from("filings").select("id, plot").in("status", BUILT_STATUSES);
   const filingOn = new Map(((held ?? []) as { id: number; plot: number }[]).map((f) => [f.plot, f.id]));
   const rows = items.filter((it) => filingOn.has(it.plot)).map((it, i) => ({
-    day, filing: filingOn.get(it.plot)!, other: it.other === null ? null : (filingOn.get(it.other) ?? null), line: it.line,
+    day, filing: filingOn.get(it.plot)!, other: it.other === null ? null : (filingOn.get(it.other) ?? null), line: it.line, mark: it.mark,
     answers: { checks: it.checks, ...(i === 0 && { drafts, editor: EDITOR, judge: JUDGE }) },
   }));
   const { error } = await db.from("happenings").insert(rows);

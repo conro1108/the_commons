@@ -14,6 +14,7 @@ import { drawQuestionnaire, drawRedTag, isRed, isWaiting, type Tag } from "./let
 import { dark, grade, hourNow } from "./light.ts";
 import { onShell, shellLights, shellMini, shellStandings, underRoof } from "./shell.ts";
 import type { Shell } from "./schedule.ts";
+import { drawCloseMark, type Mark } from "./marks.ts";
 
 /** Commons shown round the plot up close, in art px. */
 export const FOCUS_PAD = 24;
@@ -39,6 +40,7 @@ export interface FocusScene {
   brush: Cells | null; // ground about to be painted
   hover: { p: Placement; colour: string } | null; // a prop about to be moved or taken down
   tags?: Tag[]; // Gary's tags on this plot (the letter)
+  marks?: Mark[]; // what today's gazette left here (src/marks.ts)
   shell?: { shell: Shell | null; ok: boolean; picked?: boolean } | null; // a shell being put up or changed, in place of the filing's
 }
 
@@ -440,6 +442,7 @@ export function drawFocus(ctx: CanvasRenderingContext2D, scene: FocusScene, now:
   }
   const fading = !!scene.shell && !scene.shell.ok;
   drawBuilt(ctx, plot, scene.built, now, shell ? shellStandings(ctx, shell, { mine: scene.mine }, fading ? 0.5 : 1) : undefined);
+  for (const m of scene.marks ?? []) drawCloseMark(ctx, m, Date.now());
   if (scene.hover) {
     const { p, colour } = scene.hover;
     ctx.drawImage(halo(look(p), colour), p.x * ZOOM - 1, p.y * ZOOM - 1);

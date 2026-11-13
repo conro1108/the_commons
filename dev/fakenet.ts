@@ -76,9 +76,9 @@ export function nextCourt(status: string, made: Appeal[]): Appeal["court"] | nul
 }
 
 export const loadGazette = async (): Promise<Happening[]> => [
-  { id: 3, day: now.slice(0, 10), filing: 1, other: 2, line: "The evening class at the karate studio could be heard from the quiet bench, which was not quiet. Marguerite sat through all of it and has asked Gary what the bench is for." },
-  { id: 2, day: now.slice(0, 10), filing: 2, other: null, line: "The goose spent the afternoon on the quiet bench and would not be moved. Gary came out, looked, and went back in." },
-  { id: 1, day: "2026-01-01", filing: 1, other: null, line: "A duck got into the karate studio and stood on the mats. Nobody knew the form for it." },
+  { id: 3, day: now.slice(0, 10), filing: 1, other: 2, line: "The evening class at the karate studio could be heard from the quiet bench, which was not quiet. Marguerite sat through all of it and has asked Gary what the bench is for.", mark: "visitor" },
+  { id: 2, day: now.slice(0, 10), filing: 2, other: null, line: "The goose spent the afternoon on the quiet bench and would not be moved. Gary came out, looked, and went back in.", mark: "goose" },
+  { id: 1, day: "2026-01-01", filing: 1, other: null, line: "A duck got into the karate studio and stood on the mats. Nobody knew the form for it.", mark: "ducks" },
 ];
 export const signIn = async () => ME;
 export const isGuest = async () => false;

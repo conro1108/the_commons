@@ -23,6 +23,7 @@ import {
   FOCUS_PAD, SURROUND, canPaint, canPlace, drawFocus, focusLights, focusSize, land, placementAt, type Cells, type FocusScene,
 } from "./closeup.ts";
 import { grade } from "./light.ts";
+import { markFor, type Mark } from "./marks.ts";
 import {
   DEFAULT_MATERIAL, DEFAULT_PAINT, MATERIALS, PAINTS, defaultWindows, footprintProblem, frontWallAt, kindOf, materialSwatch, materialsFor,
   onShell, raise, scheduledMaterial, shellKind, windowFits, type Kind as ShellKind,
@@ -519,7 +520,22 @@ for (const ev of ["pointerup", "pointercancel", "lostpointercapture"]) card.addE
 // Pinned to the notice board, a paper on the corner of each plot in today's,
 // and on those plots' cards.
 let gazette: Happening[] = [];
-let news = new Set<number>(); // plots in the latest paper
+let news = new Set<number>(); // plots in the latest paper with nothing standing on them to show for it
+let marks: Mark[] = []; // what the latest paper left on plots (src/marks.ts)
+
+/** Today's marks and papers, worked out again: a mark stands by the thing its item names, so it follows what's built. */
+function layPaper() {
+  const day = gazette[0]?.day;
+  const todays = gazette.filter((h) => h.day === day);
+  marks = todays.flatMap((h) => {
+    const f = filings.get(h.filing);
+    const m = f && markFor(h, plotById(f.plot)!, built.get(f.id) ?? []);
+    return m ? [m] : [];
+  });
+  const marked = new Set(marks.map((m) => m.plot));
+  news = new Set(todays.flatMap((h) => [h.filing, h.other]).map((id) => (id === null ? undefined : filings.get(id)?.plot))
+    .filter((p): p is number => p !== undefined && !marked.has(p)));
+}
 
 async function loadPaper() {
   try {
@@ -527,8 +543,7 @@ async function loadPaper() {
   } catch {
     return; // no paper today: the commons works without it
   }
-  const day = gazette[0]?.day;
-  news = new Set(gazette.filter((h) => h.day === day).flatMap((h) => [h.filing, h.other]).map((id) => (id === null ? undefined : filings.get(id)?.plot)).filter((p): p is number => p !== undefined));
+  layPaper();
   renderAll();
   renderBoard();
 }
@@ -546,7 +561,8 @@ function gazetteHtml() {
   if (!gazette.length) return "";
   const days = [...new Set(gazette.map((h) => h.day))];
   const of = (day: string) => gazette.filter((h) => h.day === day).reverse().map(itemHtml).join("");
-  const mine = [...filings.values()].some((f) => f.filer === me && news.has(f.plot));
+  const day = gazette[0].day;
+  const mine = gazette.some((h) => h.day === day && [h.filing, h.other].some((id) => id !== null && filings.get(id)?.filer === me));
   return `<div class="gazette"><span class="pin" style="background:#b5404f"></span>
       <div class="masthead"><h3>The Commons Gazette</h3><span>${paperDay(days[0])} · one sheet · free</span></div>
       <ol>${of(days[0])}</ol>
@@ -1181,7 +1197,7 @@ function drawPlotView(c: CanvasRenderingContext2D, f: Filing, now: number) {
   c.fillStyle = VOID;
   c.fillRect(0, 0, canvas.width, canvas.height);
   c.setTransform(k, 0, 0, k, focusView.ox + focusView.s * FOCUS_PAD - p.x * k, focusView.oy + focusView.s * FOCUS_PAD - p.y * k);
-  draw(c, { held: heldPlots(), built, me, hover: null, selected: null, walkers: [], look: lookOf, letters: [], t: Date.now(), recent: [], backdrop: p.id });
+  draw(c, { held: heldPlots(), built, me, hover: null, selected: null, walkers: [], look: lookOf, letters: [], t: Date.now(), recent: [], backdrop: p.id, marks });
   c.setTransform(1, 0, 0, 1, 0, 0);
   c.globalCompositeOperation = "multiply";
   c.fillStyle = "#b4b0c4";
@@ -1282,7 +1298,7 @@ function brushAt(bx: number, by: number): Cells {
 function focusScene(f: Filing): FocusScene {
   const mine = f.filer === me && !zoom;
   const ps = built.get(f.id) ?? [];
-  const scene: FocusScene = { plot: plotOf(f), filing: f, built: ps, mine: f.filer === me, ghost: null, brush: null, hover: null, tags: tagsOf.get(f.id) };
+  const scene: FocusScene = { plot: plotOf(f), filing: f, built: ps, mine: f.filer === me, ghost: null, brush: null, hover: null, tags: tagsOf.get(f.id), marks: marks.filter((m) => m.plot === f.plot) };
   shellScene(scene);
   if (!mine || !pointer) return scene;
   const [kind, arg] = tool.split(":");
@@ -2475,7 +2491,7 @@ function frame(now: number) {
     follow();
     viewport(mapView);
     const t = Date.now();
-    draw(ctx, { held: heldPlots(), built, me, hover, selected, walkers: [...walkers.values()], look: lookOf, letters, t, recent: recent(), tags: tagsOf, pound: pounded, news });
+    draw(ctx, { held: heldPlots(), built, me, hover, selected, walkers: [...walkers.values()], look: lookOf, letters, t, recent: recent(), tags: tagsOf, pound: pounded, news, marks });
     post(now);
     placeCard();
     overlays(now, t);
@@ -2535,6 +2551,7 @@ function upsert(f: Filing) {
 function regroup(filing: number) {
   // On the plot: outdoors, not held in anything, not impounded (at the hut). Storage and inside are elsewhere.
   built.set(filing, [...placements.values()].filter((p) => p.filing === filing && (p.room ?? "out") === "out" && !p.parent && !p.impounded_at));
+  if (gazette.length) layPaper();
   pounded = [...placements.values()].filter((p) => p.impounded_at && !p.parent).length;
   regroupInside(filing);
 }
