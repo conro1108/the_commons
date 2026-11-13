@@ -2058,13 +2058,13 @@ const ITEM_CHECKS = {
 
 // What an item leaves standing on its plot for the day, so the paper shows (src/marks.ts draws them; keep the two in step).
 const MARKS = {
-  goose: "The goose is at the first place, or did something there.",
-  ducks: "Ducks are at the first place.",
-  bees: "Bees are at the first place, or about something on it.",
-  mole: "The mole, or a fresh molehill, is at the first place.",
-  visitor: "A visitor, hiker, climber or other passer-by is or was at the first place: not its holder, not Gary.",
-  note: "Gary came out to the first place and took a note, had a word or opened a file, and no animal or visitor there is what the item is mainly about.",
-  none: "None of these: nothing would be seen standing at the first place.",
+  goose: "The goose is at one of the places, or did something there.",
+  ducks: "Ducks are at one of the places.",
+  bees: "Bees are at one of the places, or about something on it.",
+  mole: "The mole, or a fresh molehill, is at one of the places.",
+  visitor: "A visitor, hiker, climber or other passer-by is or was at one of the places: not its holder, not Gary.",
+  note: "Gary came out and took a note, had a word or opened a file, and no animal or visitor is what the item is mainly about.",
+  none: "None of these: nothing would be seen standing at either place.",
 } as const;
 
 export type Item = { plot: number; other: number | null; line: string };
@@ -2122,13 +2122,17 @@ export async function gazette(db: Db) {
     });
     const { items, problems } = itemsOf(text, plots);
     const checked = await Promise.all(items.map(async (it) => {
-      const { answers } = await ask("gazette, check", { first_place: it.plot, places: places.filter((p) => p.plot === it.plot || p.plot === it.other), item: it.line }, {
+      const { answers } = await ask("gazette, check", { places: places.filter((p) => p.plot === it.plot || p.plot === it.other), item: it.line }, {
         ...Object.fromEntries(Object.entries(ITEM_CHECKS).map(([k, instructions]) => [k, { type: "boolean" as const, instructions }])),
-        mark: { type: "choice", instructions: "After what the item reports, what would someone walking past the first place (\"first_place\") see standing there?", criteria: MARKS },
+        mark: { type: "choice", instructions: "After what the item reports, what would someone walking past see standing at one of its places?", criteria: MARKS },
+        ...(it.other !== null && { seen_at: { type: "choice" as const, instructions: "Which place would it be seen standing at, once the item is over?",
+          criteria: { first: `Plot ${it.plot}: where it is, ended up, or where Gary came out to.`, second: `Plot ${it.other}: where it is, ended up, or where Gary came out to.` } } }),
       }) as unknown as { answers: Record<string, { probability: number; choice: string }> };
-      const { mark: chosen, ...asked } = answers;
+      const { mark: chosen, seen_at, ...asked } = answers;
       const checks = Object.fromEntries(Object.entries(asked).map(([k, v]) => [k, v.probability]));
-      return { ...it, mark: chosen.choice === "none" ? null : chosen.choice, checks, failed: Object.entries(checks).filter(([, p]) => p > FAILS).map(([k]) => ITEM_CHECKS[k as keyof typeof ITEM_CHECKS]) };
+      // The place the mark stands at leads the item: that's the plot it's drawn on.
+      const led = chosen.choice !== "none" && seen_at?.choice === "second" ? { plot: it.other!, other: it.plot } : {};
+      return { ...it, ...led, mark: chosen.choice === "none" ? null : chosen.choice, checks, failed: Object.entries(checks).filter(([, p]) => p > FAILS).map(([k]) => ITEM_CHECKS[k as keyof typeof ITEM_CHECKS]) };
     }));
     drafts.push({ text, problems: [...problems, ...checked.flatMap((c) => c.failed.map((why) => `"${c.line.slice(0, 60)}…": ${why}`))] });
     const good = checked.filter((c) => !c.failed.length).slice(0, want).map(({ failed: _, ...it }) => it);
